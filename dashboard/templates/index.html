@@ -73,10 +73,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .tbl td a { color: #fff !important; text-decoration: none; }
 
 .tbl th { position: relative; overflow: hidden; border-right: 1px solid #222; }
-.tbl td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-right: 1px solid #1a1a1a; }
-.tbl td.l { white-space: nowrap; }
-.resize-h { position:absolute; right:-3px; top:0; bottom:0; width:7px; cursor:col-resize; background:transparent; z-index:3; }
-.resize-h:hover, .resize-h.active { background:#3b82f6; }
+.tbl td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-right: 1px solid #1a1a1a; text-align: center !important; }
+.tbl td.l { white-space: nowrap; text-align: left !important; }
+
+.tbl thead th { position:sticky;top:0;z-index:2;background:#111;text-align:center !important; }
 .tbl th { white-space: nowrap; }
 .tbl td { }
 .tbl .shrink { width: 1%; white-space: nowrap; }
@@ -260,7 +260,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
   <!-- Account Bar -->
   <div class="acct-bar">
     <div class="acct-item" onclick="openDepositSB()" style="cursor:pointer;" title="Click to deposit">
-      <div class="acct-label">Demo Account Value <span style="font-size:9px;color:#444;">▶ Deposit</span></div>
+      <div class="acct-label">Demo Account Value</div>
       <div class="acct-right"><div class="acct-main" id="av">--</div></div>
     </div>
     <div class="acct-item">
@@ -331,21 +331,21 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
     <div class="card">
       <div class="tabs">
         <button class="tab on" onclick="swP('pos',this)">Open Positions</button>
-        <button class="tab" onclick="swP('trades',this)">Trade History</button>
+        <button class="tab" onclick="swP('trades',this)">Closed Positions</button>
       </div>
       <div class="pane on" id="p-pos">
-        <div class="t-scroll"><table class="tbl" id="pos-tbl">
+        <div class="t-scroll"><table class="tbl" id="pos-tbl" style="table-layout:fixed;width:100%;">
           <thead><tr>
-            <th class="l" style="width:260px">Position<div class="resize-h"></div></th>
-            <th class="ra" data-col="signal" style="width:100px">Signal<div class="resize-h"></div></th>
-            <th class="ra" data-col="edge" style="width:55px">Edge<div class="resize-h"></div></th>
-            <th class="ra" data-col="qty" style="width:50px">Qty<div class="resize-h"></div></th>
-            <th class="ca" data-col="side" style="width:55px">Side<div class="resize-h"></div></th>
-            <th class="ra" data-col="ent" style="width:50px">Ent<div class="resize-h"></div></th>
-            <th class="ra" data-col="cur" style="width:50px">Cur<div class="resize-h"></div></th>
-            <th class="ca" data-col="status" style="width:70px">Status<div class="resize-h"></div></th>
-            <th class="ra" data-col="cost" style="width:65px">Cost<div class="resize-h"></div></th>
-            <th class="ra" style="width:90px">Open P&L<div class="resize-h"></div></th>
+            <th class="l" style="width:240px;min-width:200px;">Position</th>
+            <th style="width:90px;">Signal</th>
+            <th style="width:72px;">Edge</th>
+            <th style="width:72px;">Quantity</th>
+            <th style="width:62px;">Side</th>
+            <th style="width:72px;">Entry</th>
+            <th style="width:72px;">Current</th>
+            <th style="width:78px;">Status</th>
+            <th style="width:72px;">Cost</th>
+            <th style="width:88px;">Open P&L</th>
           </tr></thead>
           <tbody id="pos-b"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody>
         </table>
@@ -355,14 +355,13 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
         <div class="t-scroll">
         <table class="tbl" id="hist-tbl" style="table-layout:fixed;width:100%;min-width:700px;">
           <thead><tr>
-            <th class="l" style="width:260px;min-width:180px;">Trade<div class="resize-h"></div></th>
-            <th class="ca shrink" style="width:80px;">Date<div class="resize-h"></div></th>
-            <th class="ca shrink" style="width:50px;">Side<div class="resize-h"></div></th>
-            <th class="ra shrink" style="width:45px;">Qty<div class="resize-h"></div></th>
-            <th class="ra shrink" style="width:45px;">Ent<div class="resize-h"></div></th>
-            <th class="ra shrink" style="width:65px;">Cost<div class="resize-h"></div></th>
-            <th class="ra shrink" style="width:90px;">P&amp;L<div class="resize-h"></div></th>
-            <th class="ca shrink" style="width:60px;">Src<div class="resize-h"></div></th>
+            <th class="l" style="width:240px;min-width:180px;">Position</th>
+            <th style="width:88px;">Date</th>
+            <th style="width:70px;">Side</th>
+            <th style="width:88px;">Quantity</th>
+            <th style="width:88px;">Entry</th>
+            <th style="width:88px;">Cost</th>
+            <th style="width:88px;">Closed P&amp;L</th>
           </tr></thead>
           <tbody id="tr-b"><tr><td colspan="8" class="loading">Loading history...</td></tr></tbody>
         </table>
@@ -491,7 +490,7 @@ async function openDepositSB() {
 
   const total = dep?.total || 0;
   openSB(`
-    <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:4px;">💰 Demo Account</div>
+    <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:4px;">Demo Account</div>
     <div style="font-size:11px;color:#555;margin-bottom:16px;">Add capital to fund new modules</div>
 
     <div style="background:#0d0d0d;border-radius:8px;padding:14px;margin-bottom:20px;">
@@ -560,7 +559,7 @@ async function loadAccount() {
   // LIVE MODE: replace with raw acct.kalshi_balance (Kalshi API reflects real positions).
   // Starting capital = sum of deposits (no longer hardcoded $400)
   window._kalshiBalance = acct.starting_capital || 400;
-  $('av').textContent = dollar(window._kalshiBalance);
+  // #av is managed by updateAccountValue() only — never reset here
   // Win Rate set by loadPnlChart (closed/settled trades only)
 
   $('ts').textContent = 'Updated ' + new Date().toLocaleTimeString();
@@ -604,18 +603,34 @@ function fmtExpiry(closeTime) {
   } catch(e) { return ''; }
 }
 
+window._cachedPositions = null;
+
 async function loadPositions() {
   const positions = await api('/api/positions/active');
   const tb = $('pos-b');
   if (!positions || !positions.length) {
     tb.innerHTML='<tr><td colspan="10" class="loading">No open positions today</td></tr>';
+    window._cachedPositions = [];
     return;
   }
+
+  // If same tickers as before, skip rebuild — just refresh prices in-place
+  const newKeys = positions.map(p=>p.ticker).sort().join(',');
+  const oldKeys = window._cachedPositions ? window._cachedPositions.map(p=>p.ticker).sort().join(',') : null;
+  if (oldKeys === newKeys) {
+    // Positions unchanged — update prices silently in background
+    loadLivePrices(positions);
+    window._cachedPositions = positions;
+    return;
+  }
+
+  // Positions changed — rebuild table
+  window._cachedPositions = positions;
   tb.innerHTML = positions.map(p => {
     const name  = (p.title||p.ticker||'');
     const side  = p.side==='YES' ? '<span class="b-yes">YES</span>' : '<span class="b-no">NO</span>';
     const cur   = '<span style="color:#555;font-size:10px;">live↓</span>';
-    const url   = p.kalshi_url || `https://kalshi.com/markets/${p.ticker}`;
+    const _s = (p.ticker||"").split("-")[0].toLowerCase(); const url = `https://kalshi.com/markets/${_s}`; 
     const pnlH  = v => v!=null ? `<span class="${pcls(v)}">${sign(v)}${dollar(v)}</span>` : '<span style="color:#333">--</span>';
     const src   = (['geo','gaming','manual'].includes(p.source))
                   ? '<span class="b-manual">MANUAL</span>' : '<span class="b-bot">BOT</span>';
@@ -626,11 +641,11 @@ async function loadPositions() {
       sigVal = Math.round(p.noaa_prob*100)+'% vs '+Math.round(p.market_prob*100)+'%';
     } else if (sym.startsWith('KXBTC')||sym.startsWith('KXETH')||sym.startsWith('KXXRP')||sym.startsWith('KXDOGE')) {
       const sm = window._smartMoney;
-      sigVal = sm ? (sm.direction==='bearish'?'Bear ':'Bull ')+Math.round((sm.direction==='bearish'?sm.bear_pct:sm.bull_pct)*100)+'%' : 'Crypto';
+      sigVal = sm ? (sm.direction==='bearish' ? 'BEARISH' : sm.direction==='bullish' ? 'BULLISH' : 'NEUTRAL') : '--';
     } else if (sym.startsWith('KXCPI')||sym.startsWith('KXFED')) {
       const ep = p.entry_price||0;
       const mp = p.market_prob!=null?Math.round(p.market_prob*100)+'%':'--';
-      sigVal = 'Econ '+mp;
+      sigVal = '--';
     }
     const edgeV  = (p.edge != null) ? (Math.abs(p.edge)*100).toFixed(0)+'%' : '--';
     const edgeC  = (p.edge && Math.abs(p.edge)>.4) ? '#4ade80' : (p.edge && Math.abs(p.edge)>.2) ? '#fbbf24' : '#888';
@@ -649,14 +664,13 @@ async function loadPositions() {
       <td class="ca shrink" data-col="side">${side}</td>
       <td class="ra shrink" data-col="ent">${p.entry_price ? p.entry_price+'c' : '--'}</td>
       <td class="ra shrink" data-col="cur" id="cp-${p.ticker}">${cur}</td>
-      <td class="ca shrink" data-col="status" id="st-${p.ticker}"><span style="color:#555;font-size:10px;">—</span></td>
+      <td class="ca shrink" data-col="status" id="st-${p.ticker}"><span style="color:#555;font-size:10px;">--</span></td>
       <td class="ra shrink" data-col="cost">${dollar(p.cost)}</td>
       <td class="ra shrink" id="opnl-${p.ticker}">${pnlH(null)}<br><span style="font-size:9px;color:#2a2a2a" id="opnl-pct-${p.ticker}"></span></td>
     </tr>`;
   }).join('');
   // Async live prices
   loadLivePrices(positions);
-  if(window.restoreColWidths) restoreColWidths();
 }
 
 async function loadLivePrices(positions) {
@@ -687,11 +701,9 @@ async function loadLivePrices(positions) {
     if (stEl) {
       if (nearWin)  stEl.innerHTML = '<span style="color:#4ade80;font-size:10px;font-weight:700;">WINNING</span>';
       else if (nearLoss) stEl.innerHTML = '<span style="color:#f87171;font-size:10px;font-weight:700;">LOSING</span>';
-      else {
-        const pct = open >= 0 ? '+'+open.toFixed(0)+'%' : open.toFixed(0)+'%';
-        const opc2 = pcost ? (open/pcost*100) : 0;
-        stEl.innerHTML = `<span class="${pcls(open)}" style="font-size:10px;">${open>=0?'▲':'▼'} ${Math.abs(opc2).toFixed(1)}%</span>`;
-      }
+      else if (open > 0.01)  stEl.innerHTML = '<span style="color:#4ade80;font-size:10px;font-weight:700;">WINNING</span>';
+      else if (open < -0.01) stEl.innerHTML = '<span style="color:#f87171;font-size:10px;font-weight:700;">LOSING</span>';
+      else                   stEl.innerHTML = '<span style="color:#555;font-size:10px;">EVEN</span>';
     }
     const oe=document.getElementById('opnl-'+p.ticker);
     if(oe)oe.innerHTML=`<span class="${pcls(open)}">${sign(open)}${dollar(open)}</span><br><span style="font-size:9px;color:${open>=0?'#1a4a1a':'#4a1a1a'}">${sign(opc)}${opc.toFixed(1)}%</span>`;
@@ -741,14 +753,13 @@ async function loadTrades() {
   const trades = await api('/api/trades');
   const tb = $('tr-b');
   if (!trades||!trades.length) {
-    tb.innerHTML='<tr><td colspan="8" class="loading" style="color:#555;padding:20px;">No trades yet</td></tr>';
+    tb.innerHTML='<tr><td colspan="7" class="loading" style="color:#555;padding:20px;">No trades yet</td></tr>';
     return;
   }
   tb.innerHTML = trades.map(t=>{
     const title  = (t.title||t.ticker||'').replace(/[*]{2}/g,'');
     const ticker = t.ticker||'';
-    const series = ticker.split('-')[0].toLowerCase();
-    const url    = 'https://kalshi.com/markets/'+series;
+    const _ts = ticker.split('-')[0].toLowerCase(); const url = `https://kalshi.com/markets/${_ts}/${ticker.toLowerCase()}`;
     const side   = t.side==='yes'
       ? '<span class="b-yes">YES</span>'
       : '<span class="b-no">NO</span>';
@@ -765,7 +776,7 @@ async function loadTrades() {
     const qty    = t.contracts||'--';
     return `<tr>
       <td class="l" style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:260px;">
-        <a href="${url}" target="_blank" style="color:#fff;text-decoration:none;">${title}</a>
+        <div style="display:flex;align-items:center;gap:5px;">${src}<span style="color:#aaa;font-size:11px;">${title}</span></div>
       </td>
       <td class="ca shrink">${dt}</td>
       <td class="ca shrink">${side}</td>
@@ -773,7 +784,6 @@ async function loadTrades() {
       <td class="ra shrink">${entryP}c</td>
       <td class="ra shrink">${cost}</td>
       <td class="ra shrink">${rpnl}</td>
-      <td class="ca shrink">${src}</td>
     </tr>`;
   }).join('');
 }
@@ -1043,60 +1053,6 @@ setInterval(loadAll, 30000);
 // Stagger account bar refresh to 35s so Account Value doesn't jump with P&L
 setInterval(loadAccount, 35000);
 
-// ─── Resizable Columns ────────────────────────────────────────────────────────
-(function() {
-  let rTh = null, rStartX = 0, rStartW = 0;
-
-  function saveWidths() {
-    const tbl = document.getElementById('pos-tbl');
-    if (!tbl) return;
-    const ws = Array.from(tbl.querySelectorAll('thead th')).map(th => th.offsetWidth);
-    localStorage.setItem('ruppert_col_w', JSON.stringify(ws));
-  }
-
-  function restoreWidths() {
-    try {
-      const ws = JSON.parse(localStorage.getItem('ruppert_col_w') || 'null');
-      if (!ws) return;
-      const tbl = document.getElementById('pos-tbl');
-      if (!tbl) return;
-      const ths = tbl.querySelectorAll('thead th');
-      ths.forEach((th, i) => { if (ws[i] && ws[i] > 20) th.style.width = ws[i] + 'px'; });
-    } catch(e) {}
-  }
-
-  document.addEventListener('mousedown', function(e) {
-    if (!e.target.classList.contains('resize-h')) return;
-    rTh = e.target.parentElement;
-    rStartX = e.clientX;
-    rStartW = rTh.offsetWidth;
-    e.target.classList.add('active');
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    e.preventDefault();
-  });
-
-  document.addEventListener('mousemove', function(e) {
-    if (!rTh) return;
-    const newW = Math.max(30, rStartW + (e.clientX - rStartX));
-    rTh.style.width = newW + 'px';
-  });
-
-  document.addEventListener('mouseup', function(e) {
-    if (!rTh) return;
-    rTh.querySelector('.resize-h').classList.remove('active');
-    document.body.style.cursor = '';
-    document.body.style.userSelect = '';
-    saveWidths();
-    rTh = null;
-  });
-
-  // Restore on load + after positions render
-  window.restoreColWidths = restoreWidths;
-  document.addEventListener('DOMContentLoaded', restoreWidths);
-})();
-
-
 // ── Crypto Tab ───────────────────────────────────────────────────────────────
 async function loadCrypto() {
   const d = await api('/api/crypto/scan');
@@ -1104,7 +1060,24 @@ async function loadCrypto() {
   if (!d) { tbody.innerHTML = '<tr><td colspan="7" class="loading">Error loading crypto data</td></tr>'; return; }
 
   // Cache smart money signal globally for use in positions signal column
-  if (d.smart_money) window._smartMoney = d.smart_money;
+  if (d.smart_money) {
+    window._smartMoney = d.smart_money;
+    // Update signal cells for any crypto positions already rendered
+    const sm = d.smart_money;
+    const sigText = sm.direction==='bearish' ? 'BEARISH' : sm.direction==='bullish' ? 'BULLISH' : 'NEUTRAL';
+    const sigColor = sm.direction==='bearish' ? '#f87171' : sm.direction==='bullish' ? '#4ade80' : '#888';
+    document.querySelectorAll('[data-col="signal"]').forEach(td => {
+      const row = td.closest('tr');
+      if (!row) return;
+      // Only update crypto rows (check ticker in the link href)
+      const link = row.querySelector('a');
+      if (!link) return;
+      const href = link.href || '';
+      if (/kxbtc|kxeth|kxxrp|kxdoge/i.test(href)) {
+        td.innerHTML = `<span style="color:${sigColor};font-weight:700;font-size:10px;">${sigText}</span>`;
+      }
+    });
+  }
 
   // Update signal bar
   const sm = d.smart_money;

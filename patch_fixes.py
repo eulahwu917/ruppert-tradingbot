@@ -1,7 +1,6 @@
 import sys
 sys.stdout.reconfigure(encoding='utf-8')
 from pathlib import Path
-html = Path('dashboard/templates/index.html').read_text(encoding='utf-8')
-# Check acct-main font size in CSS
-idx = html.find('.acct-main')
-print(repr(html[idx:idx+80]))
+api = Path('dashboard/api.py').read_text(encoding='utf-8')
+idx = api.find('lp = m.get(\'last_price\')')
+print(repr(api[idx-100:idx+300]))

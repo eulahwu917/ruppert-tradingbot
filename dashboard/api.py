@@ -244,7 +244,7 @@ async def add_deposit(request: Request):
 
 @app.get("/api/trades")
 def get_trades():
-    """Trade history — closed/settled positions only (open positions shown in /api/positions/active)."""
+    """Trade history — closed/settled positions only. Computes realized_pnl from last_price."""
     all_trades = read_all_trades()
     closed = []
     seen = set()
@@ -253,9 +253,37 @@ def get_trades():
         if not ticker or ticker in seen: continue
         if t.get('action') == 'exit': continue
         seen.add(ticker)
-        # Only include if settled (past date) — open positions excluded from history
-        if is_settled_ticker(ticker):
-            closed.append(t)
+        if not is_settled_ticker(ticker):
+            continue
+        # Compute realized P&L from last_price
+        try:
+            import requests as req
+            r = req.get(
+                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                timeout=4
+            )
+            if r.status_code == 200:
+                m = r.json().get('market', {})
+                result   = m.get('result')   # 'yes' or 'no' for finalized markets
+                lp       = m.get('last_price')
+                if lp is not None or result:
+                    side      = t.get('side', 'no')
+                    mp        = t.get('market_prob', 0.5) or 0.5
+                    entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+                    contracts = t.get('contracts', 0) or 0
+                    # Use actual settlement result if finalized (more accurate than last_price)
+                    if result == 'yes':
+                        settle_yes = 100
+                    elif result == 'no':
+                        settle_yes = 0
+                    else:
+                        settle_yes = lp or 50
+                    cur_p = (100 - settle_yes) if side == 'no' else settle_yes
+                    t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
+                    t['settled_price'] = settle_yes
+        except Exception:
+            pass
+        closed.append(t)
     return closed
 
 
@@ -646,8 +674,12 @@ def get_pnl_history():
             )
             if r.status_code != 200: continue
             m = r.json().get('market', {})
-            lp = m.get('last_price')
-            if lp is None: continue
+            lp     = m.get('last_price')
+            result = m.get('result')
+            if lp is None and not result: continue
+            # Use actual settlement result for finalized markets
+            if result == 'yes':   lp = 100
+            elif result == 'no':  lp = 0
 
             side      = t.get('side', 'no')
             mp        = t.get('market_prob', 0.5) or 0.5
