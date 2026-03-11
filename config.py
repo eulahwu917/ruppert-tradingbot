@@ -44,7 +44,8 @@ WEATHER_AUTO_TRADE  = True   # Bot executes without asking
 CRYPTO_AUTO_TRADE   = True   # Bot executes without asking
 GEO_AUTO_TRADE      = False  # David approves
 GAMING_AUTO_TRADE   = False  # David approves
-ECONOMICS_AUTO_TRADE = False # David approves
+ECONOMICS_AUTO_TRADE = True  # Auto-execute high-conviction trades (edge >= ECON_HIGH_CONVICTION_EDGE)
+ECON_HIGH_CONVICTION_EDGE = 0.20  # 20%+ edge = auto-execute; below = still alert David
 
 # Bot settings
 CHECK_INTERVAL_HOURS = 6       # How often to scan for opportunities
