@@ -79,6 +79,24 @@ SPORTS_EXCLUSIONS = [
 
 
 
+
+def settlement_date_from_ticker(ticker: str):
+    """Parse settlement date from ticker, e.g. 26MAR10 -> date(2026,3,10). Returns None if not found."""
+    import re as _re
+    months = {'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,
+              'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
+    for part in ticker.upper().split('-'):
+        m = _re.match(r'^(\d{2})([A-Z]{3})(\d{2})$', part)
+        if m:
+            yy, mon, dd = m.groups()
+            mn = months.get(mon)
+            if mn:
+                try:
+                    from datetime import date
+                    return date(2000 + int(yy), mn, int(dd))
+                except: pass
+    return None
+
 def is_settled_ticker(ticker: str) -> bool:
     """Return True if ticker contains a past date (market already settled)."""
     import re as _re
@@ -611,8 +629,13 @@ def get_pnl_history():
 
     closed_pnl_total = 0.0
     closed_by_source = {'bot': 0.0, 'manual': 0.0}
+    closed_by_period = {'day': 0.0, 'month': 0.0, 'year': 0.0}
+    closed_by_src_period = {'bot': {'month':0.0,'year':0.0,'all':0.0}, 'manual': {'month':0.0,'year':0.0,'all':0.0}}
     closed_wins = 0
     closed_total = 0
+
+    from datetime import date as _date
+    _today = _date.today()
 
     # ── Settled positions ────────────────────────────────────────────────────
     for ticker, t in settled_tickers.items():
@@ -641,10 +664,27 @@ def get_pnl_history():
             if pnl > 0: closed_wins += 1
 
             src = t.get('source', 'bot')
-            if src in ('economics', 'geo', 'manual'):
+            is_manual = src in ('economics', 'geo', 'manual')
+            if is_manual:
                 closed_by_source['manual'] += pnl
             else:
                 closed_by_source['bot'] += pnl
+
+            # Bucket by settlement date parsed from ticker
+            sdate = settlement_date_from_ticker(ticker)
+            if sdate:
+                if sdate == _today:
+                    closed_by_period['day']   += pnl
+                if sdate.year == _today.year and sdate.month == _today.month:
+                    closed_by_period['month'] += pnl
+                    if is_manual: closed_by_src_period['manual']['month'] += pnl
+                    else:         closed_by_src_period['bot']['month']    += pnl
+                if sdate.year == _today.year:
+                    closed_by_period['year']  += pnl
+                    if is_manual: closed_by_src_period['manual']['year']  += pnl
+                    else:         closed_by_src_period['bot']['year']     += pnl
+                if is_manual: closed_by_src_period['manual']['all'] += pnl
+                else:         closed_by_src_period['bot']['all']    += pnl
         except Exception:
             pass
 
@@ -740,6 +780,15 @@ def get_pnl_history():
         "manual_open_pnl":   round(open_by_source['manual'], 2),
         "bot_deployed":  round(bot_dep, 2),
         "man_deployed":  round(man_dep, 2),
+        "closed_pnl_day":   round(closed_by_period["day"], 2),
+        "bot_closed_month":    round(closed_by_src_period["bot"]["month"], 2),
+        "bot_closed_year":     round(closed_by_src_period["bot"]["year"], 2),
+        "bot_closed_all":      round(closed_by_source["bot"], 2),
+        "manual_closed_month": round(closed_by_src_period["manual"]["month"], 2),
+        "manual_closed_year":  round(closed_by_src_period["manual"]["year"], 2),
+        "manual_closed_all":   round(closed_by_source["manual"], 2),
+        "closed_pnl_month": round(closed_by_period["month"], 2),
+        "closed_pnl_year":  round(closed_by_period["year"], 2),
         "closed_win_rate": round(closed_wins / closed_total * 100, 1) if closed_total else None,
         "points": points,
         "total":  round(total_pnl, 2),

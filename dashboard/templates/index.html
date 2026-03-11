@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ruppert | Trading Dashboard</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0d0d; color: #e0e0e0; }
@@ -35,12 +34,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .split-card { flex: 1; background: #111; border: 1px solid #1e1e1e; border-radius: 10px; padding: 20px 24px; display: flex; align-items: center; gap: 0; min-height: 90px; }
 .split-side-label { font-size: 10px; font-weight: 700; color: #2a2a2a; text-transform: uppercase; letter-spacing: .8px; line-height: 1.7; word-break: normal; white-space: normal; width: 58px; min-width: 58px; flex-shrink: 0; }
 .split-divider { width: 1px; background: #1e1e1e; align-self: stretch; margin: 0 20px; flex-shrink: 0; }
-.split-metrics { display: flex; flex: 1; align-items: flex-start; justify-content: center; padding-top: 4px; }
-.split-metric { flex: 1; padding: 0 16px; text-align: center; position: relative; }
-.split-metric::after { content: ''; position: absolute; right: 0; top: 0; height: 100%; width: 1px; background: #1e1e1e; }
-.split-metric:last-child::after { display: none; }
+.split-metrics { display: flex; flex: 1; align-items: stretch; gap: 0; }
+.split-metric { flex: 1; padding: 0 16px; display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; position: relative; }
+.split-metric:not(:last-child)::after { content: ''; position: absolute; right: 0; top: 10%; height: 80%; width: 1px; background: #1e1e1e; }
 .split-metric-label { font-size: 10px; font-weight: 700; color: #2a2a2a; text-transform: uppercase; letter-spacing: .7px; margin-bottom: 6px; }
 .split-metric-val { font-size: 28px; font-weight: 700; letter-spacing: -1px; line-height: 1; }
+.split-metric .acct-main { font-size: 30px; }
 .split-metric-pct { font-size: 11px; font-weight: 600; margin-top: 4px; }
 .split-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
 .split-icon-bot { background: #1a2e1a; }
@@ -50,7 +49,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 .split-sub { font-size: 10px; color: #2a2a2a; margin-top: 2px; }
 
 /* Main grid */
-.main-grid { display: grid; grid-template-columns: 3fr 7fr; gap: 14px; margin-bottom: 14px; }
+.main-grid { display: grid; grid-template-columns: 1fr; gap: 14px; margin-bottom: 14px; }
 
 /* Card */
 .card { background: #111; border: 1px solid #1e1e1e; border-radius: 10px; overflow: hidden; }
@@ -268,8 +267,8 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       <div class="acct-label">Open P&amp;L</div>
       <div class="acct-right"><div class="acct-main pnl-neu" id="opnl">--</div><div class="acct-pct pnl-neu" id="opnl-pct"></div></div>
     </div>
-    <div class="acct-item">
-      <div class="acct-label">Closed P&amp;L</div>
+    <div class="acct-item" style="min-width:110px;">
+      <div class="acct-label"><span style="white-space:nowrap;display:block;">Closed P&amp;L</span><select id="cpnl-select" onchange="setCpnlFrame(this.value)" style="font-size:9px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#777;padding:1px 4px;cursor:pointer;outline:none;margin-top:2px;"><option value="month" selected>This Month</option><option value="year">This Year</option><option value="all">All Time</option></select></div>
       <div class="acct-right"><div class="acct-main pnl-neu" id="cpnl">--</div><div class="acct-pct pnl-neu" id="cpnl-pct"></div></div>
     </div>
     <div class="acct-item">
@@ -289,17 +288,16 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       <div class="split-divider"></div>
       <div class="split-metrics">
         <div class="split-metric">
-          <div class="split-metric-label">Closed P&amp;L</div>
-          <div class="split-metric-val pnl-neu" id="bot-pnl">--</div>
-          <div class="split-metric-pct pnl-neu" id="bot-pnl-pct"></div>
+          <div class="split-metric-label" style="margin-bottom:0;max-width:70px;"><span style="white-space:nowrap;display:block;">Closed P&amp;L</span><select id="bot-cpnl-select" onchange="setBotCpnlFrame(this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:4px;color:#666;padding:1px 4px;cursor:pointer;outline:none;display:block;margin-top:2px;"><option value="month" selected>This Month</option><option value="year">This Year</option><option value="all">All Time</option></select></div>
+          <div class="acct-right"><div class="acct-main pnl-neu" id="bot-pnl">--</div><div class="acct-pct pnl-neu" id="bot-pnl-pct"></div></div>
         </div>
         <div class="split-metric">
-          <div class="split-metric-label">Deployed</div>
-          <div class="split-metric-val" style="color:#888;" id="bot-dep">--</div>
+          <div class="split-metric-label" style="margin-bottom:0;max-width:60px;">Deployed</div>
+          <div class="acct-right"><div class="acct-main" style="color:#888;" id="bot-dep">--</div></div>
         </div>
         <div class="split-metric">
-          <div class="split-metric-label">Trades</div>
-          <div class="split-metric-val" style="color:#888;" id="bot-cnt">--</div>
+          <div class="split-metric-label" style="margin-bottom:0;max-width:60px;">Trades</div>
+          <div class="acct-right"><div class="acct-main" style="color:#888;" id="bot-cnt">--</div></div>
         </div>
       </div>
     </div>
@@ -308,17 +306,16 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       <div class="split-divider"></div>
       <div class="split-metrics">
         <div class="split-metric">
-          <div class="split-metric-label">Closed P&amp;L</div>
-          <div class="split-metric-val pnl-neu" id="man-pnl">--</div>
-          <div class="split-metric-pct pnl-neu" id="man-pnl-pct"></div>
+          <div class="split-metric-label" style="margin-bottom:0;max-width:70px;"><span style="white-space:nowrap;display:block;">Closed P&amp;L</span><select id="man-cpnl-select" onchange="setManCpnlFrame(this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:4px;color:#666;padding:1px 4px;cursor:pointer;outline:none;display:block;margin-top:2px;"><option value="month" selected>This Month</option><option value="year">This Year</option><option value="all">All Time</option></select></div>
+          <div class="acct-right"><div class="acct-main pnl-neu" id="man-pnl">--</div><div class="acct-pct pnl-neu" id="man-pnl-pct"></div></div>
         </div>
         <div class="split-metric">
-          <div class="split-metric-label">Deployed</div>
-          <div class="split-metric-val" style="color:#888;" id="man-dep">--</div>
+          <div class="split-metric-label" style="margin-bottom:0;max-width:60px;">Deployed</div>
+          <div class="acct-right"><div class="acct-main" style="color:#888;" id="man-dep">--</div></div>
         </div>
         <div class="split-metric">
-          <div class="split-metric-label">Trades</div>
-          <div class="split-metric-val" style="color:#888;" id="man-cnt">--</div>
+          <div class="split-metric-label" style="margin-bottom:0;max-width:60px;">Trades</div>
+          <div class="acct-right"><div class="acct-main" style="color:#888;" id="man-cnt">--</div></div>
         </div>
       </div>
     </div>
@@ -328,24 +325,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
   <div class="main-grid">
 
     <!-- P&L -->
-    <div class="card">
-      <div class="card-head">
-        <div class="sec">P&amp;L</div>
-        <div style="display:flex;gap:4px;">
-          <button class="tf-btn on" onclick="setPnlFrame('day',this)">Day</button>
-          <button class="tf-btn" onclick="setPnlFrame('month',this)">Month</button>
-          <button class="tf-btn" onclick="setPnlFrame('year',this)">Year</button>
-        </div>
-      </div>
-      <div class="card-body" id="pnl-body">
-        <div class="pnl-empty" style="display:flex;align-items:center;justify-content:center;min-height:160px;">
-          <div class="msg" style="text-align:center;color:#333;font-size:13px;">P&amp;L data will show after first contract settlement.</div>
-        </div>
-      </div>
-      <div id="pnl-wrap" style="display:none;height:200px;padding:16px 20px 20px;position:relative;">
-        <canvas id="pnl-c" style="width:100%;height:100%;"></canvas>
-      </div>
-    </div>
+
 
     <!-- Positions + Trades tabbed -->
     <div class="card">
@@ -600,12 +580,12 @@ function setPnl(mainId, pctId, val, cost) {
 function setSplitPnl(id, pctId, val, cost) {
   const el = document.getElementById(id);
   if (!el) return;
-  el.className   = 'split-metric-val ' + pcls(val);
+  el.className   = 'acct-main ' + pcls(val);
   el.textContent = (val >= 0 ? '+' : '') + dollar(val);
   const pe = document.getElementById(pctId);
   if (pe && cost) {
     const pp = val / cost * 100;
-    pe.className   = 'split-metric-pct ' + pcls(val);
+    pe.className   = 'acct-pct ' + pcls(val);
     pe.textContent = (pp >= 0 ? '+' : '') + pp.toFixed(2) + '%';
   }
 }
@@ -1000,98 +980,62 @@ function setPnlFrame(frame, btn) {
   renderPnlChart(window._pnlData || []);
 }
 
-async function loadPnlChart() {
+// ── Closed P&L period toggles ─────────────────────────────────────────────────
+window._cpnlFrame    = 'month';
+window._cpnlData     = {all: 0, day: 0, month: 0, year: 0};
+window._botCpnlFrame = 'month';
+window._botCpnlData  = {month: 0, year: 0, all: 0};
+window._manCpnlFrame = 'month';
+window._manCpnlData  = {month: 0, year: 0, all: 0};
+
+function setCpnlFrame(frame) {
+  window._cpnlFrame = frame;
+  const val = frame === 'month' ? window._cpnlData.month : frame === 'year' ? window._cpnlData.year : window._cpnlData.all;
+  setPnl('cpnl', 'cpnl-pct', val, window._kalshiBalance || 400);
+}
+function setBotCpnlFrame(frame) { window._botCpnlFrame = frame; loadClosedPnl(); }
+function setManCpnlFrame(frame) { window._manCpnlFrame = frame; loadClosedPnl(); }
+
+async function loadClosedPnl() {
   try {
     const pnl = await api('/api/pnl');
     if (!pnl) return;
 
-    // Store closed P&L globally
-    window._closedPnl = pnl.closed_pnl || 0;
+    window._closedPnl   = pnl.closed_pnl || 0;
+    window._cpnlData    = {all: pnl.closed_pnl||0, day: pnl.closed_pnl_day||0, month: pnl.closed_pnl_month||0, year: pnl.closed_pnl_year||0};
+    window._botCpnlData = {month: pnl.bot_closed_month||0, year: pnl.bot_closed_year||0, all: pnl.bot_closed_all||0};
+    window._manCpnlData = {month: pnl.manual_closed_month||0, year: pnl.manual_closed_year||0, all: pnl.manual_closed_all||0};
 
-    // Closed P&L in account bar
-    const closedCost = Math.abs(pnl.closed_pnl || 0) || 1;
-    setPnl('cpnl', 'cpnl-pct', pnl.closed_pnl || 0, closedCost);
+    // Account bar Closed P&L
+    const cpnlVal = window._cpnlData[window._cpnlFrame || 'month'];
+    setPnl('cpnl', 'cpnl-pct', cpnlVal, window._kalshiBalance || 400);
 
-    // BOT card: closed P&L % vs bot deployed capital
-    const botDep = pnl.bot_deployed || 1;
-    setSplitPnl('bot-pnl', 'bot-pnl-pct', pnl.bot_closed_pnl || 0, botDep);
-    // Manual card: closed P&L % vs manual deployed
-    const manDep = pnl.man_deployed || 1;
-    setSplitPnl('man-pnl', 'man-pnl-pct', pnl.manual_closed_pnl || 0, manDep);
+    // Split cards
+    setSplitPnl('bot-pnl', 'bot-pnl-pct', window._botCpnlData[window._botCpnlFrame||'month'], pnl.bot_deployed||1);
+    setSplitPnl('man-pnl', 'man-pnl-pct', window._manCpnlData[window._manCpnlFrame||'month'], pnl.man_deployed||1);
 
-    // Account Value: single source of truth
-    updateAccountValue();
+    // Deployed + Trades counters
+    if ($('bot-dep')) $('bot-dep').textContent = dollar(pnl.bot_deployed||0);
+    if ($('bot-cnt')) $('bot-cnt').textContent = pnl.bot_trades||0;
+    if ($('man-dep')) $('man-dep').textContent = dollar(pnl.man_deployed||0);
+    if ($('man-cnt')) $('man-cnt').textContent = pnl.man_trades||0;
 
-    // Win Rate = closed trades (settled contracts)
-    // If no settled trades yet, show open position hit rate
+    // Win Rate
     const wrEl = document.getElementById('winrate');
-    if (wrEl) {
-      if (pnl.closed_win_rate != null && (pnl.bot_closed_pnl !== 0 || pnl.manual_closed_pnl !== 0)) {
-        wrEl.textContent = pnl.closed_win_rate.toFixed(0) + '%';
-        wrEl.style.color = pnl.closed_win_rate >= 50 ? '#4ade80' : '#f87171';
-      }
+    if (wrEl && pnl.closed_win_rate != null) {
+      wrEl.textContent = pnl.closed_win_rate.toFixed(0) + '%';
+      wrEl.style.color = pnl.closed_win_rate >= 50 ? '#4ade80' : '#f87171';
     }
 
-    // Render chart
-    if (pnl.points && pnl.points.length) renderPnlChart(pnl.points);
-  } catch(e) {}
-}
-
-function renderPnlChart(points) {
-  if (!points || !points.length) return;
-  const labels = points.map(p => p.date);
-  const data   = points.map(p => p.pnl);
-  const running = data.length ? data[data.length-1] : 0;
-
-  const pnlEmpty = document.getElementById('pnl-body');
-  const pnlWrap  = document.getElementById('pnl-wrap');
-  const pnlCanvas = document.getElementById('pnl-c');
-  if (pnlEmpty) pnlEmpty.style.display = 'none';
-  if (pnlWrap)  pnlWrap.style.display = 'block';
-
-  const ctx = pnlCanvas.getContext('2d');
-  if (window._pnlChartObj) window._pnlChartObj.destroy();
-  const color = running >= 0 ? '#4ade80' : '#f87171';
-  window._pnlChartObj = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        label: 'P&L',
-        data,
-        borderColor: color,
-        backgroundColor: running >= 0 ? 'rgba(74,222,128,0.06)' : 'rgba(248,113,113,0.06)',
-        borderWidth: 2,
-        pointRadius: 4,
-        pointBackgroundColor: color,
-        tension: 0.3,
-        fill: true,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: { display: false },
-        tooltip: { callbacks: { label: c => ' $' + c.parsed.y.toFixed(2) } }
-      },
-      scales: {
-        x: { grid: { color: '#1a1a1a' }, ticks: { color: '#555', font: { size: 10 } } },
-        y: {
-          grid: { color: '#1a1a1a' },
-          ticks: { color: '#555', font: { size: 10 }, maxTicksLimit: 5, callback: v => '$' + v.toFixed(0) },
-          grace: '10%'
-        }
-      }
-    }
-  });
+    updateAccountValue();
+  } catch(e) { console.error('loadClosedPnl', e); }
 }
 
 async function loadScouts(){
   await Promise.all([loadWeather(),loadBestBets(),loadGeo(),loadCrypto()]);
 }
 async function loadAll(){
-  await Promise.all([loadAccount(), loadPositions(), loadTrades(), loadScouts(), loadPnlChart()]);
+  await Promise.all([loadAccount(), loadPositions(), loadTrades(), loadScouts(), loadClosedPnl()]);
 }
 loadAll();
 setInterval(loadAll, 30000);
