@@ -1,52 +1,53 @@
-import sys, requests, json
+import requests, json, sys
 sys.stdout.reconfigure(encoding='utf-8')
-BASE = 'http://localhost:8765'
 
-pos      = requests.get(BASE+'/api/positions/active').json()
-prices   = requests.get(BASE+'/api/positions/prices').json()
-statuses = requests.get(BASE+'/api/positions/status').json()
+# Check what Kalshi actually returns for settling positions
+tickers = [
+    ('KXHIGHNY-26MAR11-B66.5',   'no', 0.31, 36, 25.0),
+    ('KXHIGHCHI-26MAR11-B52.5',  'no', 0.19, 30, 25.0),
+    ('KXHIGHCHI-26MAR11-B50.5',  'no', 0.19, 30, 25.0),
+    ('KXHIGHCHI-26MAR11-B48.5',  'no', 0.19, 30, 25.0),
+]
 
-print('=== POSITIONS ===')
-for p in pos:
-    print(f"  {p['ticker']} side={p['side']} entry={p['entry_price']}c contracts={p['contracts']} cost=${p['total_cost']}")
-
-print('\n=== STATUSES ===')
-for k, v in statuses.items():
-    print(f"  {k}: status={v['status']} result={repr(v['result'])} last={v['last_price']}")
-
-print('\n=== PRICES ===')
-for k, v in prices.items():
-    print(f"  {k}: yes_ask={v['yes_ask']} no_ask={v['no_ask']}")
-
-print('\n=== COMPUTED P&L ===')
-total = 0
-for p in pos:
-    ticker = p['ticker']
-    st = statuses.get(ticker)
-    lv = prices.get(ticker)
-    entry = p['entry_price']
-    contracts = p['contracts']
-    cost = p['total_cost']
-    side = p['side']
-
-    if st and st['status'] in ('closed', 'settled'):
-        result = st.get('result', '')
-        won = (side == 'NO' and result == 'no') or (side == 'YES' and result == 'yes')
-        pnl = cost * (100/entry - 1) if won else -cost
-        tag = 'SETTLED WIN' if won else 'SETTLED LOSS'
-    elif lv:
-        cp = lv['no_ask'] if side == 'NO' else lv['yes_ask']
-        if cp is None:
-            pnl = 0
-            tag = 'NO PRICE'
-        else:
-            pnl = (cp - entry) * contracts / 100
-            tag = f'LIVE cp={cp}c'
+for ticker, side, mp, contracts, cost in tickers:
+    r = requests.get(f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}', timeout=5)
+    if r.status_code != 200:
+        print(f'{ticker}: HTTP {r.status_code}')
+        continue
+    m = r.json().get('market', {})
+    entry_p = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+    
+    # Current prices
+    yes_ask = m.get('yes_ask')
+    yes_bid = m.get('yes_bid')
+    no_ask  = m.get('no_ask')
+    no_bid  = m.get('no_bid')
+    last_p  = m.get('last_price')
+    status  = m.get('status')
+    result  = m.get('result')
+    
+    print(f'{ticker}')
+    print(f'  status={status} result={result} last_price={last_p}')
+    print(f'  yes_ask={yes_ask} yes_bid={yes_bid} no_ask={no_ask} no_bid={no_bid}')
+    print(f'  entry_p={entry_p}c side={side}')
+    
+    # API pnl logic (after fix)
+    if side == 'no':
+        cur_p = no_ask
+        if cur_p is None:
+            cur_p = (100 - last_p) if last_p is not None else None
     else:
-        pnl = 0
-        tag = 'NO DATA'
+        cur_p = yes_ask
+        if cur_p is None:
+            cur_p = last_p if last_p is not None else None
+    if cur_p is None:
+        cur_p = entry_p
+    
+    pnl = (cur_p - entry_p) * contracts / 100
+    print(f'  cur_p={cur_p}c  pnl=${pnl:.2f}')
+    print()
 
-    total += pnl
-    print(f"  {ticker}: {tag} => pnl=${pnl:.2f}")
-
-print(f'\n  TOTAL OPEN P&L: ${total:.2f}')
+# Also check the local prices endpoint
+prices = requests.get('http://localhost:8765/api/positions/prices', timeout=10).json()
+for ticker in ['KXHIGHNY-26MAR11-B66.5','KXHIGHCHI-26MAR11-B52.5']:
+    print(f'Prices endpoint {ticker}: {prices.get(ticker)}')

@@ -6,7 +6,7 @@ Run with: uvicorn dashboard.api:app --reload --port 8765
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 import json
 from datetime import date, datetime
@@ -151,15 +151,30 @@ def get_account():
         seen_tickers.add(ticker)
         trades.append(t)
 
-    # Auto = weather + crypto (fully autonomous)
-    # Manual = geo + gaming + economics (David approves)
-    AUTO_SOURCES   = ('bot', 'weather', 'economics', 'crypto')
-    MANUAL_SOURCES = ('geo', 'gaming', 'manual')
+    # Bot = weather + crypto (fully autonomous, Ruppert decides)
+    # Manual = economics + geo (David approves)
+    # Gaming removed entirely
+    AUTO_SOURCES   = ('bot', 'weather', 'crypto')
+    MANUAL_SOURCES = ('economics', 'geo', 'manual')
 
-    bot_cost    = sum(t.get('size_dollars',0) for t in trades if t.get('source','bot') in AUTO_SOURCES)
-    manual_cost = sum(t.get('size_dollars',0) for t in trades if t.get('source','bot') in MANUAL_SOURCES)
+    # Only count OPEN (not-yet-settled) positions in deployed capital
+    # Settled positions: their capital is gone (loss) or returned (win) — reflected in Closed P&L
+    open_trades  = [t for t in trades if not is_settled_ticker(t.get('ticker', ''))]
+    bot_cost     = sum(t.get('size_dollars',0) for t in open_trades if t.get('source','bot') in AUTO_SOURCES)
+    manual_cost  = sum(t.get('size_dollars',0) for t in open_trades if t.get('source','bot') in MANUAL_SOURCES)
     total_deployed = bot_cost + manual_cost
 
+    # Starting capital = sum of demo deposits (replaces hardcoded $400)
+    deposits_path = LOGS_DIR / "demo_deposits.jsonl"
+    STARTING_CAPITAL = 0.0
+    if deposits_path.exists():
+        with open(deposits_path) as f:
+            for line in f:
+                try: STARTING_CAPITAL += json.loads(line).get('amount', 0)
+                except: pass
+    if STARTING_CAPITAL == 0: STARTING_CAPITAL = 400.0  # fallback
+
+    # Buying power = what's not currently locked in open trades
     buying_power = max(STARTING_CAPITAL - total_deployed, 0)
 
     return {
@@ -169,15 +184,61 @@ def get_account():
         "total_deployed":     round(total_deployed, 2),
         "bot_deployed":       round(bot_cost, 2),
         "manual_deployed":    round(manual_cost, 2),
+        "starting_capital":   round(STARTING_CAPITAL, 2),
         "bot_trade_count":    len([t for t in trades if t.get('source','bot') in AUTO_SOURCES]),
         "manual_trade_count": len([t for t in trades if t.get('source','bot') in MANUAL_SOURCES]),
+        "open_trade_count":   len(open_trades),
+        "bot_deployed":       round(bot_cost, 2),
+        "manual_deployed":    round(manual_cost, 2),
         "is_dry_run":         True,
     }
 
 
+@app.get("/api/deposits")
+def get_deposits():
+    deposits_path = LOGS_DIR / "demo_deposits.jsonl"
+    deposits = []
+    total = 0.0
+    if deposits_path.exists():
+        with open(deposits_path) as f:
+            for line in f:
+                try:
+                    d = json.loads(line)
+                    deposits.append(d)
+                    total += d.get('amount', 0)
+                except: pass
+    return {"deposits": deposits, "total": round(total, 2)}
+
+
+@app.post("/api/deposits")
+async def add_deposit(request: Request):
+    body = await request.json()
+    amount = float(body.get('amount', 0))
+    note   = str(body.get('note', 'Manual deposit'))
+    if amount <= 0:
+        return {"error": "Amount must be positive"}
+    entry = {"date": date.today().isoformat(), "amount": round(amount, 2), "note": note}
+    deposits_path = LOGS_DIR / "demo_deposits.jsonl"
+    with open(deposits_path, 'a') as f:
+        f.write(json.dumps(entry) + '\n')
+    return {"ok": True, "entry": entry}
+
+
 @app.get("/api/trades")
 def get_trades():
-    return read_all_trades()
+    """Trade history — closed/settled positions only (open positions shown in /api/positions/active)."""
+    all_trades = read_all_trades()
+    closed = []
+    seen = set()
+    for t in all_trades:
+        ticker = t.get('ticker', '')
+        if not ticker or ticker in seen: continue
+        if t.get('action') == 'exit': continue
+        seen.add(ticker)
+        # Only include if settled (past date) — open positions excluded from history
+        if is_settled_ticker(ticker):
+            closed.append(t)
+    return closed
 
 
 @app.get("/api/trades/today")
@@ -229,10 +290,10 @@ def get_active_positions():
         edge      = t.get('edge')
 
         positions.append({
-            "ticker":     ticker,
-            "title":      title,
-            "side":       side,
-            "source":     source,
+            "ticker":      ticker,
+            "title":       title,
+            "side":        side,
+            "source":      source,
             "entry_price": ep,
             "cur_price":   ep,
             "pnl":         0.0,
@@ -242,6 +303,9 @@ def get_active_positions():
             "pos_ratio":   pos_ratio,
             "edge":        round(edge, 3) if edge else None,
             "date":        t.get('date') or t.get('_date', ''),
+            "close_time":  t.get('close_time', ''),
+            "noaa_prob":   t.get('noaa_prob'),
+            "market_prob": t.get('market_prob'),
         })
 
     return positions
@@ -524,19 +588,16 @@ def dashboard():
 @app.get("/api/pnl")
 def get_pnl_history():
     """
-    Real P&L history for the chart.
-    Open positions: (current_no_ask or yes_ask - entry_price) * contracts / 100
-    Settled positions: use Kalshi last_price to determine win/loss
+    Real P&L split into open (unrealized) and closed (realized/settled).
+    Settled = past-date tickers that already resolved on Kalshi.
+    Open    = current positions still trading.
     """
     import requests as req
     from collections import defaultdict
 
     all_trades = read_all_trades()
-
-    # Separate: settled (past-date) vs open
-    settled_tickers = {}  # ticker -> trade entry
-    open_tickers    = {}  # ticker -> trade entry
-
+    settled_tickers = {}
+    open_tickers    = {}
     seen = set()
     for t in all_trades:
         ticker = t.get('ticker', '')
@@ -548,9 +609,12 @@ def get_pnl_history():
         else:
             open_tickers[ticker] = t
 
-    pnl_by_date = defaultdict(float)
+    closed_pnl_total = 0.0
+    closed_by_source = {'bot': 0.0, 'manual': 0.0}
+    closed_wins = 0
+    closed_total = 0
 
-    # ── Settled positions: fetch last_price from Kalshi ─────────────────────
+    # ── Settled positions ────────────────────────────────────────────────────
     for ticker, t in settled_tickers.items():
         try:
             r = req.get(
@@ -559,28 +623,37 @@ def get_pnl_history():
             )
             if r.status_code != 200: continue
             m = r.json().get('market', {})
-            lp = m.get('last_price')  # YES settlement: 99=YES won, 1=NO won
+            lp = m.get('last_price')
             if lp is None: continue
 
             side      = t.get('side', 'no')
             mp        = t.get('market_prob', 0.5) or 0.5
             entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
-            contracts = t.get('contracts', 0) or 0
-            # Limit crazy contracts (early log bug had 500)
             cost      = t.get('size_dollars', 25)
+            contracts = t.get('contracts', 0) or 0
             if contracts > 0 and cost > 0:
                 contracts = min(contracts, int(cost / max(entry_p, 1) * 100) + 2)
 
             cur_p = (100 - lp) if side == 'no' else lp
             pnl   = round((cur_p - entry_p) * contracts / 100, 2)
+            closed_pnl_total += pnl
+            closed_total += 1
+            if pnl > 0: closed_wins += 1
 
-            trade_date = t.get('date') or t.get('_date', '2026-03-10')
-            pnl_by_date[trade_date] += pnl
+            src = t.get('source', 'bot')
+            if src in ('economics', 'geo', 'manual'):
+                closed_by_source['manual'] += pnl
+            else:
+                closed_by_source['bot'] += pnl
         except Exception:
             pass
 
-    # ── Open positions: fetch current market prices ──────────────────────────
-    today_pnl = 0.0
+    # ── Open positions ───────────────────────────────────────────────────────
+    open_pnl_total = 0.0
+    open_by_source = {'bot': 0.0, 'manual': 0.0}
+    open_wins = 0
+    open_total = 0
+
     for ticker, t in open_tickers.items():
         try:
             r = req.get(
@@ -593,28 +666,83 @@ def get_pnl_history():
             side      = t.get('side', 'no')
             mp        = t.get('market_prob', 0.5) or 0.5
             entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
-            contracts = t.get('contracts', 0) or 0
             cost      = t.get('size_dollars', 25)
+            contracts = t.get('contracts', 0) or 0
             if contracts > 0 and cost > 0:
                 contracts = min(contracts, int(cost / max(entry_p, 1) * 100) + 2)
 
-            cur_p = m.get('no_ask', entry_p) if side == 'no' else m.get('yes_ask', entry_p)
-            if not cur_p: cur_p = entry_p
+            # ── Fair value for existing position ─────────────────────────────
+            # Use no_bid / yes_bid (what we'd SELL for) not ask (cost to buy more)
+            # Fallback: 100-yes_ask (implied NO value) > last_price > entry_p
+            # CRITICAL: use 'is None' not 'not cur_p' — 0 is valid (full loss)
+            if side == 'no':
+                cur_p = m.get('no_bid')
+                if cur_p is None:
+                    ya = m.get('yes_ask')
+                    if ya is not None: cur_p = 100 - ya
+                if cur_p is None:
+                    lp = m.get('last_price')
+                    if lp is not None: cur_p = 100 - lp
+            else:
+                cur_p = m.get('yes_bid')
+                if cur_p is None:
+                    cur_p = m.get('yes_ask')
+                if cur_p is None:
+                    lp = m.get('last_price')
+                    if lp is not None: cur_p = lp
+            if cur_p is None: cur_p = entry_p  # truly no data — hold flat
             pnl = round((cur_p - entry_p) * contracts / 100, 2)
-            today_pnl += pnl
+            open_pnl_total += pnl
+            open_total += 1
+            if pnl > 0: open_wins += 1
+
+            src = t.get('source', 'bot')
+            if src in ('economics', 'geo', 'manual'):
+                open_by_source['manual'] += pnl
+            else:
+                open_by_source['bot'] += pnl
         except Exception:
             pass
 
+    total_pnl = open_pnl_total + closed_pnl_total
+
+    # Build chart time-series (cumulative per day)
     from datetime import date as date_cls
     today = str(date_cls.today())
-    pnl_by_date[today] = pnl_by_date.get(today, 0) + today_pnl
-
-    # Build cumulative time series
     points = []
-    cumulative = 0.0
-    for d in sorted(pnl_by_date.keys()):
-        cumulative += pnl_by_date[d]
-        points.append({"date": d, "pnl": round(cumulative, 2)})
+    # Day 1: closed P&L (settled trades from prior days)
+    if closed_pnl_total != 0:
+        points.append({"date": "2026-03-10", "pnl": round(closed_pnl_total, 2)})
+    # Today: total (closed + open)
+    points.append({"date": today, "pnl": round(total_pnl, 2)})
 
-    return {"points": points, "total": round(cumulative, 2)}
+    # Deployed costs for % calculation (use account endpoint values)
+    all_t = read_all_trades()
+    seen2 = set()
+    open_t = []
+    for t in all_t:
+        tk = t.get('ticker','')
+        if not tk or tk in seen2 or t.get('action')=='exit': continue
+        seen2.add(tk)
+        if not is_settled_ticker(tk): open_t.append(t)
+    BOT_SRC = ('bot','weather','crypto')
+    MAN_SRC = ('economics','geo','manual')
+    bot_dep = sum(t.get('size_dollars',0) for t in open_t if t.get('source','bot') in BOT_SRC)
+    man_dep = sum(t.get('size_dollars',0) for t in open_t if t.get('source','bot') in MAN_SRC)
+
+    return {
+        "open_pnl":   round(open_pnl_total, 2),
+        "closed_pnl": round(closed_pnl_total, 2),
+        "total_pnl":  round(total_pnl, 2),
+        "bot_closed_pnl":    round(closed_by_source['bot'], 2),
+        "manual_closed_pnl": round(closed_by_source['manual'], 2),
+        "bot_open_pnl":      round(open_by_source['bot'], 2),
+        "manual_open_pnl":   round(open_by_source['manual'], 2),
+        "bot_deployed":  round(bot_dep, 2),
+        "man_deployed":  round(man_dep, 2),
+        "closed_win_rate": round(closed_wins / closed_total * 100, 1) if closed_total else None,
+        "points": points,
+        "total":  round(total_pnl, 2),
+    }
+
 

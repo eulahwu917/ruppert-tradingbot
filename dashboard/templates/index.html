@@ -260,13 +260,17 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 
   <!-- Account Bar -->
   <div class="acct-bar">
-    <div class="acct-item">
-      <div class="acct-label">Demo Account Value</div><div style="font-size:9px;color:#333;margin-top:2px;">$400 base + P&amp;L</div>
+    <div class="acct-item" onclick="openDepositSB()" style="cursor:pointer;" title="Click to deposit">
+      <div class="acct-label">Demo Account Value <span style="font-size:9px;color:#444;">▶ Deposit</span></div>
       <div class="acct-right"><div class="acct-main" id="av">--</div></div>
     </div>
     <div class="acct-item">
       <div class="acct-label">Open P&amp;L</div>
       <div class="acct-right"><div class="acct-main pnl-neu" id="opnl">--</div><div class="acct-pct pnl-neu" id="opnl-pct"></div></div>
+    </div>
+    <div class="acct-item">
+      <div class="acct-label">Closed P&amp;L</div>
+      <div class="acct-right"><div class="acct-main pnl-neu" id="cpnl">--</div><div class="acct-pct pnl-neu" id="cpnl-pct"></div></div>
     </div>
     <div class="acct-item">
       <div class="acct-label">Win Rate</div>
@@ -285,7 +289,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       <div class="split-divider"></div>
       <div class="split-metrics">
         <div class="split-metric">
-          <div class="split-metric-label">Total P&amp;L</div>
+          <div class="split-metric-label">Closed P&amp;L</div>
           <div class="split-metric-val pnl-neu" id="bot-pnl">--</div>
           <div class="split-metric-pct pnl-neu" id="bot-pnl-pct"></div>
         </div>
@@ -304,7 +308,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       <div class="split-divider"></div>
       <div class="split-metrics">
         <div class="split-metric">
-          <div class="split-metric-label">Total P&amp;L</div>
+          <div class="split-metric-label">Closed P&amp;L</div>
           <div class="split-metric-val pnl-neu" id="man-pnl">--</div>
           <div class="split-metric-pct pnl-neu" id="man-pnl-pct"></div>
         </div>
@@ -338,7 +342,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
           <div class="msg" style="text-align:center;color:#333;font-size:13px;">P&amp;L data will show after first contract settlement.</div>
         </div>
       </div>
-      <div id="pnl-wrap" style="display:none;height:180px;padding:0 16px 16px;position:relative;">
+      <div id="pnl-wrap" style="display:none;height:200px;padding:16px 20px 20px;position:relative;">
         <canvas id="pnl-c" style="width:100%;height:100%;"></canvas>
       </div>
     </div>
@@ -359,10 +363,11 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <th class="ca" data-col="side" style="width:55px">Side<div class="resize-h"></div></th>
             <th class="ra" data-col="ent" style="width:50px">Ent<div class="resize-h"></div></th>
             <th class="ra" data-col="cur" style="width:50px">Cur<div class="resize-h"></div></th>
+            <th class="ca" data-col="status" style="width:70px">Status<div class="resize-h"></div></th>
             <th class="ra" data-col="cost" style="width:65px">Cost<div class="resize-h"></div></th>
             <th class="ra" style="width:90px">Open P&L<div class="resize-h"></div></th>
           </tr></thead>
-          <tbody id="pos-b"><tr><td colspan="9" class="loading">Loading...</td></tr></tbody>
+          <tbody id="pos-b"><tr><td colspan="10" class="loading">Loading...</td></tr></tbody>
         </table>
         </div>
       </div>
@@ -491,6 +496,71 @@ function swS(name, btn) {
   btn.classList.add('on');
 }
 
+// ── Deposit Sidebar ────────────────────────────────────────────────────────────
+async function openDepositSB() {
+  const dep = await api('/api/deposits');
+  const rows = (dep?.deposits || []).slice().reverse().map(d =>
+    `<div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid #111;">
+      <div>
+        <div style="font-size:12px;color:#aaa;">${d.note||'Deposit'}</div>
+        <div style="font-size:10px;color:#444;">${d.date}</div>
+      </div>
+      <div style="font-size:14px;font-weight:700;color:#4ade80;">+$${(d.amount||0).toFixed(2)}</div>
+    </div>`
+  ).join('') || '<div style="color:#444;font-size:12px;padding:12px 0;">No deposits yet.</div>';
+
+  const total = dep?.total || 0;
+  openSB(`
+    <div style="font-size:16px;font-weight:700;color:#fff;margin-bottom:4px;">💰 Demo Account</div>
+    <div style="font-size:11px;color:#555;margin-bottom:16px;">Add capital to fund new modules</div>
+
+    <div style="background:#0d0d0d;border-radius:8px;padding:14px;margin-bottom:20px;">
+      <div style="font-size:10px;color:#555;margin-bottom:4px;">TOTAL DEPOSITED</div>
+      <div style="font-size:24px;font-weight:700;color:#4ade80;">$${total.toFixed(2)}</div>
+    </div>
+
+    <div style="font-size:12px;font-weight:600;color:#888;margin-bottom:8px;">ADD CAPITAL</div>
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <input id="dep-amt" type="number" min="1" step="1" placeholder="Amount ($)" 
+        style="flex:1;background:#111;border:1px solid #222;border-radius:6px;color:#fff;padding:8px 10px;font-size:13px;outline:none;" />
+    </div>
+    <input id="dep-note" type="text" placeholder="Note (e.g. Economics module)" 
+      style="width:100%;box-sizing:border-box;background:#111;border:1px solid #222;border-radius:6px;color:#fff;padding:8px 10px;font-size:12px;outline:none;margin-bottom:12px;" />
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button onclick="quickDeposit(100)" style="flex:1;background:#111;border:1px solid #222;border-radius:6px;color:#aaa;padding:7px;font-size:12px;cursor:pointer;">+$100</button>
+      <button onclick="quickDeposit(200)" style="flex:1;background:#111;border:1px solid #222;border-radius:6px;color:#aaa;padding:7px;font-size:12px;cursor:pointer;">+$200</button>
+      <button onclick="quickDeposit(500)" style="flex:1;background:#111;border:1px solid #222;border-radius:6px;color:#aaa;padding:7px;font-size:12px;cursor:pointer;">+$500</button>
+    </div>
+    <button onclick="submitDeposit()" 
+      style="width:100%;background:#22c55e;border:none;border-radius:6px;color:#000;font-weight:700;padding:10px;font-size:13px;cursor:pointer;margin-bottom:20px;">
+      Deposit
+    </button>
+
+    <div style="font-size:12px;font-weight:600;color:#888;margin-bottom:8px;">DEPOSIT HISTORY</div>
+    <div id="dep-history">${rows}</div>
+  `);
+}
+
+function quickDeposit(amt) {
+  document.getElementById('dep-amt').value = amt;
+}
+
+async function submitDeposit() {
+  const amt  = parseFloat(document.getElementById('dep-amt').value);
+  const note = document.getElementById('dep-note').value.trim() || 'Manual deposit';
+  if (!amt || amt <= 0) { alert('Enter a valid amount'); return; }
+  const r = await fetch('/api/deposits', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({amount: amt, note})
+  });
+  if (r.ok) {
+    await loadAccount();
+    updateAccountValue();
+    openDepositSB(); // refresh sidebar
+  }
+}
+
 // ── Account ────────────────────────────────────────────────────────────────────
 async function loadAccount() {
   const acct = await api('/api/account');
@@ -508,14 +578,10 @@ async function loadAccount() {
   // $400 = $200 weather allocation + $200 crypto allocation
   // Live prices endpoint adds totalPnl (open+closed) on top of this base.
   // LIVE MODE: replace with raw acct.kalshi_balance (Kalshi API reflects real positions).
-  window._kalshiBalance = acct.kalshi_balance || 400;  // 400 = demo starting capital
+  // Starting capital = sum of deposits (no longer hardcoded $400)
+  window._kalshiBalance = acct.starting_capital || 400;
   $('av').textContent = dollar(window._kalshiBalance);
-  // Win Rate: populates once contracts settle
-  const wrEl = document.getElementById('winrate');
-  if (wrEl && acct.win_rate !== undefined) {
-    wrEl.style.color = acct.win_rate >= 50 ? '#4ade80' : '#f87171';
-    wrEl.textContent = acct.win_rate.toFixed(1) + '%';
-  }
+  // Win Rate set by loadPnlChart (closed/settled trades only)
 
   $('ts').textContent = 'Updated ' + new Date().toLocaleTimeString();
 }
@@ -545,31 +611,56 @@ function setSplitPnl(id, pctId, val, cost) {
 }
 
 // ── Positions ──────────────────────────────────────────────────────────────────
+function fmtExpiry(closeTime) {
+  if (!closeTime) return '';
+  try {
+    const d = new Date(closeTime);
+    const now = new Date();
+    const diffH = (d - now) / 3600000;
+    if (diffH < 0) return '<span style="color:#f87171;font-size:9px;">EXPIRED</span>';
+    if (diffH < 2) return `<span style="color:#fbbf24;font-size:9px;">${Math.round(diffH*60)}m left</span>`;
+    if (diffH < 24) return `<span style="color:#555;font-size:9px;">${Math.round(diffH)}h left</span>`;
+    return `<span style="color:#333;font-size:9px;">${d.toLocaleDateString('en-US',{month:'short',day:'numeric'})}</span>`;
+  } catch(e) { return ''; }
+}
+
 async function loadPositions() {
   const positions = await api('/api/positions/active');
   const tb = $('pos-b');
   if (!positions || !positions.length) {
-    tb.innerHTML='<tr><td colspan="9" class="loading">No open positions today</td></tr>';
+    tb.innerHTML='<tr><td colspan="10" class="loading">No open positions today</td></tr>';
     return;
   }
   tb.innerHTML = positions.map(p => {
-    const sym   = (p.ticker||'').split('-')[0];
     const name  = (p.title||p.ticker||'');
     const side  = p.side==='YES' ? '<span class="b-yes">YES</span>' : '<span class="b-no">NO</span>';
-    const cur   = p.current_price!=null ? p.current_price+'c' : '<span style="color:#1e1e1e">--</span>';
+    const cur   = '<span style="color:#555;font-size:10px;">live↓</span>';
     const url   = p.kalshi_url || `https://kalshi.com/markets/${p.ticker}`;
-    const pnlH  = v => `<span class="${pcls(v)}">${sign(v)}${dollar(v)}</span>`;
-    const src    = (['geo','gaming','manual'].includes(p.source))
-                   ? '<span class="b-manual">MANUAL</span>' : '<span class="b-bot">BOT</span>';
-    const sigVal = (p.noaa_prob != null && p.market_prob != null)
-                   ? Math.round(p.noaa_prob*100)+'% vs '+Math.round(p.market_prob*100)+'%' : '--';
+    const pnlH  = v => v!=null ? `<span class="${pcls(v)}">${sign(v)}${dollar(v)}</span>` : '<span style="color:#333">--</span>';
+    const src   = (['geo','gaming','manual'].includes(p.source))
+                  ? '<span class="b-manual">MANUAL</span>' : '<span class="b-bot">BOT</span>';
+    // Signal: weather=NOAA vs mkt, crypto=smart money, economics=model vs mkt, default=--
+    const sym = (p.ticker||'').split('-')[0];
+    let sigVal = '--';
+    if (p.noaa_prob != null && p.market_prob != null) {
+      sigVal = Math.round(p.noaa_prob*100)+'% vs '+Math.round(p.market_prob*100)+'%';
+    } else if (sym.startsWith('KXBTC')||sym.startsWith('KXETH')||sym.startsWith('KXXRP')||sym.startsWith('KXDOGE')) {
+      const sm = window._smartMoney;
+      sigVal = sm ? (sm.direction==='bearish'?'Bear ':'Bull ')+Math.round((sm.direction==='bearish'?sm.bear_pct:sm.bull_pct)*100)+'%' : 'Crypto';
+    } else if (sym.startsWith('KXCPI')||sym.startsWith('KXFED')) {
+      const ep = p.entry_price||0;
+      const mp = p.market_prob!=null?Math.round(p.market_prob*100)+'%':'--';
+      sigVal = 'Econ '+mp;
+    }
     const edgeV  = (p.edge != null) ? (Math.abs(p.edge)*100).toFixed(0)+'%' : '--';
     const edgeC  = (p.edge && Math.abs(p.edge)>.4) ? '#4ade80' : (p.edge && Math.abs(p.edge)>.2) ? '#fbbf24' : '#888';
+    const expiry = fmtExpiry(p.close_time);
     return `<tr>
       <td class="l col-title">
-        <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+        <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">
           ${src}
-          <a href="${url}" target="_blank" style="color:#aaa;text-decoration:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:420px;">${name}</a>
+          <a href="${url}" target="_blank" style="color:#aaa;text-decoration:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:380px;">${name}</a>
+          ${expiry}
         </div>
       </td>
       <td class="ra shrink" data-col="signal" style="font-size:10px;color:#555;">${sigVal}</td>
@@ -578,8 +669,9 @@ async function loadPositions() {
       <td class="ca shrink" data-col="side">${side}</td>
       <td class="ra shrink" data-col="ent">${p.entry_price ? p.entry_price+'c' : '--'}</td>
       <td class="ra shrink" data-col="cur" id="cp-${p.ticker}">${cur}</td>
-      <td class="ra shrink" data-col="cost">${dollar(p.total_cost)}</td>
-      <td class="ra shrink" id="opnl-${p.ticker}">${pnlH(p.open_pnl)}<br><span style="font-size:9px;color:#2a2a2a">Pending</span></td>
+      <td class="ca shrink" data-col="status" id="st-${p.ticker}"><span style="color:#555;font-size:10px;">—</span></td>
+      <td class="ra shrink" data-col="cost">${dollar(p.cost)}</td>
+      <td class="ra shrink" id="opnl-${p.ticker}">${pnlH(null)}<br><span style="font-size:9px;color:#2a2a2a" id="opnl-pct-${p.ticker}"></span></td>
     </tr>`;
   }).join('');
   // Async live prices
@@ -595,13 +687,32 @@ async function loadLivePrices(positions) {
     const lv = prices[p.ticker]; if(!lv) continue;
     // Backend normalises settled market prices: last_price=99 → no_ask=1
     // so this formula works correctly for both live and settled positions.
-    let cp = p.side==='YES' ? lv.yes_ask : (lv.no_ask != null ? lv.no_ask : (lv.yes_bid!=null ? 100-lv.yes_bid : null));
+    // Use bid price (realizable sale value), not ask price (cost to buy more)
+    let cp = p.side==='YES'
+      ? (lv.yes_bid ?? lv.yes_ask ?? null)
+      : (lv.no_bid != null ? lv.no_bid : (lv.yes_ask != null ? 100 - lv.yes_ask : null));
     if(cp==null) continue;
     const open = ((cp - p.entry_price)*p.contracts)/100;
     const pcost = p.total_cost || p.cost || 0;
     const opc  = pcost ? open/pcost*100 : 0;
     totOpen+=open; totCost+=pcost;
-    const el=document.getElementById('cp-'+p.ticker); if(el)el.textContent=cp+'c';
+    // Badges: WINNING (≥95c) or LOSING (≤5c) for near-settled positions
+    const nearWin  = cp >= 95;
+    const nearLoss = cp <= 5;
+    const settling = nearWin || nearLoss;
+    const el=document.getElementById('cp-'+p.ticker);
+    if(el) el.textContent = cp+'c';
+    // Populate Status column
+    const stEl = document.getElementById('st-'+p.ticker);
+    if (stEl) {
+      if (nearWin)  stEl.innerHTML = '<span style="color:#4ade80;font-size:10px;font-weight:700;">WINNING</span>';
+      else if (nearLoss) stEl.innerHTML = '<span style="color:#f87171;font-size:10px;font-weight:700;">LOSING</span>';
+      else {
+        const pct = open >= 0 ? '+'+open.toFixed(0)+'%' : open.toFixed(0)+'%';
+        const opc2 = pcost ? (open/pcost*100) : 0;
+        stEl.innerHTML = `<span class="${pcls(open)}" style="font-size:10px;">${open>=0?'▲':'▼'} ${Math.abs(opc2).toFixed(1)}%</span>`;
+      }
+    }
     const oe=document.getElementById('opnl-'+p.ticker);
     if(oe)oe.innerHTML=`<span class="${pcls(open)}">${sign(open)}${dollar(open)}</span><br><span style="font-size:9px;color:${open>=0?'#1a4a1a':'#4a1a1a'}">${sign(opc)}${opc.toFixed(1)}%</span>`;
   }
@@ -611,7 +722,9 @@ async function loadLivePrices(positions) {
     let botPnl = 0, manPnl = 0;
     for (const p of positions) {
       const lv = prices[p.ticker]; if (!lv) continue;
-      let cp = p.side === 'YES' ? lv.yes_ask : (lv.no_ask != null ? lv.no_ask : (lv.yes_bid != null ? 100 - lv.yes_bid : null));
+      let cp = p.side === 'YES'
+        ? (lv.yes_bid ?? lv.yes_ask ?? null)
+        : (lv.no_bid != null ? lv.no_bid : (lv.yes_ask != null ? 100 - lv.yes_ask : null));
       if (cp == null) continue;
       const pnl = ((cp - p.entry_price) * p.contracts) / 100;
       if (p.source && ['geo','gaming','manual'].includes(p.source)) manPnl += pnl;
@@ -623,30 +736,24 @@ async function loadLivePrices(positions) {
     // DEMO: Account Value = Starting Capital ($400) + Open P&L + Closed P&L
     // window._kalshiBalance is set to 400 in loadAccount(); totalPnl includes open + settled.
     // LIVE MODE: swap to dollar(window._kalshiBalance) — Kalshi API already factors in P&L.
-    document.getElementById('av').textContent = dollar((window._kalshiBalance || 400) + totalPnl);
+    // Store open P&L globally — Account Value updated by updateAccountValue()
+    window._openPnl = totalPnl;
+    updateAccountValue();
 
     // Open P&L in account bar
     setPnl('opnl', 'opnl-pct', totalPnl, totCost);
 
-    // Bot / Manual P&L split cards
-    setSplitPnl('bot-pnl', 'bot-pnl-pct', botPnl, totCost);
-    setSplitPnl('man-pnl', 'man-pnl-pct', manPnl, totCost);
-
-    // Win Rate: positions with positive P&L / total
-    const winning = positions.filter(p => {
-      const lv = prices[p.ticker]; if (!lv) return false;
-      const cp2 = p.side === 'YES' ? lv.yes_ask : (lv.no_ask != null ? lv.no_ask : null);
-      if (cp2 == null) return false;
-      return cp2 > p.entry_price;
-    }).length;
-    const total = positions.filter(p => prices[p.ticker]).length;
-    const wrEl = document.getElementById('winrate');
-    if (wrEl && total > 0) {
-      const wr = winning / total * 100;
-      wrEl.textContent = wr.toFixed(0) + '%';
-      wrEl.style.color = wr >= 50 ? '#4ade80' : '#f87171';
-    }
+    // Manual closed P&L set by loadPnlChart — do NOT overwrite here
+    // NOTE: bot-pnl shows CLOSED P&L (set by loadPnlChart) — do NOT overwrite here
   }
+}
+
+function updateAccountValue() {
+  // Single source of truth: $400 base + open P&L + closed P&L
+  const base     = window._kalshiBalance || 400;
+  const openPnl  = window._openPnl  || 0;
+  const closedPnl= window._closedPnl || 0;
+  document.getElementById('av').textContent = dollar(base + openPnl + closedPnl);
 }
 
 // ── Trades ─────────────────────────────────────────────────────────────────────
@@ -896,8 +1003,37 @@ function setPnlFrame(frame, btn) {
 async function loadPnlChart() {
   try {
     const pnl = await api('/api/pnl');
-    if (!pnl || !pnl.points || !pnl.points.length) return;
-    renderPnlChart(pnl.points);
+    if (!pnl) return;
+
+    // Store closed P&L globally
+    window._closedPnl = pnl.closed_pnl || 0;
+
+    // Closed P&L in account bar
+    const closedCost = Math.abs(pnl.closed_pnl || 0) || 1;
+    setPnl('cpnl', 'cpnl-pct', pnl.closed_pnl || 0, closedCost);
+
+    // BOT card: closed P&L % vs bot deployed capital
+    const botDep = pnl.bot_deployed || 1;
+    setSplitPnl('bot-pnl', 'bot-pnl-pct', pnl.bot_closed_pnl || 0, botDep);
+    // Manual card: closed P&L % vs manual deployed
+    const manDep = pnl.man_deployed || 1;
+    setSplitPnl('man-pnl', 'man-pnl-pct', pnl.manual_closed_pnl || 0, manDep);
+
+    // Account Value: single source of truth
+    updateAccountValue();
+
+    // Win Rate = closed trades (settled contracts)
+    // If no settled trades yet, show open position hit rate
+    const wrEl = document.getElementById('winrate');
+    if (wrEl) {
+      if (pnl.closed_win_rate != null && (pnl.bot_closed_pnl !== 0 || pnl.manual_closed_pnl !== 0)) {
+        wrEl.textContent = pnl.closed_win_rate.toFixed(0) + '%';
+        wrEl.style.color = pnl.closed_win_rate >= 50 ? '#4ade80' : '#f87171';
+      }
+    }
+
+    // Render chart
+    if (pnl.points && pnl.points.length) renderPnlChart(pnl.points);
   } catch(e) {}
 }
 
@@ -940,14 +1076,20 @@ function renderPnlChart(points) {
         tooltip: { callbacks: { label: c => ' $' + c.parsed.y.toFixed(2) } }
       },
       scales: {
-        x: { grid: { color: '#1a1a1a' }, ticks: { color: '#333', font: { size: 10 } } },
-        y: { grid: { color: '#1a1a1a' }, ticks: { color: '#333', font: { size: 10 }, callback: v => '$' + v } }
+        x: { grid: { color: '#1a1a1a' }, ticks: { color: '#555', font: { size: 10 } } },
+        y: {
+          grid: { color: '#1a1a1a' },
+          ticks: { color: '#555', font: { size: 10 }, maxTicksLimit: 5, callback: v => '$' + v.toFixed(0) },
+          grace: '10%'
+        }
       }
     }
   });
 }
 
-async function loadScouts(){ await Promise.all([loadWeather(),loadBestBets(),loadGeo(),loadCrypto()]); }
+async function loadScouts(){
+  await Promise.all([loadWeather(),loadBestBets(),loadGeo(),loadCrypto()]);
+}
 async function loadAll(){
   await Promise.all([loadAccount(), loadPositions(), loadTrades(), loadScouts(), loadPnlChart()]);
 }
@@ -1016,6 +1158,9 @@ async function loadCrypto() {
   const d = await api('/api/crypto/scan');
   const tbody = $('crypto-b');
   if (!d) { tbody.innerHTML = '<tr><td colspan="7" class="loading">Error loading crypto data</td></tr>'; return; }
+
+  // Cache smart money signal globally for use in positions signal column
+  if (d.smart_money) window._smartMoney = d.smart_money;
 
   // Update signal bar
   const sm = d.smart_money;
