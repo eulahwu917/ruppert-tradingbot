@@ -1,0 +1,20 @@
+# Secrets — NEVER commit these
+secrets/
+*.pem
+*.key
+kalshi_config.json
+telegram_config.json
+
+# Logs — runtime data, not code
+logs/
+*.jsonl
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Dashboard cache
+dashboard/__pycache__/

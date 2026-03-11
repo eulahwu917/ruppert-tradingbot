@@ -1,0 +1,349 @@
+"""
+Ruppert Autonomous Trading Cycle
+Runs on schedule via Windows Task Scheduler.
+Modes:
+  full   — scan + positions + smart money + execute (7am, 3pm)
+  check  — positions only (12pm, 10pm)
+  smart  — smart money refresh only (lightweight)
+"""
+import sys, json, time, math, requests
+from pathlib import Path
+from datetime import date, datetime, timezone
+
+sys.stdout.reconfigure(encoding='utf-8')
+
+MODE = sys.argv[1] if len(sys.argv) > 1 else 'full'
+LOGS = Path(__file__).parent / 'logs'
+LOGS.mkdir(exist_ok=True)
+ALERTS_FILE = LOGS / 'pending_alerts.json'
+ALERT_LOG   = LOGS / 'cycle_log.jsonl'
+
+import config
+from kalshi_client import KalshiClient
+from logger import log_trade, log_activity
+
+DRY_RUN = True  # Flip to False when going live
+
+def ts():
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+def push_alert(level, message, ticker=None, pnl=None):
+    """Write alert for heartbeat to pick up and forward to David."""
+    alerts = []
+    if ALERTS_FILE.exists():
+        try: alerts = json.loads(ALERTS_FILE.read_text(encoding='utf-8'))
+        except: pass
+    alerts.append({
+        'level': level, 'message': message,
+        'ticker': ticker, 'pnl': pnl,
+        'timestamp': ts(),
+    })
+    ALERTS_FILE.write_text(json.dumps(alerts, indent=2), encoding='utf-8')
+
+def log_cycle(event, data=None):
+    entry = {'ts': ts(), 'mode': MODE, 'event': event}
+    if data: entry.update(data)
+    with open(ALERT_LOG, 'a', encoding='utf-8') as f:
+        f.write(json.dumps(entry) + '\n')
+
+def norm_cdf(x):
+    t = 1 / (1 + 0.2316419 * abs(x))
+    p = 1 - (0.31938153*t - 0.356563782*t**2 + 1.781477937*t**3
+             - 1.821255978*t**4 + 1.330274429*t**5) * math.exp(-x*x/2) / math.sqrt(2*math.pi)
+    return p if x >= 0 else 1 - p
+
+def band_prob(spot, band_mid, half_w, sigma, drift=0.0):
+    mu = math.log(spot) + drift
+    lo, hi = band_mid - half_w, band_mid + half_w
+    if lo <= 0: return 0.0
+    return max(0, min(1, norm_cdf((math.log(hi)-mu)/sigma) - norm_cdf((math.log(lo)-mu)/sigma)))
+
+# ─────────────────────────────────────────────────────────────────────────────
+print(f"\n{'='*60}")
+print(f"  RUPPERT CYCLE  mode={MODE.upper()}  {ts()}")
+print(f"{'='*60}")
+log_cycle('start')
+
+client = KalshiClient()
+BASE   = "https://api.elections.kalshi.com/trade-api/v2/markets"
+HDR    = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+traded_tickers = set()
+
+# ── STEP 1: POSITION CHECK (every run) ───────────────────────────────────────
+print("\n[1] Position check...")
+try:
+    from openmeteo_client import get_full_weather_signal
+    from edge_detector import detect_edge
+
+    trade_log = LOGS / f"trades_{date.today().isoformat()}.jsonl"
+    open_positions = []
+    if trade_log.exists():
+        for line in trade_log.read_text(encoding='utf-8').splitlines():
+            try: open_positions.append(json.loads(line))
+            except: pass
+    open_positions = [p for p in open_positions if p.get('action') != 'exit']
+
+    print(f"  {len(open_positions)} open position(s)")
+    actions_taken = []
+
+    for pos in open_positions:
+        ticker = pos.get('ticker', '')
+        source = pos.get('source', 'bot')
+        if source not in ('weather', 'bot'): continue
+        if ticker in traded_tickers: continue
+
+        # Get current market price
+        try:
+            r = requests.get(f'{BASE}/{ticker}', timeout=5)
+            if r.status_code != 200: continue
+            m = r.json().get('market', {})
+            status = m.get('status', '')
+            if status in ('finalized', 'settled'): continue
+
+            yes_ask = m.get('yes_ask', 50) or 50
+            no_ask  = m.get('no_ask', 50) or 50
+            side    = pos.get('side', 'no')
+            entry_p = pos.get('entry_price') or (100 - round(pos.get('market_prob',0.5)*100))
+            cur_p   = no_ask if side == 'no' else yes_ask
+            contracts = pos.get('contracts', 0)
+            pnl     = round((cur_p - entry_p) * contracts / 100, 2)
+
+            # Weather: check ensemble if close to expiry
+            alert_msg = None
+            if 'KXHIGH' in ticker:
+                # Parse city
+                city_map = {'MIA': 'miami', 'NY': 'new_york', 'CHI': 'chicago', 'LA': 'los_angeles', 'HOU': 'houston', 'PHX': 'phoenix'}
+                city = next((v for k, v in city_map.items() if k in ticker), None)
+                if city:
+                    try:
+                        sig = get_full_weather_signal(city)
+                        band_str = ticker.split('-B')[-1]
+                        band_lo = float(band_str)
+                        forecast = sig.get('tomorrow_high_f', 0)
+                        margin = abs(forecast - band_lo)
+                        ens_prob = sig.get('ensemble_prob', 0.5)
+
+                        if side == 'no':
+                            # NO wins if forecast OUTSIDE band — check if forecast moved inside
+                            if margin < 1.0:
+                                alert_msg = f'WARNING: {ticker} forecast {forecast:.1f}F only {margin:.1f}F from band edge {band_lo}F | P&L ${pnl:+.2f}'
+                                push_alert('warning', alert_msg, ticker=ticker, pnl=pnl)
+                            elif ens_prob > 0.80 and side == 'no':
+                                alert_msg = f'EXIT SIGNAL: {ticker} ensemble {ens_prob:.0%} against NO position | P&L ${pnl:+.2f}'
+                                push_alert('exit', alert_msg, ticker=ticker, pnl=pnl)
+
+                            # Auto-exit if gain > $4 and margin tight
+                            if pnl > 4.0 and margin < 2.0:
+                                print(f'  AUTO-EXIT: {ticker} P&L=${pnl:+.2f} margin={margin:.1f}F')
+                                actions_taken.append(('exit', ticker, side, cur_p, contracts, pnl))
+                                traded_tickers.add(ticker)
+                    except Exception as e:
+                        print(f'  Weather check error for {ticker}: {e}')
+
+            print(f'  {ticker:38} {side.upper()} entry={entry_p}c cur={cur_p}c P&L=${pnl:+.2f}' +
+                  (f' [ALERT]' if alert_msg else ''))
+        except Exception as e:
+            print(f'  Error checking {ticker}: {e}')
+
+    # Execute auto-exits
+    if actions_taken:
+        for action, ticker, side, price, contracts, pnl in actions_taken:
+            opp = {'ticker': ticker, 'title': ticker, 'side': side, 'action': 'exit',
+                   'yes_price': price if side=='yes' else 100-price,
+                   'market_prob': price/100, 'noaa_prob': None, 'edge': None,
+                   'size_dollars': round(contracts*price/100, 2), 'contracts': contracts,
+                   'source': 'weather', 'timestamp': ts(), 'date': str(date.today())}
+            if DRY_RUN:
+                log_trade(opp, opp['size_dollars'], contracts, {'dry_run': True})
+                log_activity(f'[AUTO-EXIT] {ticker} {side.upper()} @ {price}c P&L=${pnl:+.2f}')
+                print(f'  [DEMO] AUTO-EXIT logged: {ticker}')
+            else:
+                try:
+                    result = client.sell_position(ticker, side, price, contracts)
+                    log_trade(opp, opp['size_dollars'], contracts, result)
+                    print(f'  [LIVE] AUTO-EXIT executed: {ticker}')
+                except Exception as e:
+                    print(f'  EXIT ERROR {ticker}: {e}')
+
+except Exception as e:
+    print(f'  Position check error: {e}')
+    import traceback; traceback.print_exc()
+
+if MODE == 'check':
+    log_cycle('done', {'actions': len(actions_taken) if 'actions_taken' in dir() else 0})
+    print(f"\nCheck-only cycle done. {ts()}")
+    sys.exit(0)
+
+# ── STEP 2: SMART MONEY REFRESH (full mode only) ─────────────────────────────
+print("\n[2] Refreshing smart money signal...")
+try:
+    import subprocess, sys as _sys
+    r = subprocess.run(
+        [_sys.executable, 'fetch_smart_money.py'],
+        capture_output=True, text=True, timeout=45,
+        cwd=str(Path(__file__).parent)
+    )
+    if r.returncode == 0:
+        sm_cache = LOGS / 'crypto_smart_money.json'
+        sm = json.loads(sm_cache.read_text(encoding='utf-8')) if sm_cache.exists() else {}
+        direction = sm.get('direction', 'neutral')
+        bull_pct  = sm.get('bull_pct', 0.5)
+        print(f"  Smart money: {direction.upper()} ({bull_pct:.0%} bull)")
+    else:
+        direction = 'neutral'
+        print(f"  Smart money fetch failed — using neutral")
+except Exception as e:
+    direction = 'neutral'
+    print(f"  Smart money error: {e}")
+
+# ── STEP 3: WEATHER OPPORTUNITY SCAN (full mode only) ────────────────────────
+print("\n[3] Scanning for new weather opportunities...")
+new_weather = []
+try:
+    from main import scan_weather
+    new_weather = scan_weather(dry_run=DRY_RUN)
+    if new_weather:
+        print(f"  {len(new_weather)} new weather trade(s) executed")
+        for t in new_weather:
+            print(f"    {t.get('ticker')} {t.get('side','').upper()} edge={t.get('edge',0)*100:.0f}%")
+    else:
+        print("  No new weather opportunities above threshold")
+except Exception as e:
+    print(f"  Weather scan error: {e}")
+
+# ── STEP 4: CRYPTO OPPORTUNITY SCAN (full mode only) ─────────────────────────
+print("\n[4] Scanning for new crypto opportunities...")
+new_crypto = []
+try:
+    # Get live prices
+    prices = {}
+    for sym, key in [('XBTUSD','btc'), ('ETHUSD','eth'), ('XRPUSD','xrp')]:
+        try:
+            r = requests.get(f'https://api.kraken.com/0/public/Ticker?pair={sym}', timeout=5)
+            prices[key] = float(list(r.json()['result'].values())[0]['c'][0])
+        except: pass
+
+    btc = prices.get('btc', 70000)
+    eth = prices.get('eth', 2000)
+    xrp = prices.get('xrp', 1.38)
+    print(f"  BTC=${btc:,.0f}  ETH=${eth:,.2f}  XRP=${xrp:.4f}")
+
+    # Bearish drift
+    drift_sigma = -0.6 if direction == 'bearish' else (0.4 if direction == 'bullish' else 0.0)
+
+    SERIES_CFG = [
+        ('KXBTC', btc, 250, 0.025, 18),
+        ('KXETH', eth, 10, 0.030, 18),
+        ('KXXRP', xrp, 0.01, 0.045, 18),
+    ]
+
+    for series, spot, half_w, daily_vol, hours in SERIES_CFG:
+        if spot == 0: continue
+        sigma = daily_vol * math.sqrt(hours / 24)
+        drift = drift_sigma * sigma
+
+        r = requests.get(BASE, params={'series_ticker': series, 'status': 'open', 'limit': 50}, timeout=8)
+        markets = r.json().get('markets', [])
+
+        for m in markets:
+            ticker = m.get('ticker','')
+            if ticker in traded_tickers: continue
+            ya = m.get('yes_ask') or 0
+            na = m.get('no_ask') or 0
+            if ya < 5 or ya > 92 or na < 5: continue
+            close = m.get('close_time','')
+            # Skip markets closing in less than 2 hours
+            if close:
+                try:
+                    ct = datetime.fromisoformat(close.replace('Z','+00:00'))
+                    mins_left = (ct - datetime.now(timezone.utc)).total_seconds() / 60
+                    if mins_left < 120: continue
+                except: pass
+
+            try: band_mid = float(ticker.split('-B')[-1])
+            except: continue
+
+            prob_model = band_prob(spot, band_mid, half_w, sigma, drift)
+            mkt_yes    = ya / 100
+            edge_no    = mkt_yes - prob_model
+            edge_yes   = prob_model - mkt_yes
+
+            best_edge  = max(edge_no, edge_yes)
+            best_action = 'no' if edge_no >= edge_yes else 'yes'
+            best_price  = na if best_action == 'no' else ya
+
+            if best_edge < config.CRYPTO_MIN_EDGE_THRESHOLD: continue
+            if best_price > 95: continue  # near-limit orders are risky
+
+            size = min(config.CRYPTO_MAX_POSITION_SIZE, 25)
+            contracts = max(1, int(size / best_price * 100))
+            actual_cost = round(contracts * best_price / 100, 2)
+
+            new_crypto.append({
+                'ticker': ticker, 'title': m.get('title', ticker),
+                'side': best_action, 'price': best_price,
+                'contracts': contracts, 'cost': actual_cost,
+                'edge': round(best_edge, 3), 'series': series,
+                'note': f'{series} {direction} | model={prob_model*100:.0f}% mkt={mkt_yes*100:.0f}% edge={best_edge*100:.0f}%',
+            })
+
+    # Sort by edge, take top 3 per run max
+    new_crypto.sort(key=lambda x: x['edge'], reverse=True)
+    for t in new_crypto[:3]:
+        opp = {
+            'ticker': t['ticker'], 'title': t['title'], 'side': t['side'],
+            'action': 'buy', 'yes_price': t['price'] if t['side']=='yes' else 100-t['price'],
+            'market_prob': t['price']/100, 'noaa_prob': None,
+            'edge': t['edge'], 'size_dollars': t['cost'],
+            'contracts': t['contracts'], 'source': 'crypto',
+            'note': t['note'], 'timestamp': ts(), 'date': str(date.today()),
+        }
+        if DRY_RUN:
+            log_trade(opp, t['cost'], t['contracts'], {'dry_run': True})
+            log_activity(f"[AUTO-CRYPTO] BUY {t['side'].upper()} {t['ticker']} {t['contracts']}@{t['price']}c ${t['cost']:.2f} edge={t['edge']*100:.0f}%")
+            print(f"  [DEMO] BUY {t['side'].upper()} {t['ticker']:38} {t['contracts']:3}@{t['price']:3}c ${t['cost']:.2f} edge={t['edge']*100:.0f}%")
+        else:
+            try:
+                result = client.place_order(t['ticker'], t['side'], t['price'], t['contracts'])
+                log_trade(opp, t['cost'], t['contracts'], result)
+                print(f"  [LIVE] EXECUTED {t['ticker']}")
+            except Exception as e:
+                print(f"  ERROR {t['ticker']}: {e}")
+        traded_tickers.add(t['ticker'])
+
+    print(f"  {min(len(new_crypto),3)} crypto trade(s) executed")
+
+except Exception as e:
+    print(f"  Crypto scan error: {e}")
+    import traceback; traceback.print_exc()
+
+# ── STEP 5: SECURITY AUDIT (weekly — Sunday only) ───────────────────────────
+if datetime.now().weekday() == 6:  # Sunday
+    print("\n[5] Weekly security audit...")
+    try:
+        import subprocess, sys as _sys
+        r = subprocess.run([_sys.executable, 'security_audit.py'],
+                          capture_output=True, text=True, timeout=30,
+                          cwd=str(Path(__file__).parent))
+        if 'WARNING' in r.stdout:
+            push_alert('security', 'Security audit found issues — review security_audit output')
+            print("  ALERT: issues found — check logs")
+        else:
+            print("  Clean — no issues found")
+    except Exception as e:
+        print(f"  Audit error: {e}")
+
+# ── DONE ─────────────────────────────────────────────────────────────────────
+summary = {
+    'weather_trades': len(new_weather) if new_weather else 0,
+    'crypto_trades':  min(len(new_crypto), 3),
+    'smart_money':    direction,
+    'auto_exits':     len(actions_taken) if 'actions_taken' in dir() else 0,
+}
+log_cycle('done', summary)
+
+print(f"\n{'='*60}")
+print(f"  CYCLE COMPLETE  {ts()}")
+print(f"  Weather: {summary['weather_trades']} new | Crypto: {summary['crypto_trades']} new")
+print(f"  Auto-exits: {summary['auto_exits']} | Signal: {direction.upper()}")
+print(f"{'='*60}\n")

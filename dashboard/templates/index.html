@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ruppert | Trading Dashboard</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0d0d; color: #e0e0e0; }
+
+.header { background: #111; border-bottom: 1px solid #1e1e1e; padding: 12px 22px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+.header h1 { font-size: 15px; font-weight: 600; color: #fff; }
+.header h1 span { color: #4ade80; }
+.pill { padding: 3px 10px; border-radius: 20px; font-size: 10px; font-weight: 700; margin-left: 6px; }
+.pill-g { background: #1a2e1a; color: #4ade80; border: 1px solid #2d5a2d; }
+.pill-b { background: #1a1a2e; color: #818cf8; border: 1px solid #2d2d5a; }
+
+.wrap { max-width: 1920px; margin: 0 auto; padding: 16px 32px; }
+
+/* Account Bar */
+.acct-bar { background: #111; border: 1px solid #1e1e1e; border-radius: 10px; padding: 20px 24px; margin-bottom: 14px; display: flex; align-items: stretch; gap: 0; }
+.acct-item { flex: 1; padding: 0 20px; display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; min-height: 72px; position: relative; }
+.acct-item:first-child { padding-left: 0; }
+.acct-item:not(:last-child)::after { content: ''; position: absolute; right: 0; top: 10%; height: 80%; width: 1px; background: #1e1e1e; }
+.acct-label { font-size: 10px; font-weight: 700; color: #555; text-transform: uppercase; letter-spacing: .8px; line-height: 1.6; word-break: break-word; max-width: 60px; flex-shrink: 0; }
+.acct-main { font-size: 38px; font-weight: 700; color: #fff; line-height: 1; letter-spacing: -1.5px; text-align: right; }
+.acct-pct { font-size: 11px; font-weight: 600; text-align: right; margin-top: 3px; }
+.acct-right { display: flex; flex-direction: column; align-items: flex-end; }
+.pnl-pos { color: #4ade80; } .pnl-neg { color: #f87171; } .pnl-neu { color: #444; }
+.mode-badge { align-self: center; padding: 5px 14px; border-radius: 5px; font-size: 11px; font-weight: 700; background: #1a1a2e; color: #818cf8; border: 1px solid #2d2d5a; margin-left: auto; white-space: nowrap; }
+
+/* Split P&L row */
+.split-row { display: flex; gap: 14px; margin-bottom: 14px; }
+.split-card { flex: 1; background: #111; border: 1px solid #1e1e1e; border-radius: 10px; padding: 20px 24px; display: flex; align-items: center; gap: 0; min-height: 90px; }
+.split-side-label { font-size: 10px; font-weight: 700; color: #2a2a2a; text-transform: uppercase; letter-spacing: .8px; line-height: 1.7; word-break: normal; white-space: normal; width: 58px; min-width: 58px; flex-shrink: 0; }
+.split-divider { width: 1px; background: #1e1e1e; align-self: stretch; margin: 0 20px; flex-shrink: 0; }
+.split-metrics { display: flex; flex: 1; align-items: flex-start; justify-content: center; padding-top: 4px; }
+.split-metric { flex: 1; padding: 0 16px; text-align: center; position: relative; }
+.split-metric::after { content: ''; position: absolute; right: 0; top: 0; height: 100%; width: 1px; background: #1e1e1e; }
+.split-metric:last-child::after { display: none; }
+.split-metric-label { font-size: 10px; font-weight: 700; color: #2a2a2a; text-transform: uppercase; letter-spacing: .7px; margin-bottom: 6px; }
+.split-metric-val { font-size: 28px; font-weight: 700; letter-spacing: -1px; line-height: 1; }
+.split-metric-pct { font-size: 11px; font-weight: 600; margin-top: 4px; }
+.split-icon { width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
+.split-icon-bot { background: #1a2e1a; }
+.split-icon-man { background: #1a1a2e; }
+.split-label { font-size: 10px; color: #333; font-weight: 600; text-transform: uppercase; letter-spacing: .6px; }
+.split-val { font-size: 18px; font-weight: 700; color: #fff; }
+.split-sub { font-size: 10px; color: #2a2a2a; margin-top: 2px; }
+
+/* Main grid */
+.main-grid { display: grid; grid-template-columns: 3fr 7fr; gap: 14px; margin-bottom: 14px; }
+
+/* Card */
+.card { background: #111; border: 1px solid #1e1e1e; border-radius: 10px; overflow: hidden; }
+.card-head { padding: 14px 16px 0; display: flex; align-items: center; justify-content: space-between; }
+.card-body { padding: 14px 16px 16px; }
+.sec { font-size: 12px; font-weight: 600; color: #fff; display: flex; align-items: center; gap: 6px; }
+.dot { width: 6px; height: 6px; border-radius: 50%; }
+.dot-g{background:#4ade80}.dot-y{background:#fbbf24}.dot-b{background:#818cf8}.dot-r{background:#f87171}
+.ref { background: #161616; border: 1px solid #222; color: #444; padding: 3px 8px; border-radius: 4px; font-size: 10px; cursor: pointer; }
+.ref:hover { color: #aaa; }
+
+/* Tabs */
+.tabs { display: flex; border-bottom: 1px solid #1a1a1a; padding: 0 16px; }
+.tab { padding: 9px 14px; font-size: 11px; font-weight: 600; cursor: pointer; color: #444; border: none; background: transparent; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s; white-space: nowrap; }
+.tab.on { color: #fff; border-bottom-color: #4ade80; }
+.tab:hover:not(.on) { color: #777; }
+.pane { display: none; } .pane.on { display: block; }
+
+/* Tables */
+.tbl { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+.tbl td a { color: #fff !important; text-decoration: none; }
+
+.tbl th { position: relative; overflow: hidden; border-right: 1px solid #222; }
+.tbl td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-right: 1px solid #1a1a1a; }
+.tbl td.l { white-space: nowrap; }
+.resize-h { position:absolute; right:-3px; top:0; bottom:0; width:7px; cursor:col-resize; background:transparent; z-index:3; }
+.resize-h:hover, .resize-h.active { background:#3b82f6; }
+.tbl th { white-space: nowrap; }
+.tbl td { }
+.tbl .shrink { width: 1%; white-space: nowrap; }
+
+.tbl .ra { text-align: right; }
+.tbl .ca { text-align: center; }
+.tbl th { padding: 7px 12px; color: #2a2a2a; font-size: 10px; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid #1a1a1a; text-align: right; white-space: nowrap; }
+.tbl th.l { text-align: left; }
+.tbl td { padding: 9px 12px; border-bottom: 1px solid #141414; text-align: right; vertical-align: middle; white-space: nowrap; }
+.tbl td.l { text-align: left; white-space: normal; }
+.tbl tr:last-child td { border-bottom: none; }
+.tbl tr:hover td { background: #141414; }
+.t-scroll { max-height: 260px; overflow-y: auto; }
+
+/* Positions */
+.sym { font-weight: 700; color: #fff; font-size: 12px; }
+.sym-n { font-size: 10px; color: #333; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.close-x { background: #181818; border: 1px solid #222; color: #444; padding: 2px 7px; border-radius: 3px; font-size: 10px; cursor: pointer; }
+.close-x:hover { color: #f87171; border-color: #5a2a2a; }
+a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { color: #818cf8; text-decoration: underline; }
+
+/* Badges */
+.b-yes{background:#1a2e1a;color:#4ade80;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:700}
+.b-no{background:#2e1a1a;color:#f87171;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:700}
+.b-sim{background:#1a1a2e;color:#818cf8;padding:2px 6px;border-radius:3px;font-size:10px}
+.b-bot{background:#1a1a2e;color:#818cf8;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-left:5px;vertical-align:middle}
+.b-manual{background:#2e2a1a;color:#fbbf24;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-left:5px;vertical-align:middle}
+.b-nh{background:#2e1a1a;color:#f87171;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700}
+.b-nm{background:#2e2a1a;color:#fbbf24;padding:2px 6px;border-radius:3px;font-size:10px}
+.b-nl{background:#1a1a1a;color:#333;padding:2px 6px;border-radius:3px;font-size:10px}
+.b-econ{background:#1a2a1a;color:#86efac;padding:2px 6px;border-radius:3px;font-size:10px}
+.b-geo{background:#2a1a2a;color:#c4b5fd;padding:2px 6px;border-radius:3px;font-size:10px}
+.b-strong{background:#1a2e1a;color:#4ade80;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;border:1px solid #2d5a2d}
+
+/* Scout items */
+.sc-scroll { max-height: 500px; overflow-y: auto; padding: 4px 0; }
+.sc-item { padding: 11px 16px; border-bottom: 1px solid #141414; cursor: pointer; transition: background .1s; }
+.sc-item:last-child { border-bottom: none; }
+.sc-item:hover { background: #141414; }
+.sc-q { font-size: 12px; color: #ccc; line-height: 1.4; margin-bottom: 5px; }
+.sc-row { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; }
+.sc-prob { font-size: 13px; font-weight: 700; color: #fff; }
+.sc-lbl { font-size: 10px; color: #2a2a2a; }
+.more-btn { width: calc(100% - 32px); margin: 10px 16px; padding: 8px; background: #141414; border: 1px solid #1e1e1e; color: #333; border-radius: 6px; font-size: 11px; cursor: pointer; }
+.more-btn:hover { color: #888; background: #181818; }
+
+/* Best Bets */
+.bb-item { padding: 12px 16px; border-bottom: 1px solid #141414; cursor: pointer; }
+.bb-item:last-child { border-bottom: none; }
+.bb-item:hover { background: #141414; }
+.bb-title { font-size: 12px; color: #fff; line-height: 1.4; margin-bottom: 6px; font-weight: 500; }
+.bb-row { display: flex; gap: 7px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.conf-bar-wrap { background: #1a1a1a; border-radius: 4px; height: 4px; width: 80px; overflow: hidden; }
+.conf-bar { height: 4px; border-radius: 4px; background: #4ade80; }
+.conf-lbl { font-size: 10px; color: #4ade80; font-weight: 700; }
+.bb-rationale { font-size: 11px; color: #666; line-height: 1.5; }
+
+/* Weather table */
+.wt th { text-align: left; }
+.wt td { text-align: left; }
+.edge-pos { background:#1a2e1a;color:#4ade80;padding:2px 6px;border-radius:3px;font-size:10px;font-weight:700 }
+.edge-neg { background:#2e1a1a;color:#f87171;padding:2px 6px;border-radius:3px;font-size:10px }
+
+/* P&L pending */
+.pnl-empty { text-align: center; padding: 44px 20px; }
+.pnl-empty .num { font-size: 32px; font-weight: 700; color: #1e1e1e; }
+.pnl-empty .msg { font-size: 11px; color: #222; margin-top: 8px; line-height: 1.7; }
+
+/* Sidebar overlay */
+.ovl { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 200; }
+.ovl.open { display: block; }
+.sb { position: fixed; top: 0; right: -500px; width: 480px; max-width: 96vw; height: 100vh; background: #111; border-left: 1px solid #1e1e1e; z-index: 201; transition: right .22s ease; overflow-y: auto; }
+.sb.open { right: 0; }
+.sb-inner { padding: 22px; }
+.sb-x { float: right; background: none; border: none; color: #444; font-size: 18px; cursor: pointer; line-height: 1; }
+.sb-x:hover { color: #fff; }
+.sb-title { font-size: 14px; font-weight: 600; color: #fff; line-height: 1.5; margin-bottom: 16px; padding-right: 26px; }
+.sb-sec { margin-bottom: 16px; }
+.sb-lbl { font-size: 10px; font-weight: 700; color: #2a2a2a; text-transform: uppercase; letter-spacing: .7px; margin-bottom: 6px; }
+.sb-prob { font-size: 26px; font-weight: 700; color: #fff; }
+.sb-note { font-size: 11px; color: #3a3a3a; margin-top: 5px; line-height: 1.6; }
+.sb-ruppert { background: #141414; border-left: 2px solid #4ade80; padding: 10px 13px; border-radius: 0 5px 5px 0; font-size: 12px; color: #777; line-height: 1.6; }
+.sb-ruppert b { color: #aaa; }
+.sb-rules { background: #141414; border-left: 2px solid #2a2a2a; padding: 10px 13px; border-radius: 0 5px 5px 0; font-size: 11px; color: #444; line-height: 1.6; max-height: 120px; overflow-y: auto; }
+.sb-hl { font-size: 11px; color: #2a2a2a; padding: 5px 0; border-bottom: 1px solid #161616; font-style: italic; line-height: 1.5; }
+.sb-hl:last-child { border-bottom: none; }
+.sb-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn { padding: 8px 16px; border-radius: 5px; font-size: 11px; font-weight: 700; cursor: pointer; border: 1px solid; transition: opacity .15s; }
+.btn:hover { opacity: .75; }
+.btn-yes { background:#1a3a1a;color:#4ade80;border-color:#2a5a2a }
+.btn-no  { background:#3a1a1a;color:#f87171;border-color:#5a2a2a }
+.btn-wch { background:#1a1a3a;color:#818cf8;border-color:#2a2a5a }
+.btn-pas { background:#181818;color:#444;border-color:#222 }
+
+.loading { color: #1e1e1e; font-size: 12px; padding: 24px; text-align: center; }
+.tf-btn { background: #161616; border: 1px solid #222; color: #444; padding: 4px 12px; border-radius: 5px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all .15s; }
+.tf-btn:hover { color: #aaa; background: #1e1e1e; }
+.tf-btn.on { background: #1e1e1e; color: #fff; border-color: #333; }
+.footer { text-align: center; color: #1a1a1a; font-size: 10px; padding: 14px; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<div class="ovl" id="ovl" onclick="closeSB()"></div>
+<div class="sb" id="sb"><div class="sb-inner" id="sb-inner"></div></div>
+
+<div class="header">
+  <h1>&#x1F4CA; <span>Ruppert</span> Dashboard</h1>
+  <div>
+    <span class="pill pill-g">&#x25CF; Running</span>
+    <span class="pill pill-b">Demo</span>
+    <span id="ts" style="color:#1e1e1e;font-size:10px;margin-left:12px;"></span>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <!-- Account Bar -->
+  <div class="acct-bar">
+    <div class="acct-item">
+      <div class="acct-label">Demo Account Value</div><div style="font-size:9px;color:#333;margin-top:2px;">$400 base + P&amp;L</div>
+      <div class="acct-right"><div class="acct-main" id="av">--</div></div>
+    </div>
+    <div class="acct-item">
+      <div class="acct-label">Open P&amp;L</div>
+      <div class="acct-right"><div class="acct-main pnl-neu" id="opnl">--</div><div class="acct-pct pnl-neu" id="opnl-pct"></div></div>
+    </div>
+    <div class="acct-item">
+      <div class="acct-label">Win Rate</div>
+      <div class="acct-right"><div class="acct-main" id="winrate" style="color:#888;">--</div></div>
+    </div>
+    <div class="acct-item">
+      <div class="acct-label">Buying Power</div>
+      <div class="acct-right"><div class="acct-main" id="bp">--</div></div>
+    </div>
+  </div>
+
+  <!-- Bot / Manual split -->
+  <div class="split-row">
+    <div class="split-card">
+      <div class="split-side-label">Bot Trades</div>
+      <div class="split-divider"></div>
+      <div class="split-metrics">
+        <div class="split-metric">
+          <div class="split-metric-label">Total P&amp;L</div>
+          <div class="split-metric-val pnl-neu" id="bot-pnl">--</div>
+          <div class="split-metric-pct pnl-neu" id="bot-pnl-pct"></div>
+        </div>
+        <div class="split-metric">
+          <div class="split-metric-label">Deployed</div>
+          <div class="split-metric-val" style="color:#888;" id="bot-dep">--</div>
+        </div>
+        <div class="split-metric">
+          <div class="split-metric-label">Trades</div>
+          <div class="split-metric-val" style="color:#888;" id="bot-cnt">--</div>
+        </div>
+      </div>
+    </div>
+    <div class="split-card">
+      <div class="split-side-label">Manual Trades</div>
+      <div class="split-divider"></div>
+      <div class="split-metrics">
+        <div class="split-metric">
+          <div class="split-metric-label">Total P&amp;L</div>
+          <div class="split-metric-val pnl-neu" id="man-pnl">--</div>
+          <div class="split-metric-pct pnl-neu" id="man-pnl-pct"></div>
+        </div>
+        <div class="split-metric">
+          <div class="split-metric-label">Deployed</div>
+          <div class="split-metric-val" style="color:#888;" id="man-dep">--</div>
+        </div>
+        <div class="split-metric">
+          <div class="split-metric-label">Trades</div>
+          <div class="split-metric-val" style="color:#888;" id="man-cnt">--</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- P&L Chart | Positions + Trades -->
+  <div class="main-grid">
+
+    <!-- P&L -->
+    <div class="card">
+      <div class="card-head">
+        <div class="sec">P&amp;L</div>
+        <div style="display:flex;gap:4px;">
+          <button class="tf-btn on" onclick="setPnlFrame('day',this)">Day</button>
+          <button class="tf-btn" onclick="setPnlFrame('month',this)">Month</button>
+          <button class="tf-btn" onclick="setPnlFrame('year',this)">Year</button>
+        </div>
+      </div>
+      <div class="card-body" id="pnl-body">
+        <div class="pnl-empty" style="display:flex;align-items:center;justify-content:center;min-height:160px;">
+          <div class="msg" style="text-align:center;color:#333;font-size:13px;">P&amp;L data will show after first contract settlement.</div>
+        </div>
+      </div>
+      <canvas id="pnl-c" style="display:none;padding:0 16px 16px;height:200px;"></canvas>
+    </div>
+
+    <!-- Positions + Trades tabbed -->
+    <div class="card">
+      <div class="tabs">
+        <button class="tab on" onclick="swP('pos',this)">Open Positions</button>
+        <button class="tab" onclick="swP('trades',this)">Trade History</button>
+      </div>
+      <div class="pane on" id="p-pos">
+        <div class="t-scroll"><table class="tbl" id="pos-tbl">
+          <thead><tr>
+            <th class="l" style="width:260px">Position<div class="resize-h"></div></th>
+            <th class="ra" data-col="signal" style="width:100px">Signal<div class="resize-h"></div></th>
+            <th class="ra" data-col="edge" style="width:55px">Edge<div class="resize-h"></div></th>
+            <th class="ra" data-col="qty" style="width:50px">Qty<div class="resize-h"></div></th>
+            <th class="ca" data-col="side" style="width:55px">Side<div class="resize-h"></div></th>
+            <th class="ra" data-col="ent" style="width:50px">Ent<div class="resize-h"></div></th>
+            <th class="ra" data-col="cur" style="width:50px">Cur<div class="resize-h"></div></th>
+            <th class="ra" data-col="cost" style="width:65px">Cost<div class="resize-h"></div></th>
+            <th class="ra" style="width:90px">Open P&L<div class="resize-h"></div></th>
+          </tr></thead>
+          <tbody id="pos-b"><tr><td colspan="9" class="loading">Loading...</td></tr></tbody>
+        </table>
+        </div>
+      </div>
+      <div class="pane" id="p-trades">
+        <div class="t-scroll">
+        <table class="tbl" id="hist-tbl" style="table-layout:fixed;width:100%;min-width:700px;">
+          <thead><tr>
+            <th class="l" style="width:260px;min-width:180px;">Trade<div class="resize-h"></div></th>
+            <th class="ca shrink" style="width:80px;">Date<div class="resize-h"></div></th>
+            <th class="ca shrink" style="width:50px;">Side<div class="resize-h"></div></th>
+            <th class="ra shrink" style="width:45px;">Qty<div class="resize-h"></div></th>
+            <th class="ra shrink" style="width:45px;">Ent<div class="resize-h"></div></th>
+            <th class="ra shrink" style="width:65px;">Cost<div class="resize-h"></div></th>
+            <th class="ra shrink" style="width:90px;">P&amp;L<div class="resize-h"></div></th>
+            <th class="ca shrink" style="width:60px;">Src<div class="resize-h"></div></th>
+          </tr></thead>
+          <tbody id="tr-b"><tr><td colspan="8" class="loading">Loading history...</td></tr></tbody>
+        </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Market Scout -->
+  <div class="card" style="margin-bottom:14px;">
+    <div class="card-head" style="padding-bottom:0;">
+      <div class="sec"><div class="dot dot-b"></div>Market Scout</div>
+      <button class="ref" onclick="loadScouts()">&#x21BB; Refresh</button>
+    </div>
+    <div class="tabs" style="margin-top:10px;">
+      <button class="tab on" onclick="swS('weather',this)">&#x1F327; Weather</button>
+      <button class="tab" onclick="swS('crypto',this)">&#x20BF; Crypto</button>
+      <button class="tab" onclick="swS('bestbets',this)">&#x2B50; Best Bets</button>
+      <button class="tab" onclick="swS('geo',this)">&#x1F30D; Geopolitical</button>
+
+
+    </div>
+
+    <!-- Weather -->
+    <div class="pane on" id="s-weather">
+      <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
+        <table class="tbl wt">
+          <thead><tr><th>Market</th><th>City</th><th>YES</th><th>NOAA</th><th>Edge</th><th>Signal</th></tr></thead>
+          <tbody id="w-b"><tr><td colspan="6" class="loading">Loading...</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Best Bets -->
+    <div class="pane" id="s-bestbets">
+      <div class="sc-scroll" id="bb-list"><div class="loading">Loading best bets...</div></div>
+    </div>
+
+    <!-- Geo -->
+    <div class="pane" id="s-geo">
+      <div class="sc-scroll" id="geo-list"><div class="loading">Loading...</div></div>
+    </div>
+    <!-- Crypto -->
+    <div class="pane" id="s-crypto">
+      <div id="crypto-signal-bar" style="display:flex;align-items:center;gap:12px;padding:8px 0 12px;border-bottom:1px solid #1e1e1e;margin-bottom:10px;">
+        <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.05em;">Smart Money</span>
+        <span id="crypto-sm-badge" style="font-size:11px;padding:2px 8px;border-radius:4px;background:#1e1e1e;color:#888;">Loading...</span>
+        <span style="font-size:11px;color:#555;">|</span>
+        <span style="font-size:11px;color:#888;">BTC</span>
+        <span id="crypto-btc-price" style="font-size:13px;font-weight:700;color:#e0e0e0;">--</span>
+        <span id="crypto-btc-chg" style="font-size:11px;">--</span>
+        <span style="font-size:11px;color:#555;">|</span>
+        <span style="font-size:11px;color:#888;">ETH</span>
+        <span id="crypto-eth-price" style="font-size:13px;font-weight:700;color:#e0e0e0;">--</span>
+        <span id="crypto-eth-chg" style="font-size:11px;">--</span>
+      </div>
+      <div style="overflow-x:auto;max-height:380px;overflow-y:auto;">
+        <table class="tbl wt">
+          <thead><tr>
+            <th>Market</th>
+            <th>Coin</th>
+            <th>YES%</th>
+            <th>Model%</th>
+            <th>Edge</th>
+            <th>Signal</th>
+            <th>Action</th>
+          </tr></thead>
+          <tbody id="crypto-b"><tr><td colspan="7" style="color:#555;text-align:center;padding:20px;">Click to load crypto markets</td></tr></tbody>
+        </table>
+      </div>
+      <div style="font-size:10px;color:#444;margin-top:8px;">All crypto trades require David's approval. Smart money signal = aggregate of top 10 Polymarket crypto traders.</div>
+    </div>
+
+
+
+  </div>
+
+</div>
+
+<div class="footer">Ruppert v1.4 &mdash; Dry Run &mdash; No real money at risk &mdash; Auto-refreshes 30s</div>
+
+<script>
+
+// ── Utils ──────────────────────────────────────────────────────────────────────
+async function api(url) { try { return await (await fetch(url)).json(); } catch { return null; } }
+const $ = id => document.getElementById(id);
+const dollar = v => '$' + (v||0).toFixed(2);
+const pct    = v => v != null ? (v*100).toFixed(0)+'%' : '?';
+const sign   = v => v>=0 ? '+' : '';
+const pcls   = v => v>0 ? 'pnl-pos' : v<0 ? 'pnl-neg' : 'pnl-neu';
+function cityOf(t) {
+  if(!t)return'';
+  if(t.includes('HIGHNY'))return'NYC'; if(t.includes('HIGHLA'))return'LA';
+  if(t.includes('HIGHCHI'))return'Chicago'; if(t.includes('HIGHHOU'))return'Houston';
+  if(t.includes('HIGHMIA'))return'Miami'; if(t.includes('HIGHPHX'))return'Phoenix';
+  return'';
+}
+
+// ── Tab helpers ────────────────────────────────────────────────────────────────
+function swP(name, btn) {
+  ['p-pos','p-trades'].forEach(id=>$(id).classList.remove('on'));
+  $(name==='pos'?'p-pos':'p-trades').classList.add('on');
+  btn.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  btn.classList.add('on');
+}
+function swS(name, btn) {
+  ['s-weather','s-bestbets','s-geo','s-crypto'].forEach(id=>$(id).classList.remove('on'));
+  $('s-'+name).classList.add('on');
+  btn.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
+  btn.classList.add('on');
+}
+
+// ── Account ────────────────────────────────────────────────────────────────────
+async function loadAccount() {
+  const acct = await api('/api/account');
+  if (!acct || acct.error) return;
+
+  // Store globally so loadLivePrices can compute Account Value = Balance + Open P&L
+
+  $('bp').textContent      = dollar(acct.buying_power);
+  $('bot-dep').textContent = dollar(acct.bot_deployed);
+  $('man-dep').textContent = dollar(acct.manual_deployed);
+  $('bot-cnt').textContent = acct.bot_trade_count || 0;
+  $('man-cnt').textContent = acct.manual_trade_count || 0;
+
+  // DEMO: Account Value = $400 starting capital + Open P&L + Closed P&L
+  // $400 = $200 weather allocation + $200 crypto allocation
+  // Live prices endpoint adds totalPnl (open+closed) on top of this base.
+  // LIVE MODE: replace with raw acct.kalshi_balance (Kalshi API reflects real positions).
+  window._kalshiBalance = acct.kalshi_balance || 400;  // 400 = demo starting capital
+  $('av').textContent = dollar(window._kalshiBalance);
+  // Win Rate: populates once contracts settle
+  const wrEl = document.getElementById('winrate');
+  if (wrEl && acct.win_rate !== undefined) {
+    wrEl.style.color = acct.win_rate >= 50 ? '#4ade80' : '#f87171';
+    wrEl.textContent = acct.win_rate.toFixed(1) + '%';
+  }
+
+  $('ts').textContent = 'Updated ' + new Date().toLocaleTimeString();
+}
+
+function setPnl(mainId, pctId, val, cost) {
+  const el = document.getElementById(mainId);
+  const pe = document.getElementById(pctId);
+  if (!el) return;
+  const pp = cost ? val / cost * 100 : 0;
+  const s  = val >= 0 ? '+' : '';
+  el.className   = 'acct-main ' + pcls(val);
+  el.textContent = s + dollar(val);
+  if (pe) { pe.className = 'acct-pct ' + pcls(val); pe.textContent = s + pp.toFixed(2) + '%'; }
+}
+
+function setSplitPnl(id, pctId, val, cost) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.className   = 'split-metric-val ' + pcls(val);
+  el.textContent = (val >= 0 ? '+' : '') + dollar(val);
+  const pe = document.getElementById(pctId);
+  if (pe && cost) {
+    const pp = val / cost * 100;
+    pe.className   = 'split-metric-pct ' + pcls(val);
+    pe.textContent = (pp >= 0 ? '+' : '') + pp.toFixed(2) + '%';
+  }
+}
+
+// ── Positions ──────────────────────────────────────────────────────────────────
+async function loadPositions() {
+  const positions = await api('/api/positions/active');
+  const tb = $('pos-b');
+  if (!positions || !positions.length) {
+    tb.innerHTML='<tr><td colspan="9" class="loading">No open positions today</td></tr>';
+    return;
+  }
+  tb.innerHTML = positions.map(p => {
+    const sym   = (p.ticker||'').split('-')[0];
+    const name  = (p.title||p.ticker||'');
+    const side  = p.side==='YES' ? '<span class="b-yes">YES</span>' : '<span class="b-no">NO</span>';
+    const cur   = p.current_price!=null ? p.current_price+'c' : '<span style="color:#1e1e1e">--</span>';
+    const url   = p.kalshi_url || `https://kalshi.com/markets/${p.ticker}`;
+    const pnlH  = v => `<span class="${pcls(v)}">${sign(v)}${dollar(v)}</span>`;
+    const src    = (['geo','gaming','manual'].includes(p.source))
+                   ? '<span class="b-manual">MANUAL</span>' : '<span class="b-bot">BOT</span>';
+    const sigVal = (p.noaa_prob != null && p.market_prob != null)
+                   ? Math.round(p.noaa_prob*100)+'% vs '+Math.round(p.market_prob*100)+'%' : '--';
+    const edgeV  = (p.edge != null) ? (Math.abs(p.edge)*100).toFixed(0)+'%' : '--';
+    const edgeC  = (p.edge && Math.abs(p.edge)>.4) ? '#4ade80' : (p.edge && Math.abs(p.edge)>.2) ? '#fbbf24' : '#888';
+    return `<tr>
+      <td class="l col-title">
+        <div style="display:flex;align-items:center;gap:6px;min-width:0;">
+          ${src}
+          <a href="${url}" target="_blank" style="color:#aaa;text-decoration:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:420px;">${name}</a>
+        </div>
+      </td>
+      <td class="ra shrink" data-col="signal" style="font-size:10px;color:#555;">${sigVal}</td>
+      <td class="ra shrink" data-col="edge" style="color:${edgeC};font-weight:700;">${edgeV}</td>
+      <td class="ra shrink" data-col="qty">${p.contracts}</td>
+      <td class="ca shrink" data-col="side">${side}</td>
+      <td class="ra shrink" data-col="ent">${p.entry_price ? p.entry_price+'c' : '--'}</td>
+      <td class="ra shrink" data-col="cur" id="cp-${p.ticker}">${cur}</td>
+      <td class="ra shrink" data-col="cost">${dollar(p.total_cost)}</td>
+      <td class="ra shrink" id="opnl-${p.ticker}">${pnlH(p.open_pnl)}<br><span style="font-size:9px;color:#2a2a2a">Pending</span></td>
+    </tr>`;
+  }).join('');
+  // Async live prices
+  loadLivePrices(positions);
+  if(window.restoreColWidths) restoreColWidths();
+}
+
+async function loadLivePrices(positions) {
+  const prices = await api('/api/positions/prices');
+  if (!prices) return;
+  let totOpen=0, totCost=0;
+  for (const p of positions) {
+    const lv = prices[p.ticker]; if(!lv) continue;
+    // Backend normalises settled market prices: last_price=99 → no_ask=1
+    // so this formula works correctly for both live and settled positions.
+    let cp = p.side==='YES' ? lv.yes_ask : (lv.no_ask != null ? lv.no_ask : (lv.yes_bid!=null ? 100-lv.yes_bid : null));
+    if(cp==null) continue;
+    const open = ((cp - p.entry_price)*p.contracts)/100;
+    const opc  = p.total_cost ? open/p.total_cost*100 : 0;
+    totOpen+=open; totCost+=p.total_cost;
+    const el=document.getElementById('cp-'+p.ticker); if(el)el.textContent=cp+'c';
+    const oe=document.getElementById('opnl-'+p.ticker);
+    if(oe)oe.innerHTML=`<span class="${pcls(open)}">${sign(open)}${dollar(open)}</span><br><span style="font-size:9px;color:${open>=0?'#1a4a1a':'#4a1a1a'}">${sign(opc)}${opc.toFixed(1)}%</span>`;
+  }
+  // Push live P&L into account bar (mark-to-market, real-time)
+  if (totCost > 0) {
+    // Classify by source
+    let botPnl = 0, manPnl = 0;
+    for (const p of positions) {
+      const lv = prices[p.ticker]; if (!lv) continue;
+      let cp = p.side === 'YES' ? lv.yes_ask : (lv.no_ask != null ? lv.no_ask : (lv.yes_bid != null ? 100 - lv.yes_bid : null));
+      if (cp == null) continue;
+      const pnl = ((cp - p.entry_price) * p.contracts) / 100;
+      if (p.source && ['geo','gaming','manual'].includes(p.source)) manPnl += pnl;
+      else botPnl += pnl;
+    }
+    const totalPnl = botPnl + manPnl;
+    const bp = parseFloat(document.getElementById('bp').textContent.replace('$','')) || 0;
+
+    // Account Value = Buying Power + Open P&L
+    // DEMO: Account Value = Starting Capital ($400) + Open P&L + Closed P&L
+    // window._kalshiBalance is set to 400 in loadAccount(); totalPnl includes open + settled.
+    // LIVE MODE: swap to dollar(window._kalshiBalance) — Kalshi API already factors in P&L.
+    document.getElementById('av').textContent = dollar((window._kalshiBalance || 400) + totalPnl);
+
+    // Open P&L = Day's P&L (all positions opened today)
+    setPnl('opnl', 'opnl-pct', totalPnl, totCost);
+    setPnl('dpnl', 'dpnl-pct', totalPnl, totCost);
+
+    // Bot / Manual P&L
+    setSplitPnl('bot-pnl', 'bot-pnl-pct', botPnl, totCost);
+    setSplitPnl('man-pnl', 'man-pnl-pct', manPnl, totCost);
+  }
+}
+
+// ── Trades ─────────────────────────────────────────────────────────────────────
+async function loadTrades() {
+  const trades = await api('/api/trades');
+  const tb = $('tr-b');
+  if (!trades||!trades.length) {
+    tb.innerHTML='<tr><td colspan="8" class="loading" style="color:#555;padding:20px;">No trades yet</td></tr>';
+    return;
+  }
+  tb.innerHTML = trades.map(t=>{
+    const title  = (t.title||t.ticker||'').replace(/[*]{2}/g,'');
+    const ticker = t.ticker||'';
+    const series = ticker.split('-')[0].toLowerCase();
+    const url    = 'https://kalshi.com/markets/'+series;
+    const side   = t.side==='yes'
+      ? '<span class="b-yes">YES</span>'
+      : '<span class="b-no">NO</span>';
+    const src    = (['geo','gaming','manual','crypto'].includes(t.source))
+      ? '<span class="b-manual">MANUAL</span>'
+      : '<span class="b-bot">BOT</span>';
+    const mp     = t.market_prob||0;
+    const entryP = t.side==='no' ? Math.round((1-mp)*100) : Math.round(mp*100);
+    const cost   = t.size_dollars ? dollar(t.size_dollars) : '--';
+    const rpnl   = t.realized_pnl!=null
+      ? '<span class="'+(t.realized_pnl>=0?'pnl-pos':'pnl-neg')+'">'+(t.realized_pnl>=0?'+':'')+dollar(t.realized_pnl)+'</span>'
+      : '<span style="color:#444">--</span>';
+    const dt     = (t.timestamp||t._date||'').substring(0,10);
+    const qty    = t.contracts||'--';
+    return `<tr>
+      <td class="l" style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:260px;">
+        <a href="${url}" target="_blank" style="color:#fff;text-decoration:none;">${title}</a>
+      </td>
+      <td class="ca shrink">${dt}</td>
+      <td class="ca shrink">${side}</td>
+      <td class="ra shrink">${qty}</td>
+      <td class="ra shrink">${entryP}c</td>
+      <td class="ra shrink">${cost}</td>
+      <td class="ra shrink">${rpnl}</td>
+      <td class="ca shrink">${src}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Weather ────────────────────────────────────────────────────────────────────
+let wAll=[], wShow=10;
+async function loadWeather() {
+  const d = await api('/api/kalshi/weather');
+  if(!d||d.error||!d.length){$('w-b').innerHTML='<tr><td colspan="6" class="loading">No data</td></tr>';return;}
+  wAll=d; renderWeather();
+}
+function renderWeather(){
+  const rows = wAll.slice(0,wShow).map(m=>{
+    const title = (m.title||'').replace(/\*\*/g,'').substring(0,52);
+    const city  = cityOf(m.ticker||'');
+    const yes   = m.yes_ask!=null?m.yes_ask+'c':'--';
+    const noaa  = m._noaa_prob!=null?(m._noaa_prob*100).toFixed(0)+'%':'--';
+    const edge  = m._has_edge&&m._edge!=null
+      ? `<span class="${m._edge>0?'edge-pos':'edge-neg'}">${m._edge>0?'+':''}${(m._edge*100).toFixed(0)}%</span>`:'--';
+    const sig   = m._has_edge?`<span style="color:#4ade80;font-size:10px;font-weight:700">${m._action||'Edge'}</span>`:'<span style="color:#1e1e1e">--</span>';
+    const url   = m.kalshi_url||`https://kalshi.com/markets/${m.ticker||''}`;
+    return `<tr>
+      <td><a href="${url}" target="_blank" style="color:#888;font-size:11px;text-decoration:none;" title="${m.title||''}">${title}</a></td>
+      <td style="color:#444">${city}</td>
+      <td style="color:#4ade80;font-weight:700">${yes}</td>
+      <td style="color:#888">${noaa}</td>
+      <td>${edge}</td><td>${sig}</td>
+    </tr>`;
+  });
+  const btn = wAll.length>wShow
+    ? `<tr><td colspan="6" style="padding:0;"><button class="more-btn" onclick="wShow+=10;renderWeather()">Load ${Math.min(10,wAll.length-wShow)} More</button></td></tr>`:'';
+  $('w-b').innerHTML = rows.join('')+btn;
+}
+
+// ── Best Bets ──────────────────────────────────────────────────────────────────
+let bbAll=[], bbShow=10;
+async function loadBestBets(){
+  const d = await api('/api/bestbets');
+  const el=$('bb-list');
+  if(!d||!d.length){
+    el.innerHTML='<div class="loading" style="color:#888;padding:32px;">No Best Bets found yet.<br><span style="color:#555;font-size:10px;">Best Bets appear when Ruppert finds 60%+ confidence + 15%+ edge on geo or economics markets.<br>Run the bot to populate.</span></div>';
+    return;
+  }
+  bbAll=d; renderBestBets();
+}
+function renderBestBets(){
+  const el=$('bb-list');
+  const items=bbAll.slice(0,bbShow);
+  const cards=items.map(b=>{
+    const catBadge = b.category==='Economics'?'<span class="b-econ">Economics</span>':'<span class="b-geo">Geopolitical</span>';
+    const conf=b.confidence||0;
+    const badge = conf>=80?'<span class="b-strong">Strong</span>':'';
+    const side = b.recommended_side==='YES'?'<span class="b-yes">BET YES</span>':'<span class="b-no">BET NO</span>';
+    const edge = b.edge ? (b.edge*100).toFixed(0)+'%' : '?';
+    return `<div class="bb-item" onclick='openBBSidebar(${JSON.stringify(b).replace(/'/g,"&#39;")})'>
+      <div class="bb-title">${b.title||''}</div>
+      <div class="bb-row">
+        ${catBadge} ${badge} ${side}
+        <span style="font-size:11px;color:#fff;font-weight:700">${(b.ruppert_prob*100||0).toFixed(0)}%</span>
+        <span style="font-size:10px;color:#555">Ruppert's est.</span>
+        <span style="font-size:10px;color:#888">Mkt: ${(b.market_prob*100||0).toFixed(0)}%</span>
+        <span style="font-size:10px;color:#4ade80;font-weight:700">+${edge} edge</span>
+      </div>
+      <div class="bb-row" style="gap:6px;">
+        <div class="conf-bar-wrap"><div class="conf-bar" style="width:${conf}%"></div></div>
+        <span class="conf-lbl">${conf}% confidence</span>
+      </div>
+      <div class="bb-rationale">${(b.rationale||'').substring(0,110)}...</div>
+    </div>`;
+  }).join('');
+  const more=bbAll.length>bbShow
+    ?`<button class="more-btn" onclick="bbShow+=10;renderBestBets()">Load ${Math.min(10,bbAll.length-bbShow)} More</button>`:'';
+  el.innerHTML=cards+more;
+}
+
+// ── Geo Scout ──────────────────────────────────────────────────────────────────
+let geoAll=[], geoShow=10;
+async function loadGeo(){
+  const d=await api('/api/scout/geo');
+  const el=$('geo-list');
+  if(!d||!d.length){el.innerHTML='<div class="loading">Run the bot to populate geopolitical data</div>';return;}
+  geoAll=d; renderGeo();
+}
+function renderGeo(){
+  const el=$('geo-list');
+  const items=geoAll.slice(0,geoShow).map(m=>{
+    const prob=m.market_prob!=null?(m.market_prob*100).toFixed(0):'?';
+    const sig=m.news_signal||'LOW';
+    const bc=sig==='HIGH'?'b-nh':sig==='MEDIUM'?'b-nm':'b-nl';
+    return `<div class="sc-item" onclick='openGeoSidebar(${JSON.stringify(m).replace(/'/g,"&#39;")})'>
+      <div class="sc-q">${m.title||''}</div>
+      <div class="sc-row">
+        <span class="sc-prob">${prob}%</span>
+        <span class="sc-lbl">market says YES</span>
+        <span class="${bc}">${sig} NEWS</span>
+      </div>
+    </div>`;
+  }).join('');
+  const more=geoAll.length>geoShow
+    ?`<button class="more-btn" onclick="geoShow+=10;renderGeo()">Load ${Math.min(10,geoAll.length-geoShow)} More</button>`:'';
+  el.innerHTML=items+more;
+}
+
+// ── Sidebars ───────────────────────────────────────────────────────────────────
+function openSB(html){$('sb-inner').innerHTML=html;$('sb').classList.add('open');$('ovl').classList.add('open');}
+function closeSB(){$('sb').classList.remove('open');$('ovl').classList.remove('open');}
+
+function openGeoSidebar(m) {
+  const prob=m.market_prob!=null?(m.market_prob*100).toFixed(0):'?';
+  const yes=m.yes_price||0; const no=100-yes;
+  const sig=m.news_signal||'LOW';
+  const bc=sig==='HIGH'?'b-nh':sig==='MEDIUM'?'b-nm':'b-nl';
+  const uid='sb_'+Math.random().toString(36).slice(2,7);
+  const take=sig==='HIGH'
+    ?`<b>Ruppert:</b> High news activity (${m.news_volume||0} articles). Emotional markets overprice escalation -- "fade the chaos" suggests considering NO on escalation bets. Read settlement rules carefully.`
+    :sig==='MEDIUM'
+    ?`<b>Ruppert:</b> Medium news activity. Watch the next 24h. If coverage spikes, this could move. Check exact resolution trigger.`
+    :`<b>Ruppert:</b> Low news signal. Market is quiet. No strong edge right now -- monitor and revisit.`;
+  const hls=(m.recent_headlines||[]).slice(0,4).map(h=>`<div class="sb-hl">"${h}"</div>`).join('')
+    ||'<div class="sb-hl" style="color:#1a1a1a">No recent headlines</div>';
+  const rules=m.rules||m.rules_primary
+    ?`<div class="sb-sec"><div class="sb-lbl">Settlement Rules</div><div class="sb-rules">${m.rules||m.rules_primary}</div></div>`:'';
+  const url=m.kalshi_url||`https://kalshi.com/markets/${m.ticker||''}`;
+  openSB(`
+    <button class="sb-x" onclick="closeSB()">&#x2715;</button>
+    <div class="sb-title">${m.title||''}</div>
+    <div class="sb-sec">
+      <div class="sb-lbl">What Does ${prob}% Mean?</div>
+      <div class="sb-prob">${prob}%</div>
+      <div class="sb-note"><strong style="color:#888">${prob}% of bettors think YES</strong> -- this is crowd consensus.<br>
+        YES contract costs ${yes}¢ (pays $1 if YES). NO costs ${no}¢ (pays $1 if NO).<br>
+        If your estimate is lower than ${prob}%, bet NO. Higher → bet YES.</div>
+    </div>
+    <div class="sb-sec"><div class="sb-lbl">News Signal</div><span class="${bc}">${sig} &mdash; ${m.news_volume||0} articles in 24h</span></div>
+    <div class="sb-sec"><div class="sb-lbl">Ruppert's Take</div><div class="sb-ruppert">${take}</div></div>
+    ${rules}
+    <div class="sb-sec"><div class="sb-lbl">Recent Headlines</div>${hls}</div>
+    <div class="sb-sec"><div class="sb-lbl">Your Decision</div>
+      <div class="sb-actions" id="${uid}-r">
+        <button class="btn btn-yes" onclick="doAct('${uid}','BET YES')">&#x2191; YES (${yes}¢)</button>
+        <button class="btn btn-no"  onclick="doAct('${uid}','BET NO')">&#x2193; NO (${no}¢)</button>
+        <button class="btn btn-wch" onclick="doAct('${uid}','WATCH')">&#x1F441; Watch</button>
+        <button class="btn btn-pas" onclick="doAct('${uid}','PASS')">Pass</button>
+      </div>
+      <div id="${uid}-d" style="display:none;margin-top:10px;font-size:12px;font-weight:600;"></div>
+    </div>
+    <div class="sb-sec"><a href="${url}" target="_blank" style="font-size:11px;color:#818cf8;">View on Kalshi &#x2197;</a></div>`);
+}
+
+function openBBSidebar(b) {
+  const rPct=(b.ruppert_prob*100||0).toFixed(0);
+  const mPct=(b.market_prob*100||0).toFixed(0);
+  const edge=(b.edge*100||0).toFixed(0);
+  const yes=b.yes_price||0; const no=100-yes;
+  const uid='sb_'+Math.random().toString(36).slice(2,7);
+  const catBadge=b.category==='Economics'?'<span class="b-econ">Economics</span>':'<span class="b-geo">Geopolitical</span>';
+  const rules=b.rules?`<div class="sb-sec"><div class="sb-lbl">Settlement Rules</div><div class="sb-rules">${b.rules}</div></div>`:'';
+  openSB(`
+    <button class="sb-x" onclick="closeSB()">&#x2715;</button>
+    <div class="sb-sec" style="margin-bottom:10px;">${catBadge}</div>
+    <div class="sb-title">${b.title||''}</div>
+    <div class="sb-sec">
+      <div class="sb-lbl">Ruppert's Probability vs Market</div>
+      <div style="display:flex;gap:24px;margin-top:6px;">
+        <div><div style="font-size:10px;color:#333">Ruppert</div><div class="sb-prob" style="color:#4ade80">${rPct}%</div></div>
+        <div><div style="font-size:10px;color:#333">Market</div><div class="sb-prob">${mPct}%</div></div>
+        <div><div style="font-size:10px;color:#333">Edge</div><div class="sb-prob" style="color:#fbbf24">+${edge}%</div></div>
+        <div><div style="font-size:10px;color:#333">Confidence</div><div class="sb-prob" style="color:#818cf8">${b.confidence||0}%</div></div>
+      </div>
+    </div>
+    <div class="sb-sec"><div class="sb-lbl">Ruppert's Rationale</div><div class="sb-ruppert"><b>Ruppert:</b> ${b.rationale||'No rationale available.'}</div></div>
+    ${rules}
+    <div class="sb-sec"><div class="sb-lbl">Recommendation</div>
+      <div style="font-size:13px;font-weight:700;color:${b.recommended_side==='YES'?'#4ade80':'#f87171'};">
+        ${b.recommended_side==='YES'?'&#x2191;':'&#x2193;'} ${b.recommended_side} @ ${b.recommended_price}¢
+      </div>
+    </div>
+    <div class="sb-sec"><div class="sb-lbl">Your Decision</div>
+      <div class="sb-actions" id="${uid}-r">
+        <button class="btn btn-yes" onclick="doAct('${uid}','BET YES')">&#x2191; YES (${yes}¢)</button>
+        <button class="btn btn-no"  onclick="doAct('${uid}','BET NO')">&#x2193; NO (${no}¢)</button>
+        <button class="btn btn-wch" onclick="doAct('${uid}','WATCH')">&#x1F441; Watch</button>
+        <button class="btn btn-pas" onclick="doAct('${uid}','PASS')">Pass</button>
+      </div>
+      <div id="${uid}-d" style="display:none;margin-top:10px;font-size:12px;font-weight:600;"></div>
+    </div>
+    <div class="sb-sec"><a href="${b.kalshi_url||'#'}" target="_blank" style="font-size:11px;color:#818cf8;">View on Kalshi &#x2197;</a></div>`);
+}
+
+function doAct(uid, action) {
+  document.getElementById(uid+'-r').querySelectorAll('.btn').forEach(b=>{b.disabled=true;b.style.opacity='.3';});
+  const done=document.getElementById(uid+'-d'); done.style.display='block';
+  const c={'BET YES':'#4ade80','BET NO':'#f87171','WATCH':'#818cf8','PASS':'#444'}[action]||'#aaa';
+  done.style.color=c; done.textContent='✓ '+action+' logged -- executes on go-live';
+}
+
+// ── Load All ───────────────────────────────────────────────────────────────────
+// P&L timeframe
+window._pnlFrame = 'day';
+function setPnlFrame(frame, btn) {
+  window._pnlFrame = frame;
+  document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('on'));
+  btn.classList.add('on');
+  renderPnlChart(window._pnlData || []);
+}
+
+function renderPnlChart(trades) {
+  window._pnlData = trades;
+  const frame = window._pnlFrame || 'day';
+  const now = new Date();
+
+  // Filter trades by frame
+  const filtered = trades.filter(t => {
+    if (!t._date) return false;
+    const d = new Date(t._date);
+    if (frame === 'day')   return t._date === now.toISOString().slice(0,10);
+    if (frame === 'month') return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+    if (frame === 'year')  return d.getFullYear() === now.getFullYear();
+    return true;
+  });
+
+  if (!filtered.length) return; // keep pending state
+
+  // Group by date, cumulative P&L
+  const byDate = {};
+  for (const t of filtered) {
+    byDate[t._date] = (byDate[t._date] || 0) + (t.realized_pnl || 0);
+  }
+  const labels = Object.keys(byDate).sort();
+  let running = 0;
+  const data = labels.map(d => { running += byDate[d]; return parseFloat(running.toFixed(2)); });
+
+  const pnlEmpty = document.getElementById('pnl-body');
+  const pnlCanvas = document.getElementById('pnl-c');
+  if (pnlEmpty) pnlEmpty.style.display = 'none';
+  if (pnlCanvas) pnlCanvas.style.display = 'block';
+
+  const ctx = pnlCanvas.getContext('2d');
+  if (window._pnlChartObj) window._pnlChartObj.destroy();
+  const color = running >= 0 ? '#4ade80' : '#f87171';
+  window._pnlChartObj = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{
+        label: 'P&L',
+        data,
+        borderColor: color,
+        backgroundColor: running >= 0 ? 'rgba(74,222,128,0.06)' : 'rgba(248,113,113,0.06)',
+        borderWidth: 2,
+        pointRadius: 4,
+        pointBackgroundColor: color,
+        tension: 0.3,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => ' $' + c.parsed.y.toFixed(2) } }
+      },
+      scales: {
+        x: { grid: { color: '#1a1a1a' }, ticks: { color: '#333', font: { size: 10 } } },
+        y: { grid: { color: '#1a1a1a' }, ticks: { color: '#333', font: { size: 10 }, callback: v => '$' + v } }
+      }
+    }
+  });
+}
+
+async function loadScouts(){ await Promise.all([loadWeather(),loadBestBets(),loadGeo(),loadCrypto()]); }
+async function loadAll(){
+  await Promise.all([loadAccount(), loadPositions(), loadTrades(), loadScouts()]);
+}
+loadAll();
+setInterval(loadAll, 30000);
+
+// Stagger account bar refresh to 35s so Account Value doesn't jump with P&L
+setInterval(loadAccount, 35000);
+
+// ─── Resizable Columns ────────────────────────────────────────────────────────
+(function() {
+  let rTh = null, rStartX = 0, rStartW = 0;
+
+  function saveWidths() {
+    const tbl = document.getElementById('pos-tbl');
+    if (!tbl) return;
+    const ws = Array.from(tbl.querySelectorAll('thead th')).map(th => th.offsetWidth);
+    localStorage.setItem('ruppert_col_w', JSON.stringify(ws));
+  }
+
+  function restoreWidths() {
+    try {
+      const ws = JSON.parse(localStorage.getItem('ruppert_col_w') || 'null');
+      if (!ws) return;
+      const tbl = document.getElementById('pos-tbl');
+      if (!tbl) return;
+      const ths = tbl.querySelectorAll('thead th');
+      ths.forEach((th, i) => { if (ws[i] && ws[i] > 20) th.style.width = ws[i] + 'px'; });
+    } catch(e) {}
+  }
+
+  document.addEventListener('mousedown', function(e) {
+    if (!e.target.classList.contains('resize-h')) return;
+    rTh = e.target.parentElement;
+    rStartX = e.clientX;
+    rStartW = rTh.offsetWidth;
+    e.target.classList.add('active');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    if (!rTh) return;
+    const newW = Math.max(30, rStartW + (e.clientX - rStartX));
+    rTh.style.width = newW + 'px';
+  });
+
+  document.addEventListener('mouseup', function(e) {
+    if (!rTh) return;
+    rTh.querySelector('.resize-h').classList.remove('active');
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+    saveWidths();
+    rTh = null;
+  });
+
+  // Restore on load + after positions render
+  window.restoreColWidths = restoreWidths;
+  document.addEventListener('DOMContentLoaded', restoreWidths);
+})();
+
+
+// ── Crypto Tab ───────────────────────────────────────────────────────────────
+async function loadCrypto() {
+  const d = await api('/api/crypto/scan');
+  const tbody = $('crypto-b');
+  if (!d) { tbody.innerHTML = '<tr><td colspan="7" class="loading">Error loading crypto data</td></tr>'; return; }
+
+  // Update signal bar
+  const sm = d.smart_money;
+  const smBadge = document.getElementById('crypto-sm-badge');
+  if (sm) {
+    const dir = sm.direction || 'neutral';
+    const colors = {bullish:'#4ade80', bearish:'#f87171', neutral:'#aaa'};
+    smBadge.style.background = dir === 'bullish' ? '#1a2e1a' : dir === 'bearish' ? '#2e1a1a' : '#1e1e1e';
+    smBadge.style.color = colors[dir] || '#aaa';
+    const active = sm.active_positions != null ? sm.active_positions : sm.traders_sampled;
+    const note = sm.active_positions === 0 ? 'sidelines' : (Math.round((sm.bull_pct||0.5)*100) + '% bull');
+    smBadge.textContent = dir.toUpperCase() + ' — ' + note + ' (' + sm.traders_sampled + ' traders tracked)';
+  }
+
+  // BTC/ETH prices
+  if (d.btc) {
+    document.getElementById('crypto-btc-price').textContent = '$' + Number(d.btc.price).toLocaleString();
+    const chgEl = document.getElementById('crypto-btc-chg');
+    const chg = d.btc.change_24h_pct;
+    chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+    chgEl.style.color = chg >= 0 ? '#4ade80' : '#f87171';
+  }
+  if (d.eth) {
+    document.getElementById('crypto-eth-price').textContent = '$' + Number(d.eth.price).toLocaleString();
+    const chgEl = document.getElementById('crypto-eth-chg');
+    const chg = d.eth.change_24h_pct;
+    chgEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+    chgEl.style.color = chg >= 0 ? '#4ade80' : '#f87171';
+  }
+
+  // Opportunities table
+  const opps = d.opportunities || [];
+  if (!opps.length) {
+    tbody.innerHTML = '<tr><td colspan="7" style="color:#555;text-align:center;padding:20px;">No opportunities above threshold right now</td></tr>';
+    return;
+  }
+  tbody.innerHTML = opps.map(o => {
+    const edge = o.edge || 0;
+    const edgeCls = edge > 0 ? 'edge-pos' : 'edge-neg';
+    const edgeTxt = (edge >= 0 ? '+' : '') + (edge * 100).toFixed(0) + '%';
+    const coin = o.ticker.includes('ETH') ? 'ETH' : 'BTC';
+    const coinColor = coin === 'BTC' ? '#f7931a' : '#627eea';
+    const url = 'https://kalshi.com/markets/' + o.ticker.split('-')[0].toLowerCase();
+    return `<tr>
+      <td><a href="${url}" target="_blank" style="color:#fff;text-decoration:none;">${o.title || o.ticker}</a></td>
+      <td><span style="color:${coinColor};font-weight:700;font-size:11px;">${coin}</span></td>
+      <td style="text-align:right;">${Math.round((o.market_prob||0)*100)}%</td>
+      <td style="text-align:right;">${Math.round((o.model_prob||0)*100)}%</td>
+      <td style="text-align:right;"><span class="${edgeCls}">${edgeTxt}</span></td>
+      <td style="text-align:center;">${o.direction || '--'}</td>
+      <td style="text-align:center;"><button style="background:#1e1e1e;border:1px solid #333;color:#e0e0e0;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;" onclick="alert('Feature coming soon — manual approval flow')">Review</button></td>
+    </tr>`;
+  }).join('');
+}
+
+</script>
+</body>
+</html>
