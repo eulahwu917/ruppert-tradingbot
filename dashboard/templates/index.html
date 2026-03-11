@@ -177,6 +177,68 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 .tf-btn:hover { color: #aaa; background: #1e1e1e; }
 .tf-btn.on { background: #1e1e1e; color: #fff; border-color: #333; }
 .footer { text-align: center; color: #1a1a1a; font-size: 10px; padding: 14px; }
+
+/* ── MOBILE RESPONSIVE ─────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .wrap { padding: 10px 12px; }
+
+  /* Header */
+  .header { padding: 10px 14px; }
+  .header h1 { font-size: 13px; }
+  .pill { display: none; }
+
+  /* Account bar — stack vertically */
+  .acct-bar { flex-direction: column; gap: 0; padding: 14px 16px; }
+  .acct-item { padding: 10px 0; min-height: unset; border-bottom: 1px solid #1a1a1a; justify-content: space-between; }
+  .acct-item:last-child { border-bottom: none; }
+  .acct-item:not(:last-child)::after { display: none; }
+  .acct-item:first-child { padding-left: 0; }
+  .acct-main { font-size: 26px; letter-spacing: -1px; }
+  .acct-label { max-width: none; font-size: 9px; }
+  .mode-badge { margin-left: 0; }
+
+  /* Split P&L row */
+  .split-row { flex-direction: column; gap: 10px; }
+  .split-card { padding: 14px 16px; min-height: unset; flex-wrap: wrap; gap: 10px; }
+  .split-side-label { display: none; }
+  .split-divider { display: none; }
+  .split-metrics { justify-content: flex-start; gap: 0; }
+  .split-metric { padding: 0 12px; }
+  .split-metric-val { font-size: 20px; }
+
+  /* Main grid — single column */
+  .main-grid { grid-template-columns: 1fr; gap: 10px; }
+
+  /* Tabs — scroll horizontally */
+  .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; gap: 0; padding: 0 10px; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { padding: 10px 12px; font-size: 11px; flex-shrink: 0; }
+
+  /* Tables — horizontal scroll */
+  .t-scroll { max-height: none; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tbl { font-size: 11px; min-width: 480px; }
+  .tbl th, .tbl td { padding: 7px 8px; }
+
+  /* Scout / Best Bets */
+  .sc-scroll { max-height: none; }
+  .bb-item { padding: 10px 12px; }
+  .bb-title { font-size: 12px; }
+
+  /* Sidebar full-width on mobile */
+  .sb { width: 100%; max-width: 100%; }
+
+  /* Chart area — full width */
+  canvas { max-width: 100%; }
+
+  /* Win rate / stat numbers */
+  #winrate { font-size: 24px; }
+}
+
+@media (max-width: 420px) {
+  .acct-main { font-size: 22px; }
+  .split-metric-val { font-size: 18px; }
+  .tbl { font-size: 10px; min-width: 420px; }
+}
 </style>
 </head>
 <body>
@@ -276,7 +338,9 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
           <div class="msg" style="text-align:center;color:#333;font-size:13px;">P&amp;L data will show after first contract settlement.</div>
         </div>
       </div>
-      <canvas id="pnl-c" style="display:none;padding:0 16px 16px;height:200px;"></canvas>
+      <div id="pnl-wrap" style="display:none;height:180px;padding:0 16px 16px;position:relative;">
+        <canvas id="pnl-c" style="width:100%;height:100%;"></canvas>
+      </div>
     </div>
 
     <!-- Positions + Trades tabbed -->
@@ -534,8 +598,9 @@ async function loadLivePrices(positions) {
     let cp = p.side==='YES' ? lv.yes_ask : (lv.no_ask != null ? lv.no_ask : (lv.yes_bid!=null ? 100-lv.yes_bid : null));
     if(cp==null) continue;
     const open = ((cp - p.entry_price)*p.contracts)/100;
-    const opc  = p.total_cost ? open/p.total_cost*100 : 0;
-    totOpen+=open; totCost+=p.total_cost;
+    const pcost = p.total_cost || p.cost || 0;
+    const opc  = pcost ? open/pcost*100 : 0;
+    totOpen+=open; totCost+=pcost;
     const el=document.getElementById('cp-'+p.ticker); if(el)el.textContent=cp+'c';
     const oe=document.getElementById('opnl-'+p.ticker);
     if(oe)oe.innerHTML=`<span class="${pcls(open)}">${sign(open)}${dollar(open)}</span><br><span style="font-size:9px;color:${open>=0?'#1a4a1a':'#4a1a1a'}">${sign(opc)}${opc.toFixed(1)}%</span>`;
@@ -553,7 +618,6 @@ async function loadLivePrices(positions) {
       else botPnl += pnl;
     }
     const totalPnl = botPnl + manPnl;
-    const bp = parseFloat(document.getElementById('bp').textContent.replace('$','')) || 0;
 
     // Account Value = Buying Power + Open P&L
     // DEMO: Account Value = Starting Capital ($400) + Open P&L + Closed P&L
@@ -561,13 +625,27 @@ async function loadLivePrices(positions) {
     // LIVE MODE: swap to dollar(window._kalshiBalance) — Kalshi API already factors in P&L.
     document.getElementById('av').textContent = dollar((window._kalshiBalance || 400) + totalPnl);
 
-    // Open P&L = Day's P&L (all positions opened today)
+    // Open P&L in account bar
     setPnl('opnl', 'opnl-pct', totalPnl, totCost);
-    setPnl('dpnl', 'dpnl-pct', totalPnl, totCost);
 
-    // Bot / Manual P&L
+    // Bot / Manual P&L split cards
     setSplitPnl('bot-pnl', 'bot-pnl-pct', botPnl, totCost);
     setSplitPnl('man-pnl', 'man-pnl-pct', manPnl, totCost);
+
+    // Win Rate: positions with positive P&L / total
+    const winning = positions.filter(p => {
+      const lv = prices[p.ticker]; if (!lv) return false;
+      const cp2 = p.side === 'YES' ? lv.yes_ask : (lv.no_ask != null ? lv.no_ask : null);
+      if (cp2 == null) return false;
+      return cp2 > p.entry_price;
+    }).length;
+    const total = positions.filter(p => prices[p.ticker]).length;
+    const wrEl = document.getElementById('winrate');
+    if (wrEl && total > 0) {
+      const wr = winning / total * 100;
+      wrEl.textContent = wr.toFixed(0) + '%';
+      wrEl.style.color = wr >= 50 ? '#4ade80' : '#f87171';
+    }
   }
 }
 
@@ -815,36 +893,25 @@ function setPnlFrame(frame, btn) {
   renderPnlChart(window._pnlData || []);
 }
 
-function renderPnlChart(trades) {
-  window._pnlData = trades;
-  const frame = window._pnlFrame || 'day';
-  const now = new Date();
+async function loadPnlChart() {
+  try {
+    const pnl = await api('/api/pnl');
+    if (!pnl || !pnl.points || !pnl.points.length) return;
+    renderPnlChart(pnl.points);
+  } catch(e) {}
+}
 
-  // Filter trades by frame
-  const filtered = trades.filter(t => {
-    if (!t._date) return false;
-    const d = new Date(t._date);
-    if (frame === 'day')   return t._date === now.toISOString().slice(0,10);
-    if (frame === 'month') return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
-    if (frame === 'year')  return d.getFullYear() === now.getFullYear();
-    return true;
-  });
-
-  if (!filtered.length) return; // keep pending state
-
-  // Group by date, cumulative P&L
-  const byDate = {};
-  for (const t of filtered) {
-    byDate[t._date] = (byDate[t._date] || 0) + (t.realized_pnl || 0);
-  }
-  const labels = Object.keys(byDate).sort();
-  let running = 0;
-  const data = labels.map(d => { running += byDate[d]; return parseFloat(running.toFixed(2)); });
+function renderPnlChart(points) {
+  if (!points || !points.length) return;
+  const labels = points.map(p => p.date);
+  const data   = points.map(p => p.pnl);
+  const running = data.length ? data[data.length-1] : 0;
 
   const pnlEmpty = document.getElementById('pnl-body');
+  const pnlWrap  = document.getElementById('pnl-wrap');
   const pnlCanvas = document.getElementById('pnl-c');
   if (pnlEmpty) pnlEmpty.style.display = 'none';
-  if (pnlCanvas) pnlCanvas.style.display = 'block';
+  if (pnlWrap)  pnlWrap.style.display = 'block';
 
   const ctx = pnlCanvas.getContext('2d');
   if (window._pnlChartObj) window._pnlChartObj.destroy();
@@ -882,7 +949,7 @@ function renderPnlChart(trades) {
 
 async function loadScouts(){ await Promise.all([loadWeather(),loadBestBets(),loadGeo(),loadCrypto()]); }
 async function loadAll(){
-  await Promise.all([loadAccount(), loadPositions(), loadTrades(), loadScouts()]);
+  await Promise.all([loadAccount(), loadPositions(), loadTrades(), loadScouts(), loadPnlChart()]);
 }
 loadAll();
 setInterval(loadAll, 30000);

@@ -20,15 +20,18 @@ def _activity_log_path():
 def log_trade(opportunity, size, contracts, order_result):
     """Log a placed trade to today's trade log."""
     entry = {
-        'timestamp': datetime.now().isoformat(),
-        'ticker': opportunity['ticker'],
-        'title': opportunity['title'],
-        'side': opportunity['side'],
-        'noaa_prob': opportunity['noaa_prob'],
-        'market_prob': opportunity['market_prob'],
-        'edge': opportunity['edge'],
+        'timestamp':    datetime.now().isoformat(),
+        'date':         date.today().isoformat(),
+        'ticker':       opportunity['ticker'],
+        'title':        opportunity['title'],
+        'side':         opportunity['side'],
+        'action':       opportunity.get('action', 'buy'),
+        'source':       opportunity.get('source', 'bot'),
+        'noaa_prob':    opportunity.get('noaa_prob'),
+        'market_prob':  opportunity.get('market_prob'),
+        'edge':         opportunity.get('edge'),
         'size_dollars': size,
-        'contracts': contracts,
+        'contracts':    contracts,
         'order_result': order_result,
     }
     with open(_today_log_path(), 'a') as f:

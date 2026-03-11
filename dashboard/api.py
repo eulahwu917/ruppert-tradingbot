@@ -77,6 +77,32 @@ SPORTS_EXCLUSIONS = [
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
+
+
+def is_settled_ticker(ticker: str) -> bool:
+    """Return True if ticker contains a past date (market already settled)."""
+    import re as _re
+    from datetime import date, datetime
+    today = date.today()
+    # Match patterns like 26MAR10, 26MAR11, 26JUN12, etc.
+    # Format: YY + MON + DD  (e.g. 26MAR10 = March 10, 2026)
+    months = {'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,
+              'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
+    parts = ticker.upper().split('-')
+    for part in parts:
+        m = _re.match(r'^(\d{2})([A-Z]{3})(\d{2})$', part)
+        if m:
+            yy, mon, dd = m.groups()
+            month_num = months.get(mon)
+            if month_num:
+                try:
+                    mkt_date = date(2000 + int(yy), month_num, int(dd))
+                    if mkt_date < today:
+                        return True
+                except Exception:
+                    pass
+    return False
+
 @app.get("/api/summary")
 def get_summary():
     trades = read_all_trades()
@@ -111,7 +137,19 @@ def get_account():
     # DEMO: fixed starting capital ($200 weather + $200 crypto)
     STARTING_CAPITAL = 400.00
 
-    trades = read_all_trades()
+    all_trades = read_all_trades()
+
+    # Deduplicate by ticker (same logic as positions endpoint)
+    # Only count each position once — ignore exit entries and duplicates
+    exited = {t.get('ticker') for t in all_trades if t.get('action') == 'exit'}
+    seen_tickers = set()
+    trades = []
+    for t in all_trades:
+        ticker = t.get('ticker', '')
+        if not ticker or ticker in exited or ticker in seen_tickers: continue
+        if t.get('action') == 'exit': continue
+        seen_tickers.add(ticker)
+        trades.append(t)
 
     # Auto = weather + crypto (fully autonomous)
     # Manual = geo + gaming + economics (David approves)
@@ -149,44 +187,81 @@ def get_today_trades():
 
 @app.get("/api/positions/active")
 def get_active_positions():
-    """Positions from trade log — fast, no external calls."""
-    trades = read_today_trades()
-    if not trades:
-        return []
-    total_cost = sum(t.get('size_dollars',0) for t in trades)
-    positions  = []
-    for t in trades:
+    """
+    All open positions across all trade log files.
+    - Reads all dates (not just today)
+    - Deduplicates by ticker (first entry = opening entry)
+    - Skips tickers that have a corresponding action=exit entry
+    - Fast: no external API calls
+    """
+    all_trades = read_all_trades()
+
+    # Build set of exited tickers
+    exited = {t.get('ticker') for t in all_trades if t.get('action') == 'exit'}
+
+    # Deduplicate: keep first (earliest) entry per ticker, skip exits + dupes + settled
+    seen = {}
+    for t in all_trades:
         ticker = t.get('ticker','')
-        title  = (t.get('title') or ticker).replace('**','')
-        side   = t.get('side','no')
-        pos_ratio = round(t.get('size_dollars',0) / total_cost * 100, 1) if total_cost else 0
+        if not ticker: continue
+        if ticker in exited: continue
+        if ticker in seen: continue  # already have opening entry
+        if t.get('action') == 'exit': continue
+        if is_settled_ticker(ticker): continue  # skip past-date markets
+        seen[ticker] = t
+
+    open_trades = list(seen.values())
+    if not open_trades:
+        return []
+
+    total_cost = sum(t.get('size_dollars', 0) for t in open_trades)
+    positions  = []
+    for t in open_trades:
+        ticker = t.get('ticker', '')
+        title  = (t.get('title') or ticker).replace('**', '')
+        side   = t.get('side', 'no')
+        source = t.get('source', 'bot')
+        mp     = t.get('market_prob', 0.5) or 0.5
+        ep     = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+        cost   = t.get('size_dollars', 0)
+        contracts = t.get('contracts', 0)
+        pos_ratio = round(cost / total_cost * 100) if total_cost else 0
+        edge      = t.get('edge')
+
         positions.append({
-            'ticker':        ticker,
-            'title':         title,
-            'side':          side.upper(),
-            'contracts':     t.get('contracts',0),
-            'entry_price':   (round((1 - t.get('market_prob',0)) * 100) if side == 'no'
-                              else round(t.get('market_prob',0) * 100)),
-            'current_price': None,
-            'total_cost':    round(t.get('size_dollars',0), 2),
-            'open_pnl':      0,
-            'open_pnl_pct':  0,
-            'pos_ratio':     pos_ratio,
-            'noaa_prob':     t.get('noaa_prob'),
-            'market_prob':   t.get('market_prob'),
-            'edge':          t.get('edge'),
-            'source':        t.get('source','bot'),
-            'timestamp':     t.get('timestamp',''),
-            'kalshi_url':    f"https://kalshi.com/markets/{ticker.split('-')[0].lower()}",
+            "ticker":     ticker,
+            "title":      title,
+            "side":       side,
+            "source":     source,
+            "entry_price": ep,
+            "cur_price":   ep,
+            "pnl":         0.0,
+            "pnl_pct":     0.0,
+            "cost":        round(cost, 2),
+            "contracts":   contracts,
+            "pos_ratio":   pos_ratio,
+            "edge":        round(edge, 3) if edge else None,
+            "date":        t.get('date') or t.get('_date', ''),
         })
+
     return positions
 
 
 @app.get("/api/positions/prices")
 def get_live_prices():
-    """Async live prices for positions — called separately by frontend."""
+    """Async live prices for ALL open positions — called separately by frontend."""
     import requests as req
-    trades = read_today_trades()
+    all_trades = read_all_trades()
+    # Deduplicate — same logic as positions endpoint
+    exited = {t.get('ticker') for t in all_trades if t.get('action') == 'exit'}
+    seen = set()
+    trades = []
+    for t in all_trades:
+        ticker = t.get('ticker','')
+        if not ticker or ticker in exited or ticker in seen: continue
+        if t.get('action') == 'exit': continue
+        seen.add(ticker)
+        trades.append(t)
     if not trades:
         return {}
     prices = {}
@@ -269,32 +344,46 @@ def get_position_statuses():
 
 @app.get("/api/kalshi/weather")
 def get_weather_markets():
-    """Weather markets with NOAA edge analysis."""
+    """
+    Weather markets — served from scanner cache for speed.
+    Background scanner (ruppert_cycle.py) writes logs/weather_scan.jsonl.
+    Fallback: raw Kalshi markets with no edge calc (fast, no NOAA calls).
+    """
+    import requests as req
+
+    # 1. Try cache first (written by background scanner)
+    cache = LOGS_DIR / "weather_scan.jsonl"
+    if cache.exists():
+        from datetime import datetime, timezone
+        age = (datetime.now(timezone.utc).timestamp() - cache.stat().st_mtime)
+        if age < 14400:  # < 4 hours old
+            markets = []
+            for line in cache.read_text(encoding='utf-8').splitlines():
+                try: markets.append(json.loads(line))
+                except: pass
+            if markets:
+                return markets
+
+    # 2. Fast fallback: raw Kalshi markets, no blocking NOAA/ensemble calls
     try:
-        import requests as req
-        from edge_detector import find_opportunities
-        series = ['KXHIGHNY','KXHIGHLA','KXHIGHCHI','KXHIGHHOU','KXHIGHMIA']
+        series = ['KXHIGHNY', 'KXHIGHLA', 'KXHIGHCHI', 'KXHIGHHOU', 'KXHIGHMIA', 'KXHIGHPHX']
         markets = []
         for s in series:
-            resp = req.get(
-                'https://api.elections.kalshi.com/trade-api/v2/markets',
-                params={'series_ticker': s, 'status': 'open', 'limit': 8},
-                timeout=5
-            )
-            if resp.status_code == 200:
-                markets.extend(resp.json().get('markets',[]))
-        opps = find_opportunities(markets)
-        opp_map = {o['ticker']: o for o in opps}
-        for m in markets:
-            o = opp_map.get(m.get('ticker',''))
-            if o:
-                m['_edge']     = o['edge']
-                m['_noaa_prob']= o['noaa_prob']
-                m['_action']   = o['action']
-                m['_has_edge'] = True
-            else:
-                m['_has_edge'] = False
-            m['kalshi_url'] = f"https://kalshi.com/markets/{m.get('ticker','')}"
+            try:
+                resp = req.get(
+                    'https://api.elections.kalshi.com/trade-api/v2/markets',
+                    params={'series_ticker': s, 'status': 'open', 'limit': 8},
+                    timeout=5
+                )
+                if resp.status_code == 200:
+                    for m in resp.json().get('markets', []):
+                        m['_has_edge']  = False
+                        m['_edge']      = None
+                        m['_noaa_prob'] = None
+                        m['kalshi_url'] = f"https://kalshi.com/markets/{m.get('ticker','')}"
+                        markets.append(m)
+            except Exception:
+                pass
         return markets[:30]
     except Exception as e:
         return {"error": str(e)}
@@ -432,3 +521,100 @@ def get_crypto_scan():
 def dashboard():
     with open(Path(__file__).parent / "templates" / "index.html") as f:
         return f.read()
+@app.get("/api/pnl")
+def get_pnl_history():
+    """
+    Real P&L history for the chart.
+    Open positions: (current_no_ask or yes_ask - entry_price) * contracts / 100
+    Settled positions: use Kalshi last_price to determine win/loss
+    """
+    import requests as req
+    from collections import defaultdict
+
+    all_trades = read_all_trades()
+
+    # Separate: settled (past-date) vs open
+    settled_tickers = {}  # ticker -> trade entry
+    open_tickers    = {}  # ticker -> trade entry
+
+    seen = set()
+    for t in all_trades:
+        ticker = t.get('ticker', '')
+        if not ticker or ticker in seen: continue
+        if t.get('action') == 'exit': continue
+        seen.add(ticker)
+        if is_settled_ticker(ticker):
+            settled_tickers[ticker] = t
+        else:
+            open_tickers[ticker] = t
+
+    pnl_by_date = defaultdict(float)
+
+    # ── Settled positions: fetch last_price from Kalshi ─────────────────────
+    for ticker, t in settled_tickers.items():
+        try:
+            r = req.get(
+                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                timeout=4
+            )
+            if r.status_code != 200: continue
+            m = r.json().get('market', {})
+            lp = m.get('last_price')  # YES settlement: 99=YES won, 1=NO won
+            if lp is None: continue
+
+            side      = t.get('side', 'no')
+            mp        = t.get('market_prob', 0.5) or 0.5
+            entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+            contracts = t.get('contracts', 0) or 0
+            # Limit crazy contracts (early log bug had 500)
+            cost      = t.get('size_dollars', 25)
+            if contracts > 0 and cost > 0:
+                contracts = min(contracts, int(cost / max(entry_p, 1) * 100) + 2)
+
+            cur_p = (100 - lp) if side == 'no' else lp
+            pnl   = round((cur_p - entry_p) * contracts / 100, 2)
+
+            trade_date = t.get('date') or t.get('_date', '2026-03-10')
+            pnl_by_date[trade_date] += pnl
+        except Exception:
+            pass
+
+    # ── Open positions: fetch current market prices ──────────────────────────
+    today_pnl = 0.0
+    for ticker, t in open_tickers.items():
+        try:
+            r = req.get(
+                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                timeout=4
+            )
+            if r.status_code != 200: continue
+            m = r.json().get('market', {})
+
+            side      = t.get('side', 'no')
+            mp        = t.get('market_prob', 0.5) or 0.5
+            entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+            contracts = t.get('contracts', 0) or 0
+            cost      = t.get('size_dollars', 25)
+            if contracts > 0 and cost > 0:
+                contracts = min(contracts, int(cost / max(entry_p, 1) * 100) + 2)
+
+            cur_p = m.get('no_ask', entry_p) if side == 'no' else m.get('yes_ask', entry_p)
+            if not cur_p: cur_p = entry_p
+            pnl = round((cur_p - entry_p) * contracts / 100, 2)
+            today_pnl += pnl
+        except Exception:
+            pass
+
+    from datetime import date as date_cls
+    today = str(date_cls.today())
+    pnl_by_date[today] = pnl_by_date.get(today, 0) + today_pnl
+
+    # Build cumulative time series
+    points = []
+    cumulative = 0.0
+    for d in sorted(pnl_by_date.keys()):
+        cumulative += pnl_by_date[d]
+        points.append({"date": d, "pnl": round(cumulative, 2)})
+
+    return {"points": points, "total": round(cumulative, 2)}
+
