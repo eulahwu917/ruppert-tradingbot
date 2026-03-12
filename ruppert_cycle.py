@@ -289,6 +289,16 @@ if MODE == 'report':
     print(f"\n7am report complete. {ts()}")
     sys.exit(0)
 
+# ── STEP 1b: WALLET LIST REFRESH (full mode — once daily before scans) ───────
+print("\n[1b] Refreshing smart money wallet list from Polymarket leaderboard...")
+try:
+    from bot.wallet_updater import update_wallet_list as _update_wallets
+    _wallets_updated = _update_wallets()
+    if not _wallets_updated:
+        print("  Wallet refresh skipped — API unavailable, using existing list")
+except Exception as e:
+    print(f"  Wallet refresh error (non-fatal): {e}")
+
 # ── STEP 2: SMART MONEY REFRESH (full mode only) ─────────────────────────────
 print("\n[2] Refreshing smart money signal...")
 try:

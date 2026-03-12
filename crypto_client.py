@@ -23,6 +23,7 @@ PRICE SOURCES:
   Binance geo-blocked in US — not used.
 """
 
+import json
 import requests
 import statistics
 import math
@@ -30,6 +31,7 @@ import time
 import logging
 from datetime import datetime, timezone
 from functools import lru_cache
+from pathlib import Path
 
 try:
     from scipy.stats import t as scipy_t
@@ -66,6 +68,41 @@ TOP_TRADER_WALLETS = {
     '0xTODO_wallet_placeholder_7': 'Trader7',
     '0xTODO_wallet_placeholder_8': 'Trader8',
 }
+
+# Path to the auto-refreshed wallet list produced by bot/wallet_updater.py
+_WALLETS_FILE = Path(__file__).parent / 'logs' / 'smart_money_wallets.json'
+
+
+def _load_wallets() -> dict:
+    """
+    Return smart money wallets as {address: display_name}.
+
+    Priority:
+      1. logs/smart_money_wallets.json — written daily by wallet_updater.update_wallet_list()
+      2. TOP_TRADER_WALLETS fallback   — hardcoded above, placeholders excluded
+
+    The JSON stores a flat list of proxyWallet addresses; display names are
+    derived from the first 8 characters of each address.
+    """
+    if _WALLETS_FILE.exists():
+        try:
+            data = json.loads(_WALLETS_FILE.read_text(encoding='utf-8'))
+            raw = data.get('wallets', [])
+            if raw and isinstance(raw, list):
+                logger.debug(
+                    '_load_wallets: loaded %d wallets from %s (updated %s)',
+                    len(raw), _WALLETS_FILE.name, data.get('updated_at', 'unknown')
+                )
+                return {addr: addr[:8] + '...' for addr in raw}
+        except Exception as e:
+            logger.warning('_load_wallets: failed to read smart_money_wallets.json: %s', e)
+
+    # Fallback: use hardcoded list, filtering out TODO placeholders
+    real_wallets = {k: v for k, v in TOP_TRADER_WALLETS.items()
+                    if not k.startswith('0xTODO')}
+    logger.debug('_load_wallets: using hardcoded fallback (%d wallets)', len(real_wallets))
+    return real_wallets
+
 
 # In-process cache (TTL: 5 min for prices, 15 min for smart money)
 _CACHE: dict = {}
@@ -458,7 +495,7 @@ def get_polymarket_smart_money(wallets: dict | None = None) -> dict:
         }
     """
     if wallets is None:
-        wallets = TOP_TRADER_WALLETS
+        wallets = _load_wallets()
 
     cached = _cache_get('smart_money', ttl=900)
     if cached:
@@ -549,6 +586,7 @@ def get_polymarket_smart_money(wallets: dict | None = None) -> dict:
         'raw_signals': raw_signals,
         'errors': errors,
         'tracked_wallets': len(wallets),
+        'wallet_source': 'dynamic' if _WALLETS_FILE.exists() else 'hardcoded_fallback',
     }
 
     _cache_set('smart_money', result)
