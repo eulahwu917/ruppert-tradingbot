@@ -450,7 +450,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 <script>
 
 // ── Utils ──────────────────────────────────────────────────────────────────────
-async function api(url) { try { return await (await fetch(url)).json(); } catch { return null; } }
+async function api(url, opts={}) { try { return await (await fetch(url, opts)).json(); } catch { return null; } }
 const $ = id => document.getElementById(id);
 const dollar = v => '$' + (v||0).toFixed(2);
 const pct    = v => v != null ? (v*100).toFixed(0)+'%' : '?';
@@ -984,10 +984,10 @@ function openGeoSidebar(m) {
     <div class="sb-sec"><div class="sb-lbl">Recent Headlines</div>${hls}</div>
     <div class="sb-sec"><div class="sb-lbl">Your Decision</div>
       <div class="sb-actions" id="${uid}-r">
-        <button class="btn btn-yes" onclick="doAct('${uid}','BET YES','${b.ticker}',${yes});">&#x2191; YES (${yes}¢)</button>
-        <button class="btn btn-no"  onclick="doAct('${uid}','BET NO','${b.ticker}',${no})">&#x2193; NO (${no}¢)</button>
-        <button class="btn btn-wch" onclick="doAct('${uid}','WATCH','${b.ticker}')">${isWatched(b.ticker||'')?'Un-watch':'&#x1F441; Watch'}</button>
-        <button class="btn btn-pas" onclick="doAct('${uid}','PASS','${b.ticker}',0)">Pass</button>>
+        <button class="btn btn-yes" onclick="doAct('${uid}','BET YES','${m.ticker}',${yes});">&#x2191; YES (${yes}¢)</button>
+        <button class="btn btn-no"  onclick="doAct('${uid}','BET NO','${m.ticker}',${no})">&#x2193; NO (${no}¢)</button>
+        <button class="btn btn-wch" onclick="doAct('${uid}','WATCH','${m.ticker}')">${isWatched(m.ticker||'')?'Un-watch':'&#x1F441; Watch'}</button>
+        <button class="btn btn-pas" onclick="doAct('${uid}','PASS','${m.ticker}',0)">Pass</button>
       </div>
       <div id="${uid}-d" style="display:none;margin-top:10px;font-size:12px;font-weight:600;"></div>
     </div>

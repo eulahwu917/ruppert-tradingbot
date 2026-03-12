@@ -20,7 +20,8 @@ ALERT_LOG   = LOGS / 'cycle_log.jsonl'
 
 import config
 from kalshi_client import KalshiClient
-from logger import log_trade, log_activity
+from logger import log_trade, log_activity, get_daily_exposure
+from bot.strategy import check_daily_cap
 
 DRY_RUN = True  # Flip to False when going live
 
@@ -73,7 +74,7 @@ traded_tickers = set()
 print("\n[1] Position check...")
 try:
     from openmeteo_client import get_full_weather_signal
-    from edge_detector import detect_edge
+    from edge_detector import parse_date_from_ticker, parse_threshold_from_ticker
 
     trade_log = LOGS / f"trades_{date.today().isoformat()}.jsonl"
     open_positions = []
@@ -111,24 +112,28 @@ try:
             # Weather: check ensemble if close to expiry
             alert_msg = None
             if 'KXHIGH' in ticker:
-                # Parse city
-                city_map = {'MIA': 'miami', 'NY': 'new_york', 'CHI': 'chicago', 'LA': 'los_angeles', 'HOU': 'houston', 'PHX': 'phoenix'}
-                city = next((v for k, v in city_map.items() if k in ticker), None)
-                if city:
-                    try:
-                        sig = get_full_weather_signal(city)
-                        band_str = ticker.split('-B')[-1]
-                        band_lo = float(band_str)
-                        forecast = sig.get('tomorrow_high_f', 0)
-                        margin = abs(forecast - band_lo)
-                        ens_prob = sig.get('ensemble_prob', 0.5)
+                try:
+                    # Derive correct args for get_full_weather_signal from the ticker
+                    series_ticker = ticker.split('-')[0].upper()  # e.g. KXHIGHMIA
+                    threshold_f = parse_threshold_from_ticker(ticker)   # e.g. 85.5
+                    target_date = parse_date_from_ticker(ticker)        # e.g. date(2026,3,12)
+                    if threshold_f is not None:
+                        sig = get_full_weather_signal(series_ticker, threshold_f, target_date)
+                        # forecast: use tomorrow_high if not same-day, else today_high
+                        conditions = sig.get('conditions', {})
+                        if sig.get('is_same_day'):
+                            forecast = conditions.get('today_high_f') or 0
+                        else:
+                            forecast = conditions.get('tomorrow_high_f') or 0
+                        margin = abs(forecast - threshold_f) if forecast else 999
+                        ens_prob = sig.get('final_prob', 0.5) or 0.5
 
                         if side == 'no':
                             # NO wins if forecast OUTSIDE band — check if forecast moved inside
                             if margin < 1.0:
-                                alert_msg = f'WARNING: {ticker} forecast {forecast:.1f}F only {margin:.1f}F from band edge {band_lo}F | P&L ${pnl:+.2f}'
+                                alert_msg = f'WARNING: {ticker} forecast {forecast:.1f}F only {margin:.1f}F from band edge {threshold_f}F | P&L ${pnl:+.2f}'
                                 push_alert('warning', alert_msg, ticker=ticker, pnl=pnl)
-                            elif ens_prob > 0.80 and side == 'no':
+                            elif ens_prob > 0.80:
                                 alert_msg = f'EXIT SIGNAL: {ticker} ensemble {ens_prob:.0%} against NO position | P&L ${pnl:+.2f}'
                                 push_alert('exit', alert_msg, ticker=ticker, pnl=pnl)
 
@@ -137,8 +142,8 @@ try:
                                 print(f'  AUTO-EXIT: {ticker} P&L=${pnl:+.2f} margin={margin:.1f}F')
                                 actions_taken.append(('exit', ticker, side, cur_p, contracts, pnl))
                                 traded_tickers.add(ticker)
-                    except Exception as e:
-                        print(f'  Weather check error for {ticker}: {e}')
+                except Exception as e:
+                    print(f'  Weather check error for {ticker}: {e}')
 
             print(f'  {ticker:38} {side.upper()} entry={entry_p}c cur={cur_p}c P&L=${pnl:+.2f}' +
                   (f' [ALERT]' if alert_msg else ''))
@@ -200,8 +205,8 @@ except Exception as e:
 print("\n[3] Scanning for new weather opportunities...")
 new_weather = []
 try:
-    from main import scan_weather
-    new_weather = scan_weather(dry_run=DRY_RUN)
+    from main import run_weather_scan
+    new_weather = run_weather_scan(dry_run=DRY_RUN)
     if new_weather:
         print(f"  {len(new_weather)} new weather trade(s) executed")
         for t in new_weather:
@@ -289,6 +294,21 @@ try:
 
     # Sort by edge, take top 3 per run max
     new_crypto.sort(key=lambda x: x['edge'], reverse=True)
+
+    # ── Issue 5: Daily cap check before executing crypto trades ───────────────
+    try:
+        _total_capital  = client.get_balance()
+        _deployed_today = get_daily_exposure()
+        _cap_remaining  = check_daily_cap(_total_capital, _deployed_today)
+        if _cap_remaining <= 0:
+            print(f"  [CapCheck] Daily cap reached (${_deployed_today:.2f} deployed, "
+                  f"max ${_total_capital * 0.70:.2f}). Skipping crypto trades this cycle.")
+            new_crypto = []
+        else:
+            print(f"  [CapCheck] Cap OK — ${_cap_remaining:.2f} remaining (${_deployed_today:.2f} deployed)")
+    except Exception as e:
+        print(f"  [CapCheck] Cap check error: {e} — proceeding with caution")
+
     for t in new_crypto[:3]:
         opp = {
             'ticker': t['ticker'], 'title': t['title'], 'side': t['side'],

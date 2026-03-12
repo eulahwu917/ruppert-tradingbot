@@ -34,7 +34,7 @@ def read_today_trades():
     log_path = LOGS_DIR / f"trades_{date.today().isoformat()}.jsonl"
     trades = []
     if log_path.exists():
-        with open(log_path) as f:
+        with open(log_path, encoding='utf-8') as f:
             for line in f:
                 try: trades.append(json.loads(line))
                 except: pass
@@ -193,7 +193,7 @@ def get_summary():
         "today_trades":    len(today),
         "total_exposure":  round(sum(t.get('size_dollars',0) for t in trades), 2),
         "today_exposure":  round(sum(t.get('size_dollars',0) for t in today), 2),
-        "mode": "DRY RUN", "status": "RUNNING",
+        "mode": get_mode().upper(), "status": "RUNNING",
     }
 
 
@@ -304,7 +304,7 @@ def get_deposits():
     deposits = []
     total = 0.0
     if deposits_path.exists():
-        with open(deposits_path) as f:
+        with open(deposits_path, encoding='utf-8') as f:
             for line in f:
                 try:
                     d = json.loads(line)
@@ -323,7 +323,7 @@ async def add_deposit(request: Request):
         return {"error": "Amount must be positive"}
     entry = {"date": date.today().isoformat(), "amount": round(amount, 2), "note": note}
     deposits_path = LOGS_DIR / "demo_deposits.jsonl"
-    with open(deposits_path, 'a') as f:
+    with open(deposits_path, 'a', encoding='utf-8') as f:
         f.write(json.dumps(entry) + '\n')
     return {"ok": True, "entry": entry}
 
@@ -482,7 +482,7 @@ async def approve_highconviction(req: Request):
     from datetime import datetime as _dt
     body = await req.json()
     ticker = body.get('ticker', '')
-    log_path = BASE_DIR / 'logs' / 'highconviction_approved.jsonl'
+    log_path = LOGS_DIR / 'highconviction_approved.jsonl'
     with open(log_path, 'a', encoding='utf-8') as f:
         f.write(_json.dumps({'ticker': ticker, 'approved_at': _dt.utcnow().isoformat(), 'status': 'pending'}) + '\n')
     return {'status': 'approved', 'ticker': ticker}
@@ -494,7 +494,7 @@ async def pass_highconviction(req: Request):
     from datetime import datetime as _dt
     body = await req.json()
     ticker = body.get('ticker', '')
-    log_path = BASE_DIR / 'logs' / 'highconviction_passed.jsonl'
+    log_path = LOGS_DIR / 'highconviction_passed.jsonl'
     with open(log_path, 'a', encoding='utf-8') as f:
         f.write(_json.dumps({'ticker': ticker, 'passed_at': _dt.utcnow().isoformat()}) + '\n')
     return {'status': 'passed', 'ticker': ticker}
@@ -788,17 +788,18 @@ def get_crypto_scan():
 
     # ── Kalshi crypto markets — raw, fast (no blocking scanner) ─────────────
     # Dashboard shows live market prices; edge calc runs separately via bot scan
-    # Check for cached scanner results first (written by the bot scanner)
-    scan_cache = LOGS_DIR / "crypto_scan.jsonl"
+    # Check for cached scanner results first (written by crypto_scanner.py)
+    # crypto_scanner.py writes logs/crypto_scan_latest.json (JSON, not JSONL)
+    scan_cache = LOGS_DIR / "crypto_scan_latest.json"
     if scan_cache.exists():
         try:
             import time as _time
             # Use cache if fresher than 30 minutes
             if _time.time() - scan_cache.stat().st_mtime < 1800:
                 with open(scan_cache, encoding='utf-8') as f:
-                    for line in f:
-                        try: result["opportunities"].append(json.loads(line))
-                        except: pass
+                    data = json.load(f)
+                    for opp in data.get('opportunities', []):
+                        result["opportunities"].append(opp)
         except Exception:
             pass
 

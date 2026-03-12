@@ -10,7 +10,7 @@ SECRETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'secrets')
 CONFIG_FILE = os.path.join(SECRETS_DIR, 'kalshi_config.json')
 
 def load_config():
-    with open(CONFIG_FILE, 'r') as f:
+    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
         cfg = json.load(f)
     return cfg
 

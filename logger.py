@@ -34,7 +34,7 @@ def log_trade(opportunity, size, contracts, order_result):
         'contracts':    contracts,
         'order_result': order_result,
     }
-    with open(_today_log_path(), 'a') as f:
+    with open(_today_log_path(), 'a', encoding='utf-8') as f:
         f.write(json.dumps(entry) + '\n')
     print(f"[Log] Trade logged: {opportunity['ticker']} {opportunity['side'].upper()} ${size:.2f}")
 
@@ -48,7 +48,7 @@ def log_opportunity(opportunity):
         'edge': opportunity['edge'],
         'action': opportunity['action'],
     }
-    with open(_activity_log_path(), 'a') as f:
+    with open(_activity_log_path(), 'a', encoding='utf-8') as f:
         f.write(json.dumps(entry) + '\n')
 
 
@@ -56,7 +56,7 @@ def log_activity(message):
     """Log general bot activity."""
     entry = f"[{datetime.now().strftime('%H:%M:%S')}] {message}"
     print(entry)
-    with open(_activity_log_path(), 'a') as f:
+    with open(_activity_log_path(), 'a', encoding='utf-8') as f:
         f.write(entry + '\n')
 
 
@@ -67,7 +67,7 @@ def get_daily_exposure():
         return 0.0
 
     total = 0.0
-    with open(log_path, 'r') as f:
+    with open(log_path, 'r', encoding='utf-8') as f:
         for line in f:
             try:
                 entry = json.loads(line)
@@ -84,7 +84,7 @@ def get_daily_summary():
         return {'trades': 0, 'total_exposure': 0.0}
 
     trades = []
-    with open(log_path, 'r') as f:
+    with open(log_path, 'r', encoding='utf-8') as f:
         for line in f:
             try:
                 trades.append(json.loads(line))

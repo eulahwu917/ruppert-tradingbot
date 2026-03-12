@@ -20,7 +20,7 @@ class KalshiClient:
         self.environment = cfg.get_environment()
 
         # Read private key
-        with open(self.private_key_path, 'r') as f:
+        with open(self.private_key_path, 'r', encoding='utf-8') as f:
             private_key_pem = f.read()
 
         # Configure SDK

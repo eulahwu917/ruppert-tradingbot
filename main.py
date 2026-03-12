@@ -147,7 +147,7 @@ def run_exit_scan(dry_run=True):
             # Derive hours_to_settlement from ticker date component
             try:
                 date_part = ticker.split('-')[1]          # e.g. "26MAR11"
-                target_dt = datetime.strptime("20" + date_part, "%Y%d%b%d").replace(hour=23, minute=59)
+                target_dt = datetime.strptime("20" + date_part, "%Y%b%d").replace(hour=23, minute=59)
                 hours_to_settlement = max(0.0, (target_dt - datetime.now()).total_seconds() / 3600)
             except Exception:
                 hours_to_settlement = 24.0
@@ -278,6 +278,9 @@ def run_weather_scan(dry_run=True):
                 # Pass strategy-computed size so Trader skips redundant risk.py sizing
                 opp['strategy_size'] = decision['size']
                 approved_opps.append(opp)
+                # W14: refresh deployed_today so subsequent opportunities in this cycle
+                # see the updated cap (prevents over-deployment if multiple trades fire)
+                deployed_today += decision['size']
                 log_activity(f"  [Strategy] ENTER {opp['ticker']}: {decision['reason']}")
             else:
                 log_activity(f"  [Strategy] SKIP  {opp['ticker']}: {decision['reason']}")

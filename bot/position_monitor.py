@@ -196,9 +196,9 @@ def check_near_settlement(ticker: str) -> bool:
         # hour we might exit 30 min early, which is still fine)
         settle_utc = settle_dt.replace(tzinfo=timezone.utc) if settle_dt.tzinfo else \
                      settle_dt.replace(tzinfo=timezone.utc)
-        # Shift: Eastern ≈ UTC-5 → add 5 hours to convert ET→UTC
+        # Shift: Eastern ≈ UTC-4 (EDT, Mar–Nov) → add 4 hours to convert ET→UTC
         from datetime import timedelta
-        settle_utc_adjusted = settle_utc + timedelta(hours=5)
+        settle_utc_adjusted = settle_utc + timedelta(hours=4)
 
         now_utc = datetime.now(timezone.utc)
         delta   = settle_utc_adjusted - now_utc

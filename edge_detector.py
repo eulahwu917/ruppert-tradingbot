@@ -111,7 +111,7 @@ def parse_date_from_ticker(ticker: str) -> date:
         parts = ticker.split('-')
         if len(parts) >= 2:
             date_str = parts[1]  # e.g. "26MAR11"
-            return datetime.strptime("20" + date_str, "%Y%d%b%d").date()
+            return datetime.strptime("20" + date_str, "%Y%b%d").date()
     except Exception:
         pass
     return date.today()
