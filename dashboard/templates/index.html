@@ -605,7 +605,10 @@ async function loadAccount() {
 
   // Store globally so loadLivePrices can compute Account Value = Balance + Open P&L
 
-  $('bp').textContent      = dollar(acct.buying_power);
+  // Buying power = deposits + realized gains (closed P&L) - currently deployed
+  // window._closedPnl is set by loadClosedPnl() from /api/pnl (includes settled + manual exits)
+  const realBuyingPower = (acct.starting_capital || 400) + (window._closedPnl || 0) - (acct.total_deployed || 0);
+  $('bp').textContent = dollar(Math.max(realBuyingPower, 0));
   $('bot-dep').textContent = dollar(acct.bot_deployed);
   $('man-dep').textContent = dollar(acct.manual_deployed);
   $('bot-cnt').textContent = acct.bot_trade_count || 0;
@@ -767,7 +770,8 @@ async function loadLivePrices(positions) {
     if(oe)oe.innerHTML=`<span class="${pcls(open)}">${sign(open)}${dollar(open)}</span><br><span style="font-size:9px;color:${open>=0?'#1a4a1a':'#4a1a1a'}">${sign(opc)}${opc.toFixed(1)}%</span>`;
   }
   // Push live P&L into account bar (mark-to-market, real-time)
-  if (totCost > 0) {
+  // Always update even if totCost=0 (e.g. all positions settled, open P&L = $0)
+  if (true) {
     // Classify by source
     let botPnl = 0, manPnl = 0;
     for (const p of positions) {

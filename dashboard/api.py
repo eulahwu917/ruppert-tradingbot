@@ -161,25 +161,35 @@ def settlement_date_from_ticker(ticker: str):
     return None
 
 def is_settled_ticker(ticker: str) -> bool:
-    """Return True if ticker contains a past date (market already settled)."""
+    """Return True if ticker contains a past date (market already settled).
+    Handles both date-only (26MAR11) and date+time (26MAR1117) formats.
+    """
     import re as _re
     from datetime import date, datetime
     today = date.today()
-    # Match patterns like 26MAR10, 26MAR11, 26JUN12, etc.
-    # Format: YY + MON + DD  (e.g. 26MAR10 = March 10, 2026)
     months = {'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,
               'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
     parts = ticker.upper().split('-')
     for part in parts:
-        m = _re.match(r'^(\d{2})([A-Z]{3})(\d{2})$', part)
+        # Match 26MAR11 (date only) OR 26MAR1117 (date + 2-digit hour)
+        m = _re.match(r'^(\d{2})([A-Z]{3})(\d{2})(\d{2})?$', part)
         if m:
-            yy, mon, dd = m.groups()
+            yy, mon, dd = m.group(1), m.group(2), m.group(3)
             month_num = months.get(mon)
             if month_num:
                 try:
                     mkt_date = date(2000 + int(yy), month_num, int(dd))
                     if mkt_date < today:
                         return True
+                    # Same day but with hour — check if settlement time has passed
+                    if mkt_date == today and m.group(4):
+                        hour = int(m.group(4))
+                        # Convert EDT (UTC-4) to local comparison
+                        from datetime import datetime as _dt
+                        import time as _time
+                        now_hour_edt = (_dt.utcnow().hour - 4) % 24
+                        if now_hour_edt >= hour:
+                            return True
                 except Exception:
                     pass
     return False
@@ -265,6 +275,7 @@ def get_account():
                     try: STARTING_CAPITAL += json.loads(line).get('amount', 0)
                     except: pass
         if STARTING_CAPITAL == 0: STARTING_CAPITAL = 400.0  # fallback
+        closed_pnl_realized = 0.0  # frontend adds closed P&L from /api/pnl
         buying_power = max(STARTING_CAPITAL - total_deployed, 0)
 
     return {
