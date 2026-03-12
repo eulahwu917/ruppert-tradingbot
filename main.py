@@ -248,7 +248,16 @@ def run_weather_scan(dry_run=True):
         # ── Daily cap check ───────────────────────────────────────────────────
         # Use computed capital (deposits + realized P&L) — NOT client.get_balance()
         # which returns a stale Kalshi API demo balance.
-        total_capital  = get_computed_capital()
+        try:  # W3: guard against get_computed_capital() raising an exception
+            total_capital = get_computed_capital()
+        except Exception as _cap_err:
+            import sys as _sys
+            print(
+                f"[WARNING] run_weather_scan: get_computed_capital() failed: {_cap_err} "
+                "— using $400.00 fallback.",
+                file=_sys.stderr,
+            )
+            total_capital = 400.0
         deployed_today = get_daily_exposure()
         cap_remaining  = check_daily_cap(total_capital, deployed_today)
         log_activity(

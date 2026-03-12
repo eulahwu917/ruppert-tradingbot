@@ -268,15 +268,38 @@ def get_account():
         # Buying power = balance minus currently deployed (open positions)
         buying_power = max(STARTING_CAPITAL - total_deployed, 0)
     else:
-        # Demo: sum of demo deposits
+        # Demo: computed capital = deposits + realized P&L from all exit records.
+        # Mirrors get_computed_capital() in logger.py — inlined here to avoid circular imports.
+        # W4: replaces stale get_balance() display (~$172) with true computed capital (~$510).
         deposits_path = LOGS_DIR / "demo_deposits.jsonl"
         STARTING_CAPITAL = 0.0
         if deposits_path.exists():
-            with open(deposits_path, encoding='utf-8') as f:
-                for line in f:
-                    try: STARTING_CAPITAL += json.loads(line).get('amount', 0)
-                    except: pass
-        if STARTING_CAPITAL == 0: STARTING_CAPITAL = 400.0  # fallback
+            try:
+                with open(deposits_path, encoding='utf-8') as f:
+                    for line in f:
+                        try: STARTING_CAPITAL += json.loads(line).get('amount', 0)
+                        except: pass
+            except Exception:
+                pass
+        if STARTING_CAPITAL == 0:
+            STARTING_CAPITAL = 400.0  # fallback if deposits file missing or empty
+        # Add realized P&L from all exit records across all trade logs
+        import glob as _glob
+        for _log_path in sorted(_glob.glob(str(LOGS_DIR / "trades_*.jsonl"))):
+            try:
+                with open(_log_path, encoding='utf-8') as f:
+                    for line in f:
+                        try:
+                            rec = json.loads(line)
+                            if rec.get('action') == 'exit':
+                                pnl = rec.get('realized_pnl')
+                                if pnl is not None:
+                                    STARTING_CAPITAL += float(pnl)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+        STARTING_CAPITAL = round(STARTING_CAPITAL, 2)
         buying_power = max(STARTING_CAPITAL - total_deployed, 0)
 
     return {

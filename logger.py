@@ -91,34 +91,53 @@ def get_computed_capital():
     deposits_path = os.path.join(LOG_DIR, 'demo_deposits.jsonl')
     total_deposits = 0.0
     if os.path.exists(deposits_path):
-        with open(deposits_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    record = json.loads(line)
-                    total_deposits += float(record.get('amount', 0.0))
-                except Exception:
-                    pass
+        try:  # W2: wrap file open in try/except
+            with open(deposits_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        total_deposits += float(record.get('amount', 0.0))
+                    except Exception:
+                        pass
+        except Exception as _e:
+            import sys as _sys
+            print(f"[WARNING] get_computed_capital: failed to read deposits file: {_e}", file=_sys.stderr)
+
+    # W1: Floor — if no deposits found (file missing or empty/unreadable), fall back
+    # to $400 baseline to prevent zero-capital lockout of check_daily_cap().
+    if total_deposits == 0.0:
+        import sys as _sys
+        print(
+            "[WARNING] get_computed_capital: deposits file missing or empty — "
+            "using $400.00 floor to prevent zero-capital lockout.",
+            file=_sys.stderr,
+        )
+        total_deposits = 400.0
 
     # ── Sum realized P&L from all exit records across all trade logs ──────────
     total_realized_pnl = 0.0
     trade_log_pattern = os.path.join(LOG_DIR, 'trades_*.jsonl')
     for log_path in sorted(glob.glob(trade_log_pattern)):
-        with open(log_path, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    record = json.loads(line)
-                    if record.get('action') == 'exit':
-                        pnl = record.get('realized_pnl')
-                        if pnl is not None:
-                            total_realized_pnl += float(pnl)
-                except Exception:
-                    pass
+        try:  # W2: wrap each trade log open in try/except
+            with open(log_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                        if record.get('action') == 'exit':
+                            pnl = record.get('realized_pnl')
+                            if pnl is not None:
+                                total_realized_pnl += float(pnl)
+                    except Exception:
+                        pass
+        except Exception as _e:
+            import sys as _sys
+            print(f"[WARNING] get_computed_capital: failed to read trade log {log_path}: {_e}", file=_sys.stderr)
 
     return round(total_deposits + total_realized_pnl, 2)
 
