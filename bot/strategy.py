@@ -1,0 +1,460 @@
+"""
+Trading Strategy Layer — Module-Agnostic Capital Deployment
+
+This module is the single source of truth for ALL sizing, entry, add-on, and
+exit decisions. Market modules (weather, crypto, etc.) return *signals*; they
+never touch dollar amounts. Strategy converts signals → dollar decisions.
+
+Signal dict contract (produced by each module):
+    {
+        'edge':                float,   # model_prob - market_implied_prob
+        'win_prob':            float,   # model's estimated win probability
+        'confidence':          float,   # 0–1 model confidence score
+        'hours_to_settlement': float,   # hours until market settles
+        'module':              str,     # 'weather' | 'crypto'
+        'vol_ratio':           float,   # optional; 1.0 = normal vol (default)
+    }
+"""
+
+import sys
+
+# ---------------------------------------------------------------------------
+# Module-specific thresholds (mirrors config.py constants)
+# ---------------------------------------------------------------------------
+MIN_EDGE = {
+    'weather': 0.15,
+    'crypto':  0.10,
+}
+MIN_CONFIDENCE   = 0.50          # universal minimum confidence to enter
+MIN_HOURS_ENTRY  = 0.5           # must be ≥ 30 min from settlement to open
+MIN_HOURS_ADD    = 2.0           # must be ≥ 2 h from settlement to add
+DAILY_CAP_RATIO  = 0.70          # max fraction of total capital deployable per day
+MAX_POSITION_CAP = 25.0          # hard dollar cap per single position entry
+PCT_CAPITAL_CAP  = 0.025         # max 2.5% of total capital per entry
+KELLY_FRACTION   = 0.25          # fractional Kelly multiplier (conservative)
+
+
+# ---------------------------------------------------------------------------
+# 1. Position Sizing
+# ---------------------------------------------------------------------------
+
+def calculate_position_size(edge: float, win_prob: float, capital: float,
+                             vol_ratio: float = 1.0) -> float:
+    """
+    Compute a dollar position size using fractional Kelly criterion.
+
+    Args:
+        edge:      Estimated edge = model_prob − market_implied_prob.
+        win_prob:  Model's estimated probability of winning (0 < p < 1).
+        capital:   Total available capital in dollars.
+        vol_ratio: Volatility ratio vs baseline; >1.0 = higher vol → smaller
+                   position.  Defaults to 1.0 (no adjustment).
+
+    Returns:
+        Dollar amount to deploy (float).  Always ≥ 0.
+
+    Formula:
+        f           = edge / (1 − win_prob)    ← Kelly fraction
+        kelly_size  = KELLY_FRACTION * f * capital
+        kelly_size *= 1 / vol_ratio            ← vol shrinkage
+        size        = min(kelly_size, $25, 2.5% of capital)
+    """
+    if win_prob <= 0 or win_prob >= 1 or edge <= 0 or capital <= 0:
+        return 0.0
+
+    f = edge / (1.0 - win_prob)
+    kelly_size = KELLY_FRACTION * f * capital
+
+    # Vol adjustment: high vol → smaller position
+    if vol_ratio > 0:
+        kelly_size *= (1.0 / vol_ratio)
+
+    # Hard caps
+    size = min(kelly_size, MAX_POSITION_CAP, capital * PCT_CAPITAL_CAP)
+    return round(max(0.0, size), 2)
+
+
+# ---------------------------------------------------------------------------
+# 2. Daily Capital Cap
+# ---------------------------------------------------------------------------
+
+def check_daily_cap(total_capital: float, deployed_today: float) -> float:
+    """
+    Return remaining dollar capacity for today under the daily cap rule.
+
+    Max daily deployment = 70% of total capital.
+
+    Args:
+        total_capital:  Total portfolio capital in dollars.
+        deployed_today: Dollars already committed today across all modules.
+
+    Returns:
+        Remaining dollars available to deploy today (≥ 0).
+    """
+    max_daily = total_capital * DAILY_CAP_RATIO
+    remaining = max_daily - deployed_today
+    return round(max(0.0, remaining), 2)
+
+
+# ---------------------------------------------------------------------------
+# 3. Entry Decision
+# ---------------------------------------------------------------------------
+
+def should_enter(signal: dict, capital: float, deployed_today: float) -> dict:
+    """
+    Decide whether to open a new position.
+
+    Applies edge, confidence, time-to-settlement, and daily-cap filters
+    before sizing.  All sizing logic lives here; the market module provides
+    only the signal.
+
+    Args:
+        signal:         Signal dict (see module contract at top of file).
+        capital:        Total available capital in dollars.
+        deployed_today: Dollars already deployed today.
+
+    Returns:
+        {'enter': bool, 'size': float, 'reason': str}
+    """
+    module            = signal.get('module', 'unknown')
+    edge              = signal.get('edge', 0.0)
+    win_prob          = signal.get('win_prob', 0.0)
+    confidence        = signal.get('confidence', 0.0)
+    hours             = signal.get('hours_to_settlement', 0.0)
+    vol_ratio         = signal.get('vol_ratio', 1.0)
+
+    # --- Time gate ---
+    if hours < MIN_HOURS_ENTRY:
+        return {'enter': False, 'size': 0.0,
+                'reason': f'too_close_to_settlement ({hours:.2f}h < {MIN_HOURS_ENTRY}h)'}
+
+    # --- Confidence gate ---
+    if confidence < MIN_CONFIDENCE:
+        return {'enter': False, 'size': 0.0,
+                'reason': f'low_confidence ({confidence:.2f} < {MIN_CONFIDENCE})'}
+
+    # --- Edge gate (module-specific) ---
+    min_edge = MIN_EDGE.get(module, MIN_EDGE['weather'])
+    if edge < min_edge:
+        return {'enter': False, 'size': 0.0,
+                'reason': f'insufficient_edge ({edge:.3f} < {min_edge} for {module})'}
+
+    # --- Daily cap gate ---
+    room = check_daily_cap(capital, deployed_today)
+    if room <= 0:
+        return {'enter': False, 'size': 0.0, 'reason': 'daily_cap_reached'}
+
+    # --- Size ---
+    raw_size = calculate_position_size(edge, win_prob, capital, vol_ratio)
+    size = round(min(raw_size, room), 2)
+
+    if size <= 0:
+        return {'enter': False, 'size': 0.0, 'reason': 'kelly_size_zero'}
+
+    return {
+        'enter':  True,
+        'size':   size,
+        'reason': f'ok (edge={edge:.3f}, conf={confidence:.2f}, '
+                  f'kelly=${raw_size:.2f}, capped=${size:.2f})',
+    }
+
+
+# ---------------------------------------------------------------------------
+# 4. Add-On Decision
+# ---------------------------------------------------------------------------
+
+def should_add(signal: dict, entry_signal: dict,
+               current_allocation: float, max_allocation: float = 50.0) -> dict:
+    """
+    Decide whether to add to an existing position.
+
+    Uses confidence drift relative to the original entry signal to determine
+    both *whether* and *how much* to add.
+
+    Args:
+        signal:             Latest signal from the module.
+        entry_signal:       Signal that triggered the original entry.
+        current_allocation: Dollars currently allocated to this position.
+        max_allocation:     Maximum total allocation for this position ($).
+
+    Returns:
+        {'add': bool, 'size': float, 'reason': str}
+    """
+    hours             = signal.get('hours_to_settlement', 0.0)
+    confidence_now    = signal.get('confidence', 0.0)
+    confidence_entry  = entry_signal.get('confidence', 0.0)
+    confidence_delta  = confidence_now - confidence_entry
+
+    # --- Time gate ---
+    if hours < MIN_HOURS_ADD:
+        return {'add': False, 'size': 0.0,
+                'reason': f'too_close_to_settlement ({hours:.2f}h < {MIN_HOURS_ADD}h)'}
+
+    # --- Confidence drift gate ---
+    if confidence_delta < 0.10:
+        return {'add': False, 'size': 0.0, 'reason': 'drift_too_small'}
+
+    remaining = max_allocation - current_allocation
+    if remaining <= 0:
+        return {'add': False, 'size': 0.0, 'reason': 'max_allocation_reached'}
+
+    # --- Scale add size by confidence delta ---
+    if confidence_delta >= 0.50:
+        scale = 1.00       # 100% of remaining
+        tier  = 'delta≥0.50'
+    elif confidence_delta >= 0.25:
+        scale = 0.50       # 50% of remaining
+        tier  = 'delta≥0.25'
+    else:
+        scale = 0.25       # 25% of remaining (0.10–0.25 bucket)
+        tier  = 'delta≥0.10'
+
+    size = round(remaining * scale, 2)
+
+    if size <= 0:
+        return {'add': False, 'size': 0.0, 'reason': 'computed_size_zero'}
+
+    return {
+        'add':    True,
+        'size':   size,
+        'reason': f'confidence_drift ({tier}, Δ={confidence_delta:.3f}, '
+                  f'scale={scale:.0%}, add=${size:.2f})',
+    }
+
+
+# ---------------------------------------------------------------------------
+# 5. Exit Decision
+# ---------------------------------------------------------------------------
+
+def should_exit(current_bid: float, entry_price: float,
+                signal: dict, entry_signal: dict,
+                hours_to_settlement: float, module: str) -> dict:
+    """
+    Decide whether (and how much) of a position to exit.
+
+    Rules are evaluated in strict priority order:
+
+    1. 95¢ rule      — contract near certain; take full profit now.
+    2. 70% gain rule — realised gain ≥ 70% of max upside; full exit.
+    3. Near-settlement hold — < 30 min to settlement; let it ride.
+    4. Reversal rule — edge collapsed vs entry; scale exit by severity.
+    5. Default hold.
+
+    Args:
+        current_bid:         Current best bid in cents (0–100).
+        entry_price:         Price paid at entry in cents (0–100).
+        signal:              Latest signal from the module.
+        entry_signal:        Signal that triggered the original entry.
+        hours_to_settlement: Hours until market settles.
+        module:              Module name ('weather'|'crypto') — reserved for
+                             future module-specific overrides.
+
+    Returns:
+        {'exit': bool, 'fraction': float, 'reason': str}
+        fraction: 0.0–1.0 portion of position to close.
+    """
+    # Rule 1 — 95¢ rule (PRIORITY)
+    if current_bid >= 95:
+        return {'exit': True, 'fraction': 1.0, 'reason': '95c_rule'}
+
+    # Rule 2 — 70% gain on max upside
+    max_upside = 100.0 - entry_price
+    if max_upside > 0:
+        gain = (current_bid - entry_price) / max_upside
+        if gain >= 0.70:
+            return {'exit': True, 'fraction': 1.0, 'reason': 'gain_70pct'}
+
+    # Rule 3 — Near-settlement hold (let contract settle)
+    if hours_to_settlement < 0.5:
+        return {'exit': False, 'fraction': 0.0, 'reason': 'near_settlement_hold'}
+
+    # Rule 4 — Reversal: edge has collapsed vs entry
+    entry_edge  = entry_signal.get('edge', 0.0)
+    current_edge = signal.get('edge', 0.0)
+    reversal = entry_edge - current_edge
+
+    if reversal >= 0.35:
+        return {'exit': True,  'fraction': 1.0,  'reason': 'reversal_full'}
+    if reversal >= 0.20:
+        return {'exit': True,  'fraction': 0.50, 'reason': 'reversal_half'}
+    if reversal >= 0.10:
+        return {'exit': True,  'fraction': 0.25, 'reason': 'reversal_trim'}
+
+    # Default — hold
+    return {'exit': False, 'fraction': 0.0, 'reason': 'hold'}
+
+
+# ---------------------------------------------------------------------------
+# 6. Strategy Summary (for logging / audit)
+# ---------------------------------------------------------------------------
+
+def get_strategy_summary() -> dict:
+    """
+    Return all strategy thresholds and parameters as a dict.
+
+    Intended for startup logging and audit trails so every run records
+    exactly what rules were in effect.
+
+    Returns:
+        dict of parameter names → values.
+    """
+    return {
+        'kelly_fraction':           KELLY_FRACTION,
+        'max_position_cap_dollars': MAX_POSITION_CAP,
+        'pct_capital_cap':          PCT_CAPITAL_CAP,
+        'daily_cap_ratio':          DAILY_CAP_RATIO,
+        'min_edge_weather':         MIN_EDGE['weather'],
+        'min_edge_crypto':          MIN_EDGE['crypto'],
+        'min_confidence':           MIN_CONFIDENCE,
+        'min_hours_to_entry':       MIN_HOURS_ENTRY,
+        'min_hours_to_add':         MIN_HOURS_ADD,
+        'exit_95c_rule_threshold':  95,
+        'exit_gain_threshold':      0.70,
+        'reversal_full_threshold':  0.35,
+        'reversal_half_threshold':  0.20,
+        'reversal_trim_threshold':  0.10,
+        'add_scale_100pct_delta':   0.50,
+        'add_scale_50pct_delta':    0.25,
+        'add_scale_25pct_delta':    0.10,
+    }
+
+
+# ---------------------------------------------------------------------------
+# __main__ — quick sanity tests
+# ---------------------------------------------------------------------------
+
+if __name__ == '__main__':
+    import os, io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+
+    print("=" * 60)
+    print("strategy.py - unit tests")
+    print("=" * 60)
+
+    CAPITAL = 1000.0
+
+    # ------------------------------------------------------------------
+    # 1. calculate_position_size
+    # ------------------------------------------------------------------
+    print("\n[1] calculate_position_size")
+
+    s1 = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL)
+    print(f"  Normal:       edge=0.20, win_prob=0.70 -> ${s1}")
+
+    s2 = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL, vol_ratio=2.0)
+    print(f"  High vol x2:  edge=0.20, win_prob=0.70 -> ${s2}  (should be ~half of ${s1})")
+
+    s3 = calculate_position_size(edge=0.50, win_prob=0.90, capital=CAPITAL)
+    print(f"  High edge:    edge=0.50, win_prob=0.90 -> ${s3}  (should be capped at $25 or 2.5%)")
+
+    s4 = calculate_position_size(edge=0.00, win_prob=0.70, capital=CAPITAL)
+    print(f"  Zero edge:    -> ${s4}  (should be 0.0)")
+
+    # ------------------------------------------------------------------
+    # 2. check_daily_cap
+    # ------------------------------------------------------------------
+    print("\n[2] check_daily_cap")
+
+    r1 = check_daily_cap(total_capital=CAPITAL, deployed_today=0.0)
+    print(f"  No deployments: remaining=${r1}  (should be $700.0)")
+
+    r2 = check_daily_cap(total_capital=CAPITAL, deployed_today=600.0)
+    print(f"  $600 deployed:  remaining=${r2}  (should be $100.0)")
+
+    r3 = check_daily_cap(total_capital=CAPITAL, deployed_today=750.0)
+    print(f"  Over cap:       remaining=${r3}  (should be $0.0)")
+
+    # ------------------------------------------------------------------
+    # 3. should_enter
+    # ------------------------------------------------------------------
+    print("\n[3] should_enter")
+
+    good_signal = {
+        'edge': 0.20, 'win_prob': 0.70, 'confidence': 0.80,
+        'hours_to_settlement': 6.0, 'module': 'weather', 'vol_ratio': 1.0,
+    }
+    e1 = should_enter(good_signal, CAPITAL, deployed_today=0.0)
+    print(f"  Good weather signal:  {e1}")
+
+    low_edge = {**good_signal, 'edge': 0.05}
+    e2 = should_enter(low_edge, CAPITAL, deployed_today=0.0)
+    print(f"  Low edge (0.05):      {e2}")
+
+    close_settle = {**good_signal, 'hours_to_settlement': 0.2}
+    e3 = should_enter(close_settle, CAPITAL, deployed_today=0.0)
+    print(f"  Near settlement:      {e3}")
+
+    cap_hit = should_enter(good_signal, CAPITAL, deployed_today=750.0)
+    print(f"  Daily cap hit:        {cap_hit}")
+
+    crypto_ok = {**good_signal, 'module': 'crypto', 'edge': 0.12}
+    e4 = should_enter(crypto_ok, CAPITAL, deployed_today=0.0)
+    print(f"  Crypto (edge=0.12):   {e4}  (should enter; min=0.10)")
+
+    crypto_low = {**good_signal, 'module': 'crypto', 'edge': 0.08}
+    e5 = should_enter(crypto_low, CAPITAL, deployed_today=0.0)
+    print(f"  Crypto (edge=0.08):   {e5}  (should skip; min=0.10)")
+
+    # ------------------------------------------------------------------
+    # 4. should_add
+    # ------------------------------------------------------------------
+    print("\n[4] should_add")
+
+    entry_sig = {**good_signal, 'confidence': 0.60}
+    sig_drift_small  = {**good_signal, 'confidence': 0.65}   # Δ=0.05 < 0.10
+    sig_drift_medium = {**good_signal, 'confidence': 0.75}   # Δ=0.15 → 25%
+    sig_drift_large  = {**good_signal, 'confidence': 0.90}   # Δ=0.30 → 50%
+    sig_drift_huge   = {**good_signal, 'confidence': 1.00}   # Δ=0.40 → 50%
+
+    a1 = should_add(sig_drift_small,  entry_sig, current_allocation=20.0)
+    print(f"  Drift 0.05 (too small):  {a1}")
+
+    a2 = should_add(sig_drift_medium, entry_sig, current_allocation=20.0)
+    print(f"  Drift 0.15 (25% scale):  {a2}")
+
+    a3 = should_add(sig_drift_large,  entry_sig, current_allocation=20.0)
+    print(f"  Drift 0.30 (50% scale):  {a3}")
+
+    sig_close = {**sig_drift_large, 'hours_to_settlement': 1.0}
+    a4 = should_add(sig_close, entry_sig, current_allocation=20.0)
+    print(f"  1h to settlement:         {a4}")
+
+    # ------------------------------------------------------------------
+    # 5. should_exit
+    # ------------------------------------------------------------------
+    print("\n[5] should_exit")
+
+    cur_sig   = {**good_signal, 'edge': 0.18}   # similar to entry
+    entry_sig2 = {**good_signal, 'edge': 0.20}
+
+    x1 = should_exit(96, 60, cur_sig, entry_sig2, 5.0, 'weather')
+    print(f"  bid=96 (95¢ rule):      {x1}")
+
+    x2 = should_exit(94, 60, cur_sig, entry_sig2, 5.0, 'weather')
+    # gain = (94-60)/(100-60) = 34/40 = 0.85 ≥ 0.70
+    print(f"  bid=94, entry=60 (70%): {x2}")
+
+    x3 = should_exit(70, 60, cur_sig, entry_sig2, 0.2, 'weather')
+    print(f"  0.2h to settlement:     {x3}  (near-settlement hold)")
+
+    rev_sig = {**good_signal, 'edge': 0.00}   # reversal = 0.20
+    x4 = should_exit(65, 60, rev_sig, entry_sig2, 3.0, 'weather')
+    print(f"  Reversal 0.20 (half):   {x4}")
+
+    rev_sig2 = {**good_signal, 'edge': -0.20}  # reversal = 0.40 → full
+    x5 = should_exit(65, 60, rev_sig2, entry_sig2, 3.0, 'weather')
+    print(f"  Reversal 0.40 (full):   {x5}")
+
+    x6 = should_exit(65, 60, cur_sig, entry_sig2, 5.0, 'weather')
+    print(f"  No exit trigger (hold): {x6}")
+
+    # ------------------------------------------------------------------
+    # 6. get_strategy_summary
+    # ------------------------------------------------------------------
+    print("\n[6] get_strategy_summary")
+    summary = get_strategy_summary()
+    for k, v in summary.items():
+        print(f"  {k:<35} = {v}")
+
+    print("\n[OK] All tests complete.")
+    sys.exit(0)

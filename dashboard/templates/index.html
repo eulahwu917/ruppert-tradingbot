@@ -124,6 +124,27 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 .more-btn:hover { color: #888; background: #181818; }
 
 /* Best Bets */
+/* High Conviction Bets grid */
+.hcb-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; padding:4px 0 12px; }
+@media(max-width:900px){ .hcb-grid { grid-template-columns:repeat(2,1fr); } }
+@media(max-width:560px){ .hcb-grid { grid-template-columns:1fr; } }
+.hcb-card { background:#0d0d0d; border:1px solid #1e1e1e; border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:9px; }
+.hcb-badges { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+.hcb-title { font-size:12px; font-weight:600; color:#ccc; line-height:1.4; cursor:pointer; }
+.hcb-title:hover { color:#fff; }
+.hcb-rationale { font-size:10px; color:#555; line-height:1.4; flex:1; }
+.hcb-stats { display:flex; border:1px solid #1e1e1e; border-radius:6px; overflow:hidden; }
+.hcb-stat { flex:1; display:flex; flex-direction:column; align-items:center; padding:7px 4px; border-right:1px solid #1e1e1e; }
+.hcb-stat:last-child { border-right:none; }
+.hcb-val { font-size:14px; font-weight:700; }
+.hcb-lbl { font-size:9px; color:#444; text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
+.hcb-bar-wrap { background:#1a1a1a; border-radius:3px; height:3px; overflow:hidden; }
+.hcb-bar { height:100%; border-radius:3px; }
+.hcb-actions { display:flex; gap:8px; margin-top:2px; }
+.hcb-approve { flex:1; background:#1a2e1a; border:1px solid #2d5a2d; color:#4ade80; padding:7px; border-radius:5px; font-size:11px; font-weight:700; cursor:pointer; }
+.hcb-approve:hover { background:#22401a; }
+.hcb-pass { flex:1; background:#1e1e1e; border:1px solid #2a2a2a; color:#555; padding:7px; border-radius:5px; font-size:11px; cursor:pointer; }
+.hcb-pass:hover { color:#888; }
 .bb-item { padding: 12px 16px; border-bottom: 1px solid #141414; cursor: pointer; }
 .bb-item:last-child { border-bottom: none; }
 .bb-item:hover { background: #141414; }
@@ -371,74 +392,16 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 
   </div>
 
-  <!-- Market Scout -->
+  <!-- Best Bets -->
+  <!-- High Conviction Bets: disabled 2026-03-11 pending validation
   <div class="card" style="margin-bottom:14px;">
-    <div class="card-head" style="padding-bottom:0;">
-      <div class="sec"><div class="dot dot-b"></div>Market Scout</div>
-      <button class="ref" onclick="loadScouts()">&#x21BB; Refresh</button>
+    <div class="card-head">
+      <div style="display:flex;flex-direction:column;gap:2px;"><div class="sec">⭐ High Conviction Bets</div><div style="font-size:10px;color:#444;padding-left:2px;">Ranked by Total Confidence</div></div>
+      <button class="ref" onclick="loadHighConviction()">&#x21BB; Refresh</button>
     </div>
-    <div class="tabs" style="margin-top:10px;">
-      <button class="tab on" onclick="swS('weather',this)">&#x1F327; Weather</button>
-      <button class="tab" onclick="swS('crypto',this)">&#x20BF; Crypto</button>
-      <button class="tab" onclick="swS('bestbets',this)">&#x2B50; Best Bets</button>
-      <button class="tab" onclick="swS('geo',this)">&#x1F30D; Geopolitical</button>
-
-
-    </div>
-
-    <!-- Weather -->
-    <div class="pane on" id="s-weather">
-      <div style="overflow-x:auto;max-height:400px;overflow-y:auto;">
-        <table class="tbl wt">
-          <thead><tr><th>Market</th><th>City</th><th>YES</th><th>NOAA</th><th>Edge</th><th>Signal</th></tr></thead>
-          <tbody id="w-b"><tr><td colspan="6" class="loading">Loading...</td></tr></tbody>
-        </table>
-      </div>
-    </div>
-
-    <!-- Best Bets -->
-    <div class="pane" id="s-bestbets">
-      <div class="sc-scroll" id="bb-list"><div class="loading">Loading best bets...</div></div>
-    </div>
-
-    <!-- Geo -->
-    <div class="pane" id="s-geo">
-      <div class="sc-scroll" id="geo-list"><div class="loading">Loading...</div></div>
-    </div>
-    <!-- Crypto -->
-    <div class="pane" id="s-crypto">
-      <div id="crypto-signal-bar" style="display:flex;align-items:center;gap:12px;padding:8px 0 12px;border-bottom:1px solid #1e1e1e;margin-bottom:10px;">
-        <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.05em;">Smart Money</span>
-        <span id="crypto-sm-badge" style="font-size:11px;padding:2px 8px;border-radius:4px;background:#1e1e1e;color:#888;">Loading...</span>
-        <span style="font-size:11px;color:#555;">|</span>
-        <span style="font-size:11px;color:#888;">BTC</span>
-        <span id="crypto-btc-price" style="font-size:13px;font-weight:700;color:#e0e0e0;">--</span>
-        <span id="crypto-btc-chg" style="font-size:11px;">--</span>
-        <span style="font-size:11px;color:#555;">|</span>
-        <span style="font-size:11px;color:#888;">ETH</span>
-        <span id="crypto-eth-price" style="font-size:13px;font-weight:700;color:#e0e0e0;">--</span>
-        <span id="crypto-eth-chg" style="font-size:11px;">--</span>
-      </div>
-      <div style="overflow-x:auto;max-height:380px;overflow-y:auto;">
-        <table class="tbl wt">
-          <thead><tr>
-            <th>Market</th>
-            <th>Coin</th>
-            <th>YES%</th>
-            <th>Model%</th>
-            <th>Edge</th>
-            <th>Signal</th>
-            <th>Action</th>
-          </tr></thead>
-          <tbody id="crypto-b"><tr><td colspan="7" style="color:#555;text-align:center;padding:20px;">Click to load crypto markets</td></tr></tbody>
-        </table>
-      </div>
-      <div style="font-size:10px;color:#444;margin-top:8px;">All crypto trades require David's approval. Smart money signal = aggregate of top 10 Polymarket crypto traders.</div>
-    </div>
-
-
-
+    <div id="hc-list" style="padding:14px 14px 14px;"><div class="loading" style="color:#555;padding:24px 0;">Loading best bets...</div></div>
   </div>
+  -->
 
 </div>
 
@@ -468,12 +431,7 @@ function swP(name, btn) {
   btn.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
   btn.classList.add('on');
 }
-function swS(name, btn) {
-  ['s-weather','s-bestbets','s-geo','s-crypto'].forEach(id=>$(id).classList.remove('on'));
-  $('s-'+name).classList.add('on');
-  btn.closest('.tabs').querySelectorAll('.tab').forEach(t=>t.classList.remove('on'));
-  btn.classList.add('on');
-}
+
 
 // ── Deposit Sidebar ────────────────────────────────────────────────────────────
 async function openDepositSB() {
@@ -819,44 +777,47 @@ function renderWeather(){
 }
 
 // ── Best Bets ──────────────────────────────────────────────────────────────────
-let bbAll=[], bbShow=10;
-async function loadBestBets(){
-  const d = await api('/api/bestbets');
-  const el=$('bb-list');
+let hcAll=[], hcShow=10;
+async function loadHighConviction(){
+  const d = await api('/api/highconviction');
+  const el=$('hc-list');
   if(!d||!d.length){
-    el.innerHTML='<div class="loading" style="color:#888;padding:32px;">No Best Bets found yet.<br><span style="color:#555;font-size:10px;">Best Bets appear when Ruppert finds 60%+ confidence + 15%+ edge on geo or economics markets.<br>Run the bot to populate.</span></div>';
+    el.innerHTML='<div class="loading" style="color:#888;padding:32px;">No high conviction bets right now.<br><span style="color:#555;font-size:10px;">Bets appear when Ruppert finds 60%+ confidence + 15%+ edge on economics or geopolitical markets.</span></div>';
     return;
   }
-  bbAll=d; renderBestBets();
+  hcAll=d; renderHighConviction();
 }
-function renderBestBets(){
-  const el=$('bb-list');
-  const items=bbAll.slice(0,bbShow);
+function renderHighConviction(){
+  const el=$('hc-list');
+  const items=hcAll.slice(0,hcShow);
+  const catMap = {Economics:'<span class="b-econ">Economics</span>', Geopolitical:'<span class="b-geo">Geo</span>', Weather:'<span class="b-bot">Weather</span>', Crypto:'<span class="b-manual">Crypto</span>'};
   const cards=items.map(b=>{
-    const catBadge = b.category==='Economics'?'<span class="b-econ">Economics</span>':'<span class="b-geo">Geopolitical</span>';
+    const catBadge = catMap[b.category] || '<span class="b-geo">'+b.category+'</span>';
     const conf=b.confidence||0;
-    const badge = conf>=80?'<span class="b-strong">Strong</span>':'';
     const side = b.recommended_side==='YES'?'<span class="b-yes">BET YES</span>':'<span class="b-no">BET NO</span>';
     const edge = b.edge ? (b.edge*100).toFixed(0)+'%' : '?';
-    return `<div class="bb-item" onclick='openBBSidebar(${JSON.stringify(b).replace(/'/g,"&#39;")})'>
-      <div class="bb-title">${b.title||''}</div>
-      <div class="bb-row">
-        ${catBadge} ${badge} ${side}
-        <span style="font-size:11px;color:#fff;font-weight:700">${(b.ruppert_prob*100||0).toFixed(0)}%</span>
-        <span style="font-size:10px;color:#555">Ruppert's est.</span>
-        <span style="font-size:10px;color:#888">Mkt: ${(b.market_prob*100||0).toFixed(0)}%</span>
-        <span style="font-size:10px;color:#4ade80;font-weight:700">+${edge} edge</span>
+    const confColor = conf>=80?'#4ade80':conf>=65?'#facc15':'#f87171';
+    const bStr = JSON.stringify(b).replace(/'/g,"&#39;");
+    return `<div class="hcb-card">
+      <div class="hcb-badges">${catBadge} ${side}${isWatched(b.ticker||'')?'<span style="font-size:9px;padding:2px 7px;border-radius:4px;background:#1e1a3a;color:#818cf8;font-weight:700;cursor:pointer;" onclick="toggleWatch(\''+( b.ticker||'')+'\')" title="Click to un-watch">👁 Watching</span>':''}</div>
+      <div class="hcb-title" onclick='openHCSidebar(${bStr})'>${b.title||''}</div>
+      <div class="hcb-rationale">${(b.rationale||'').substring(0,100)}...</div>
+      <div class="hcb-stats">
+        <div class="hcb-stat"><span class="hcb-val" style="color:#fff">${(b.ruppert_prob*100||0).toFixed(0)}%</span><span class="hcb-lbl">Ruppert Analysis</span></div>
+        <div class="hcb-stat"><span class="hcb-val" style="color:#888">${(b.market_prob*100||0).toFixed(0)}%</span><span class="hcb-lbl">Market Price-In</span></div>
+        <div class="hcb-stat"><span class="hcb-val" style="color:#4ade80">+${edge}</span><span class="hcb-lbl">Edge</span></div>
+        <div class="hcb-stat"><span class="hcb-val" style="color:${confColor}">${conf}%</span><span class="hcb-lbl">Total Confidence</span></div>
       </div>
-      <div class="bb-row" style="gap:6px;">
-        <div class="conf-bar-wrap"><div class="conf-bar" style="width:${conf}%"></div></div>
-        <span class="conf-lbl">${conf}% confidence</span>
+      <div class="hcb-bar-wrap"><div class="hcb-bar" style="width:${conf}%;background:${confColor};"></div></div>
+      <div class="hcb-actions">
+        <button class="hcb-approve" onclick='approveHCBet(${bStr})'>Approve</button>
+        <button class="hcb-pass" onclick='passHCBet(${bStr})'>Pass</button>
       </div>
-      <div class="bb-rationale">${(b.rationale||'').substring(0,110)}...</div>
     </div>`;
   }).join('');
-  const more=bbAll.length>bbShow
-    ?`<button class="more-btn" onclick="bbShow+=10;renderBestBets()">Load ${Math.min(10,bbAll.length-bbShow)} More</button>`:'';
-  el.innerHTML=cards+more;
+  const more=hcAll.length>hcShow
+    ?`<div style="text-align:center;padding:12px;"><button class="more-btn" onclick="hcShow+=9;renderHighConviction()">Load ${Math.min(9,hcAll.length-hcShow)} More</button></div>`:'';
+  el.innerHTML=`<div class="hcb-grid">${cards}</div>${more}`;
 }
 
 // ── Geo Scout ──────────────────────────────────────────────────────────────────
@@ -923,22 +884,24 @@ function openGeoSidebar(m) {
     <div class="sb-sec"><div class="sb-lbl">Recent Headlines</div>${hls}</div>
     <div class="sb-sec"><div class="sb-lbl">Your Decision</div>
       <div class="sb-actions" id="${uid}-r">
-        <button class="btn btn-yes" onclick="doAct('${uid}','BET YES')">&#x2191; YES (${yes}¢)</button>
-        <button class="btn btn-no"  onclick="doAct('${uid}','BET NO')">&#x2193; NO (${no}¢)</button>
-        <button class="btn btn-wch" onclick="doAct('${uid}','WATCH')">&#x1F441; Watch</button>
-        <button class="btn btn-pas" onclick="doAct('${uid}','PASS')">Pass</button>
+        <button class="btn btn-yes" onclick="doAct('${uid}','BET YES','${b.ticker}',${yes});">&#x2191; YES (${yes}¢)</button>
+        <button class="btn btn-no"  onclick="doAct('${uid}','BET NO','${b.ticker}',${no})">&#x2193; NO (${no}¢)</button>
+        <button class="btn btn-wch" onclick="doAct('${uid}','WATCH','${b.ticker}')">${isWatched(b.ticker||'')?'Un-watch':'&#x1F441; Watch'}</button>
+        <button class="btn btn-pas" onclick="doAct('${uid}','PASS','${b.ticker}',0)">Pass</button>>
       </div>
       <div id="${uid}-d" style="display:none;margin-top:10px;font-size:12px;font-weight:600;"></div>
     </div>
     <div class="sb-sec"><a href="${url}" target="_blank" style="font-size:11px;color:#818cf8;">View on Kalshi &#x2197;</a></div>`);
 }
 
-function openBBSidebar(b) {
+function openHCSidebar(b) {
+  window._hcBetTitle = b.title || b.ticker || '';
   const rPct=(b.ruppert_prob*100||0).toFixed(0);
   const mPct=(b.market_prob*100||0).toFixed(0);
   const edge=(b.edge*100||0).toFixed(0);
   const yes=b.yes_price||0; const no=100-yes;
   const uid='sb_'+Math.random().toString(36).slice(2,7);
+  const url=b.kalshi_url || ('https://kalshi.com/markets/'+(b.ticker||'').split('-').slice(0,-1).join('-').toLowerCase());
   const catBadge=b.category==='Economics'?'<span class="b-econ">Economics</span>':'<span class="b-geo">Geopolitical</span>';
   const rules=b.rules?`<div class="sb-sec"><div class="sb-lbl">Settlement Rules</div><div class="sb-rules">${b.rules}</div></div>`:'';
   openSB(`
@@ -965,7 +928,7 @@ function openBBSidebar(b) {
       <div class="sb-actions" id="${uid}-r">
         <button class="btn btn-yes" onclick="doAct('${uid}','BET YES')">&#x2191; YES (${yes}¢)</button>
         <button class="btn btn-no"  onclick="doAct('${uid}','BET NO')">&#x2193; NO (${no}¢)</button>
-        <button class="btn btn-wch" onclick="doAct('${uid}','WATCH')">&#x1F441; Watch</button>
+        <button class="btn btn-wch" onclick="doAct('${uid}','WATCH','${b.ticker||""}')"> ${isWatched(b.ticker||'')?'Un-watch':'&#x1F441; Watch'}</button>
         <button class="btn btn-pas" onclick="doAct('${uid}','PASS')">Pass</button>
       </div>
       <div id="${uid}-d" style="display:none;margin-top:10px;font-size:12px;font-weight:600;"></div>
@@ -973,11 +936,56 @@ function openBBSidebar(b) {
     <div class="sb-sec"><a href="${b.kalshi_url||'#'}" target="_blank" style="font-size:11px;color:#818cf8;">View on Kalshi &#x2197;</a></div>`);
 }
 
-function doAct(uid, action) {
+// Persistent watch state via localStorage
+function getWatched(){ try{ return new Set(JSON.parse(localStorage.getItem('hc_watched')||'[]')); }catch(e){ return new Set(); } }
+function saveWatched(s){ localStorage.setItem('hc_watched', JSON.stringify([...s])); }
+function isWatched(ticker){ return getWatched().has(ticker); }
+function toggleWatch(ticker){
+  const s = getWatched();
+  if(s.has(ticker)){ s.delete(ticker); } else { s.add(ticker); }
+  saveWatched(s);
+  renderHighConviction(); // refresh cards to show/hide badge
+}
+
+async function doAct(uid, action, ticker, priceCents) {
+  if(action==='WATCH'){
+    toggleWatch(ticker||'');
+    const wBtn = document.querySelector('.btn-wch');
+    if(wBtn) wBtn.textContent = isWatched(ticker||'') ? 'Un-watch' : '\uD83D\uDC41 Watch';
+    return;
+  }
+  if(action==='PASS'){
+    document.getElementById(uid+'-r').querySelectorAll('.btn').forEach(b=>{b.disabled=true;b.style.opacity='.3';});
+    const done=document.getElementById(uid+'-d'); done.style.display='block';
+    done.style.color='#444'; done.textContent='✓ Passed';
+    await api('/api/highconviction/pass',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticker})});
+    setTimeout(()=>{closeSB(); loadHighConviction();}, 800);
+    return;
+  }
+  // BET YES or BET NO — execute trade
+  const side = action==='BET YES' ? 'yes' : 'no';
+  const confirmed = confirm(`Execute ${action} on\n${ticker}\nat ${priceCents}¢?\n\nThis will log to Open Positions (Demo).`);
+  if(!confirmed) return;
+
   document.getElementById(uid+'-r').querySelectorAll('.btn').forEach(b=>{b.disabled=true;b.style.opacity='.3';});
   const done=document.getElementById(uid+'-d'); done.style.display='block';
-  const c={'BET YES':'#4ade80','BET NO':'#f87171','WATCH':'#818cf8','PASS':'#444'}[action]||'#aaa';
-  done.style.color=c; done.textContent='✓ '+action+' logged -- executes on go-live';
+  done.style.color='#888'; done.textContent='Executing...';
+
+  try {
+    const res = await api('/api/highconviction/execute', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ticker, side, price_cents: priceCents, title: window._hcBetTitle||''})
+    });
+    if(res && res.status==='executed'){
+      done.style.color= side==='yes' ? '#4ade80' : '#f87171';
+      done.textContent=`✓ ${action} executed — ${res.contracts} contracts @ ${priceCents}¢ ($${res.cost})`;
+      setTimeout(()=>{ closeSB(); loadHighConviction(); loadPositions(); }, 1200);
+    } else {
+      done.style.color='#f87171'; done.textContent='Error: '+(res?.error||'Unknown');
+    }
+  } catch(e) {
+    done.style.color='#f87171'; done.textContent='Network error';
+  }
 }
 
 // ── Load All ───────────────────────────────────────────────────────────────────
@@ -1041,8 +1049,44 @@ async function loadClosedPnl() {
   } catch(e) { console.error('loadClosedPnl', e); }
 }
 
+
+// Lightweight crypto signal cache (no UI — just populates window._smartMoney for positions table)
+async function loadCryptoSignal() {
+  try {
+    const d = await api('/api/crypto/scan');
+    if (d && d.smart_money) {
+      window._smartMoney = d.smart_money;
+      const sm = d.smart_money;
+      const sigText = sm.direction==='bearish' ? 'BEARISH' : sm.direction==='bullish' ? 'BULLISH' : 'NEUTRAL';
+      const sigColor = sm.direction==='bearish' ? '#f87171' : sm.direction==='bullish' ? '#4ade80' : '#888';
+      document.querySelectorAll('[data-col="signal"]').forEach(td => {
+        const row = td.closest('tr');
+        if (!row) return;
+        const link = row.querySelector('a');
+        if (!link) return;
+        if (/kxbtc|kxeth|kxxrp|kxdoge/i.test(link.href||'')) {
+          td.innerHTML = `<span style="color:${sigColor};font-weight:700;font-size:10px;">${sigText}</span>`;
+        }
+      });
+    }
+  } catch(e) {}
+}
+
+
+function approveHCBet(b) {
+  if (!confirm('Approve bet: ' + (b.title||b.ticker) + '?')) return;
+  api('/api/highconviction/approve', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ticker: b.ticker})})
+    .then(() => { alert('Queued for execution. Review Open Positions after next bot cycle.'); loadHighConviction(); })
+    .catch(() => alert('Error approving bet.'));
+}
+function passHCBet(b) {
+  api('/api/highconviction/pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ticker: b.ticker})})
+    .then(() => loadHighConviction())
+    .catch(() => {});
+}
+
 async function loadScouts(){
-  await Promise.all([loadWeather(),loadBestBets(),loadGeo(),loadCrypto()]);
+  await Promise.all([loadHighConviction(), loadCryptoSignal()]);
 }
 async function loadAll(){
   await Promise.all([loadAccount(), loadPositions(), loadTrades(), loadScouts(), loadClosedPnl()]);

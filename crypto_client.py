@@ -31,6 +31,12 @@ import logging
 from datetime import datetime, timezone
 from functools import lru_cache
 
+try:
+    from scipy.stats import t as scipy_t
+    _SCIPY_AVAILABLE = True
+except ImportError:
+    _SCIPY_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────────── Constants ────────────────────────────────
@@ -53,6 +59,12 @@ TOP_TRADER_WALLETS = {
     '0xdE17f7144fbD0eddb2679132C10ff5e74B120988': '0xdE17f7',
     '0x1f0ebc543B2d411f66947041625c0Aa1ce61CF86': '0x1f0ebc',
     '0x95d470e8d82d3dd6a899e91e36d7cee4b2c7c38c': 'ScroogeX',
+    # TODO: replace with verified Polymarket leaderboard wallets
+    '0xTODO_wallet_placeholder_4': 'Trader4',
+    '0xTODO_wallet_placeholder_5': 'Trader5',
+    '0xTODO_wallet_placeholder_6': 'Trader6',
+    '0xTODO_wallet_placeholder_7': 'Trader7',
+    '0xTODO_wallet_placeholder_8': 'Trader8',
 }
 
 # In-process cache (TTL: 5 min for prices, 15 min for smart money)
@@ -89,17 +101,27 @@ def _rsi(closes: list, period: int = 14) -> float | None:
     return 100.0 - (100.0 / (1 + rs))
 
 
-def _norm_cdf(x: float, mu: float, sigma: float) -> float:
-    """Standard normal CDF via math.erf."""
+def _t_cdf(x: float, mu: float, sigma: float, df: int = 3) -> float:
+    """
+    CDF of Student's t-distribution (df=3 default) to capture crypto fat tails.
+    Uses scipy if available; otherwise falls back to a closed-form approximation.
+    """
     if sigma <= 0:
         return 1.0 if x >= mu else 0.0
-    z = (x - mu) / (sigma * math.sqrt(2))
-    return 0.5 * (1.0 + math.erf(z))
+    if _SCIPY_AVAILABLE:
+        t_stat = (x - mu) / sigma
+        return float(scipy_t.cdf(t_stat, df))
+    # Closed-form approximation for df=3
+    t_stat = (x - mu) / sigma
+    x2 = t_stat * t_stat
+    denom = 1 + x2 / 3
+    p = 0.5 + t_stat * denom / (2 * math.sqrt(3) * denom ** 1.5)
+    return max(0.0, min(1.0, p))
 
 
 def _band_probability(low: float, high: float, mu: float, sigma: float) -> float:
-    """P(low ≤ price < high) under normal distribution."""
-    return _norm_cdf(high, mu, sigma) - _norm_cdf(low, mu, sigma)
+    """P(low ≤ price < high) under Student's t-distribution (df=3)."""
+    return _t_cdf(high, mu, sigma) - _t_cdf(low, mu, sigma)
 
 
 # ─────────────────────────────── Kraken OHLC ─────────────────────────────────
@@ -171,11 +193,12 @@ def _build_signal(symbol: str) -> dict:
     if current_price <= 0:
         raise ValueError(f'Could not fetch price for {symbol} from CoinGecko or Kraken')
 
-    # ── Hourly candles from Kraken
+    # ── Candles from Kraken: 1h, 4h, daily
     candles_1h = _kraken_ohlc(cfg['kraken_pair'], 60, 50)
+    candles_4h = _kraken_ohlc(cfg['kraken_pair'], 240, 30)
     candles_1d = _kraken_ohlc(cfg['kraken_pair'], 1440, 8)
 
-    change_1h = change_4h = rsi = ma20 = above_ma = trend_7d = None
+    change_1h = change_4h = rsi = rsi_4h = ma20 = above_ma = trend_7d = None
 
     if candles_1h and len(candles_1h) >= 10:
         closes = [float(c[4]) for c in candles_1h]
@@ -186,34 +209,73 @@ def _build_signal(symbol: str) -> dict:
             ma20 = statistics.mean(closes[-20:])
             above_ma = current_price > ma20
 
+    # 4h RSI for multi-timeframe confirmation
+    if candles_4h and len(candles_4h) >= 16:
+        closes_4h = [float(c[4]) for c in candles_4h]
+        rsi_4h = _rsi(closes_4h, 14)
+
     if candles_1d and len(candles_1d) >= 2:
         daily_closes = [float(c[4]) for c in candles_1d]
         trend_7d = (daily_closes[-1] - daily_closes[0]) / daily_closes[0] * 100
 
-    # ── Momentum scoring (6 factors, each +1 for bull / +1 for bear)
-    factors = {
-        '1h_up':    (change_1h or 0) > 0,
-        '4h_up':    (change_4h or 0) > 0,
-        '24h_up':   change_24h > 0,
-        'rsi_mid':  rsi is not None and 40 < rsi < 70,
-        'above_ma': above_ma is True,
-        '7d_up':    (trend_7d or 0) > 0,
-    }
-    bear_factors = {
-        '1h_dn':    (change_1h or 0) < 0,
-        '4h_dn':    (change_4h or 0) < 0,
-        '24h_dn':   change_24h < 0,
-        'rsi_high': rsi is not None and rsi > 70,
-        'below_ma': above_ma is False,
-        '7d_dn':    (trend_7d or 0) < 0,
-    }
+    # ── Magnitude-weighted momentum scoring
+    # Returns accumulated bull_score / bear_score (float, threshold ≥ 3.5)
+    bull_score = 0.0
+    bear_score = 0.0
 
-    bull_count = sum(factors.values())
-    bear_count = sum(bear_factors.values())
+    # 1h change  — thresholds: 0-0.5% = ±0.5 | 0.5-2% = ±1.0 | 2%+ = ±1.5
+    c1 = abs(change_1h or 0)
+    pts_1h = 0.5 if c1 < 0.5 else (1.0 if c1 < 2.0 else 1.5)
+    if (change_1h or 0) > 0:
+        bull_score += pts_1h
+    elif (change_1h or 0) < 0:
+        bear_score += pts_1h
 
-    if bull_count >= 4:
+    # 4h change  — thresholds: 0-1% = ±0.5 | 1-3% = ±1.0 | 3%+ = ±1.5
+    c4 = abs(change_4h or 0)
+    pts_4h = 0.5 if c4 < 1.0 else (1.0 if c4 < 3.0 else 1.5)
+    if (change_4h or 0) > 0:
+        bull_score += pts_4h
+    elif (change_4h or 0) < 0:
+        bear_score += pts_4h
+
+    # 24h change — thresholds: 0-2% = ±0.5 | 2-5% = ±1.0 | 5%+ = ±1.5
+    c24 = abs(change_24h or 0)
+    pts_24h = 0.5 if c24 < 2.0 else (1.0 if c24 < 5.0 else 1.5)
+    if change_24h > 0:
+        bull_score += pts_24h
+    elif change_24h < 0:
+        bear_score += pts_24h
+
+    # MA — binary ±1.0
+    if above_ma is True:
+        bull_score += 1.0
+    elif above_ma is False:
+        bear_score += 1.0
+
+    # Multi-timeframe RSI scoring
+    rsi_overbought = rsi is not None and rsi > 70
+    rsi_oversold   = rsi is not None and rsi < 30
+    rsi_4h_overbought = rsi_4h is not None and rsi_4h > 70
+    rsi_4h_oversold   = rsi_4h is not None and rsi_4h < 30
+
+    if rsi_overbought and rsi_4h_overbought:
+        bear_score += 1.5   # both timeframes overbought → strong bear signal
+    elif rsi_overbought:
+        bear_score += 0.75  # only 1h overbought → mild bear
+    if rsi_oversold and rsi_4h_oversold:
+        bull_score += 1.5   # both timeframes oversold → strong bull signal
+    elif rsi_oversold:
+        bull_score += 0.75  # only 1h oversold → mild bull
+
+    # Legacy integer counts for backwards-compatible fields
+    bull_count = int(bull_score)
+    bear_count = int(bear_score)
+
+    SIGNAL_THRESHOLD = 3.5
+    if bull_score >= SIGNAL_THRESHOLD and bull_score > bear_score:
         direction = 'BULLISH'
-    elif bear_count >= 4:
+    elif bear_score >= SIGNAL_THRESHOLD and bear_score > bull_score:
         direction = 'BEARISH'
     else:
         direction = 'NEUTRAL'
@@ -225,10 +287,13 @@ def _build_signal(symbol: str) -> dict:
         'change_4h': change_4h,
         'change_24h': change_24h,
         'rsi': rsi,
+        'rsi_4h': rsi_4h,
         'ma20': ma20,
         'above_ma': above_ma,
         'trend_7d': trend_7d,
         'direction': direction,
+        'bull_score': round(bull_score, 2),
+        'bear_score': round(bear_score, 2),
         'bull_signals': bull_count,
         'bear_signals': bear_count,
         'hourly_vol_pct': cfg['hourly_vol_pct'],
@@ -256,7 +321,13 @@ def get_realized_vol(symbol: str, lookback_hours: int = 24) -> float:
     if len(log_returns) < 3:
         return cfg['hourly_vol_pct'] / 100
 
-    vol = statistics.stdev(log_returns)  # hourly std dev of log returns
+    # EWMA volatility (λ=0.94) — gives more weight to recent returns,
+    # better suited to crypto's regime-switching behaviour than equal-weight stdev.
+    LAMBDA = 0.94
+    variance = log_returns[0] ** 2
+    for r in log_returns[1:]:
+        variance = LAMBDA * variance + (1 - LAMBDA) * r ** 2
+    vol = math.sqrt(variance)
     _cache_set(f'rvol_{symbol}', vol)
     return vol
 
@@ -437,15 +508,19 @@ def get_polymarket_smart_money(wallets: dict | None = None) -> dict:
         except Exception as e:
             errors.append(f'{name}: {e}')
 
-    # Aggregate per asset
+    # Aggregate per asset — weighted by position size (USD) rather than wallet count
     def _agg(asset):
         sigs = [s for s in raw_signals if s['asset'] == asset]
         bull = sum(1 for s in sigs if s['direction'] == 'BULLISH')
         bear = sum(1 for s in sigs if s['direction'] == 'BEARISH')
         total = bull + bear
-        if total == 0:
-            return {'direction': 'NEUTRAL', 'bull': 0, 'bear': 0, 'traders': 0}
-        ratio = bull / total
+        bull_weight = sum(s['size_usd'] for s in sigs if s['direction'] == 'BULLISH')
+        bear_weight = sum(s['size_usd'] for s in sigs if s['direction'] == 'BEARISH')
+        combined = bull_weight + bear_weight
+        if combined == 0:
+            return {'direction': 'NEUTRAL', 'bull': 0, 'bear': 0, 'traders': 0,
+                    'bull_usd': 0.0, 'bear_usd': 0.0}
+        ratio = bull_weight / combined
         if ratio >= 0.70:
             d = 'STRONG_BULL'
         elif ratio >= 0.55:
@@ -456,7 +531,14 @@ def get_polymarket_smart_money(wallets: dict | None = None) -> dict:
             d = 'MILD_BEAR'
         else:
             d = 'NEUTRAL'
-        return {'direction': d, 'bull': bull, 'bear': bear, 'traders': total}
+        return {
+            'direction': d,
+            'bull': bull,
+            'bear': bear,
+            'traders': total,
+            'bull_usd': round(bull_weight, 2),
+            'bear_usd': round(bear_weight, 2),
+        }
 
     result = {
         'BTC': _agg('BTC'),
@@ -625,7 +707,7 @@ def get_crypto_edge(market: dict, all_event_markets: list | None = None) -> dict
             fs = float(floor_strike)
         except (TypeError, ValueError):
             fs = mu
-        model_prob = 1.0 - _norm_cdf(fs, mu, sigma)
+        model_prob = 1.0 - _t_cdf(fs, mu, sigma)
         reasoning_prefix = f'Top-tail (above {fs:g})'
 
     elif strike_type in ('less', 'below') and cap_strike is not None:
@@ -634,17 +716,17 @@ def get_crypto_edge(market: dict, all_event_markets: list | None = None) -> dict
             cs = float(cap_strike)
         except (TypeError, ValueError):
             cs = mu
-        model_prob = _norm_cdf(cs, mu, sigma)
+        model_prob = _t_cdf(cs, mu, sigma)
         reasoning_prefix = f'Bot-tail (below {cs:g})'
 
     elif mtype == 'T':
         # Fallback for T markets without strike_type info
         strike = strike_from_ticker or 0
         if strike > current_price * 1.02:
-            model_prob = 1.0 - _norm_cdf(strike, mu, sigma)
+            model_prob = 1.0 - _t_cdf(strike, mu, sigma)
             reasoning_prefix = f'Top-tail (above {strike:g})'
         else:
-            model_prob = _norm_cdf(strike, mu, sigma)
+            model_prob = _t_cdf(strike, mu, sigma)
             reasoning_prefix = f'Bot-tail (below {strike:g})'
     else:
         # B market fallback using band_step

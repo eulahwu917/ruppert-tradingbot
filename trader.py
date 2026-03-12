@@ -3,7 +3,7 @@ Trade Executor
 Handles order placement with pre-trade checks.
 """
 from kalshi_client import KalshiClient
-from risk import check_pre_trade
+from risk import check_pre_trade, contracts_from_size
 from logger import log_trade, log_activity
 import config
 
@@ -29,14 +29,25 @@ class Trader:
 
         log_activity(f"Evaluating: {ticker} | Edge: {edge:.1%} | Action: {opportunity['action']}")
 
-        # Pre-trade risk check
-        approved, reason, size, contracts = check_pre_trade(opportunity, self.bankroll)
-
-        if not approved:
-            log_activity(f"  Skipped: {reason}")
-            return False
-
-        price_cents = opportunity['yes_price'] if side == 'yes' else (100 - opportunity['yes_price'])
+        # ── Sizing: prefer strategy_size if provided; fall back to risk.py ───
+        strategy_size = opportunity.get('strategy_size')
+        if strategy_size:
+            price_cents = opportunity['yes_price'] if side == 'yes' else (100 - opportunity['yes_price'])
+            contracts = contracts_from_size(strategy_size, price_cents)
+            if contracts <= 0:
+                log_activity(f"  Skipped: strategy_size ${strategy_size:.2f} too small for {price_cents}¢ contract")
+                return False
+            size = strategy_size
+            approved = True
+            reason = f"strategy_size=${strategy_size:.2f}"
+            log_activity(f"  Using strategy size ${size:.2f} (skipping risk.py re-sizing)")
+        else:
+            # Pre-trade risk check via risk.py (legacy fallback)
+            approved, reason, size, contracts = check_pre_trade(opportunity, self.bankroll)
+            if not approved:
+                log_activity(f"  Skipped: {reason}")
+                return False
+            price_cents = opportunity['yes_price'] if side == 'yes' else (100 - opportunity['yes_price'])
 
         log_activity(f"  Placing {side.upper()} order: {contracts} contracts @ {price_cents}¢ (${size:.2f})")
 

@@ -53,7 +53,7 @@ def read_geo_log():
     return [e for e in entries if e.get('date') == today]
 
 
-def read_best_bets():
+def read_high_conviction():
     log_path = LOGS_DIR / "best_bets.jsonl"
     entries = []
     if log_path.exists():
@@ -61,8 +61,58 @@ def read_best_bets():
             for line in f:
                 try: entries.append(json.loads(line))
                 except: pass
-    today = str(date.today())
-    return [e for e in entries if e.get('date') == today]
+
+    # Load passed tickers so we can exclude them
+    passed = set()
+    pass_path = LOGS_DIR / "highconviction_passed.jsonl"
+    if pass_path.exists():
+        with open(pass_path, encoding='utf-8') as f:
+            for line in f:
+                try: passed.add(json.loads(line).get('ticker', ''))
+                except: pass
+
+    # Load approved tickers so we can exclude them too
+    approved = set()
+    approve_path = LOGS_DIR / "highconviction_approved.jsonl"
+    if approve_path.exists():
+        with open(approve_path, encoding='utf-8') as f:
+            for line in f:
+                try: approved.add(json.loads(line).get('ticker', ''))
+                except: pass
+
+    # Deduplicate by ticker (keep most recent per ticker), exclude passed/approved, exclude expired
+    from datetime import datetime as _dt
+    now = _dt.utcnow()
+    seen_ticker = {}
+    for e in entries:
+        t = e.get('ticker', '')
+        seen_ticker[t] = e  # last entry per ticker wins
+
+    result = []
+    for t, e in seen_ticker.items():
+        if t in passed or t in approved:
+            continue
+        close_str = e.get('close_date', '')
+        if close_str:
+            try:
+                close_dt = _dt.fromisoformat(close_str.replace('Z', '+00:00')).replace(tzinfo=None)
+                if close_dt < now:
+                    continue
+            except: pass
+        result.append(e)
+
+    # Deduplicate by title — same question at multiple thresholds → keep highest edge × confidence
+    seen_title = {}
+    for e in result:
+        title = (e.get('title') or e.get('ticker', '')).strip()
+        score = (e.get('edge', 0) or 0) * (e.get('confidence', 0) or 0)
+        if title not in seen_title or score > seen_title[title][1]:
+            seen_title[title] = (e, score)
+
+    result = [v[0] for v in seen_title.values()]
+    # Sort by Total Confidence descending
+    result.sort(key=lambda x: x.get('confidence', 0) or 0, reverse=True)
+    return result
 
 
 SPORTS_EXCLUSIONS = [
@@ -286,6 +336,81 @@ def get_trades():
         closed.append(t)
     return closed
 
+
+@app.post("/api/highconviction/execute")
+async def execute_highconviction(req: Request):
+    """Execute a High Conviction bet — logs trade (demo) or places live order."""
+    import json as _json
+    from datetime import datetime as _dt
+    body    = await req.json()
+    ticker  = body.get('ticker', '')
+    side    = body.get('side', '').lower()   # 'yes' or 'no'
+    price_c = int(body.get('price_cents', 50))
+    max_pos = 25.0  # $25 max per trade
+
+    contracts = max(1, int((max_pos / price_c) * 100))  # how many contracts fit in $25
+    # market_prob = YES probability (what the positions table uses for entry price calc)
+    market_prob = (100 - price_c) / 100.0 if side == 'no' else price_c / 100.0
+    title   = body.get('title', '')
+
+    # Always log to trades file
+    today = _dt.now().strftime('%Y-%m-%d')
+    log_path = LOGS_DIR / f'trades_{today}.jsonl'
+    trade = {
+        'ticker':       ticker,
+        'title':        title,
+        'side':         side,
+        'contracts':    contracts,
+        'size_dollars': round(contracts * price_c / 100, 2),
+        'market_prob':  market_prob,
+        'source':       'manual',
+        'timestamp':    _dt.utcnow().isoformat(),
+        'date':         today,
+        'action':       'buy',
+    }
+    with open(log_path, 'a', encoding='utf-8') as f:
+        f.write(_json.dumps(trade) + '\n')
+
+    # Also mark as approved so it leaves the HC queue
+    ap_path = LOGS_DIR / 'highconviction_approved.jsonl'
+    with open(ap_path, 'a', encoding='utf-8') as f:
+        f.write(_json.dumps({'ticker': ticker, 'approved_at': _dt.utcnow().isoformat(), 'status': 'executed'}) + '\n')
+
+    # In live mode: actually place the order via KalshiClient
+    is_live = False  # TODO: read from config when going live
+    if is_live:
+        try:
+            from kalshi_client import KalshiClient
+            KalshiClient().place_order(ticker, side, price_c, contracts)
+        except Exception as e:
+            return {'status': 'error', 'error': str(e)}
+
+    return {'status': 'executed', 'ticker': ticker, 'side': side,
+            'contracts': contracts, 'cost': trade['size_dollars'], 'demo': not is_live}
+
+@app.post("/api/highconviction/approve")
+async def approve_highconviction(req: Request):
+    """Mark a best bet as approved — logs it for the next bot execution cycle."""
+    import json as _json
+    from datetime import datetime as _dt
+    body = await req.json()
+    ticker = body.get('ticker', '')
+    log_path = BASE_DIR / 'logs' / 'highconviction_approved.jsonl'
+    with open(log_path, 'a', encoding='utf-8') as f:
+        f.write(_json.dumps({'ticker': ticker, 'approved_at': _dt.utcnow().isoformat(), 'status': 'pending'}) + '\n')
+    return {'status': 'approved', 'ticker': ticker}
+
+@app.post("/api/highconviction/pass")
+async def pass_highconviction(req: Request):
+    """Dismiss a best bet."""
+    import json as _json
+    from datetime import datetime as _dt
+    body = await req.json()
+    ticker = body.get('ticker', '')
+    log_path = BASE_DIR / 'logs' / 'highconviction_passed.jsonl'
+    with open(log_path, 'a', encoding='utf-8') as f:
+        f.write(_json.dumps({'ticker': ticker, 'passed_at': _dt.utcnow().isoformat()}) + '\n')
+    return {'status': 'passed', 'ticker': ticker}
 
 @app.get("/api/trades/today")
 def get_today_trades():
@@ -523,10 +648,10 @@ def get_geo_scout():
     return entries
 
 
-@app.get("/api/bestbets")
-def get_best_bets():
+@app.get("/api/highconviction")
+def get_high_conviction():
     """Best Bets — non-weather, 60%+ confidence, 15%+ edge, needs David's approval."""
-    return read_best_bets()
+    return read_high_conviction()
 
 
 # ─── Dashboard ────────────────────────────────────────────────────────────────
@@ -629,7 +754,7 @@ def get_crypto_scan():
 
 @app.get("/", response_class=HTMLResponse)
 def dashboard():
-    with open(Path(__file__).parent / "templates" / "index.html") as f:
+    with open(Path(__file__).parent / "templates" / "index.html", encoding='utf-8') as f:
         return f.read()
 @app.get("/api/pnl")
 def get_pnl_history():

@@ -77,7 +77,8 @@ def classify_market_type(temp_range) -> str:
     B_band:  band markets ("X–Y°F range")
 
     Backtest finding: T-type markets settle YES only ~5% of the time.
-    Strategy: trade T-markets as NO only, with +0.10 NO edge bonus.
+    Strategy: apply a soft confidence prior (longshot bias) rather than
+    forcing direction. Strong signals still override the prior.
     """
     if temp_range is None:
         return "B_band"
@@ -200,25 +201,27 @@ def analyze_market(market: dict) -> dict | None:
     # ── Edge calculation ──────────────────────────────────────────────────────
     edge = model_prob - market_prob
 
-    # T-market strategy: upper/lower tail markets settle YES only ~5% of the time.
-    # Apply a +0.10 bonus to NO edge and force NO-only bets for T-type markets.
     is_t_market = market_type in ("T_upper", "T_lower")
-    if is_t_market:
-        # Add 0.10 bonus to NO edge (i.e., subtract from YES probability estimate)
-        edge -= 0.10
-        logger.info(
-            f"[Edge] {ticker}: T-market ({market_type}) — applied -0.10 YES bias, "
-            f"adjusted edge={edge:.2f}"
-        )
 
     if abs(edge) < config.MIN_EDGE_THRESHOLD:
         return None
 
-    # T-markets: only trade as NO (never YES), regardless of edge direction
-    if is_t_market:
-        side = 'no'
-    else:
-        side = 'yes' if edge > 0 else 'no'
+    # Signal decides the side — never force direction
+    side = 'yes' if edge > 0 else 'no'
+
+    # T-market soft prior: longshot bias — crowds systematically overprice rare
+    # tail events (YES settles ~5% of the time). We nudge confidence down for
+    # YES and up for NO when the signal is weak (|edge| <= 0.30).
+    # Strong signals (|edge| > 0.30) are trusted as-is and override this prior.
+    if is_t_market and abs(edge) <= 0.30:
+        if side == 'no':
+            confidence = min(confidence * 1.15, 1.0)
+        elif side == 'yes':
+            confidence = confidence * 0.85
+        logger.info(
+            f"[Edge] {ticker}: T-market ({market_type}) — soft prior applied "
+            f"(longshot bias), side={side}, adjusted confidence={confidence:.2f}"
+        )
 
     win_prob  = model_prob if side == 'yes' else (1 - model_prob)
     bet_price = yes_ask if side == 'yes' else (100 - yes_ask)

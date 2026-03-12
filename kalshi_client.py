@@ -72,8 +72,7 @@ class KalshiClient:
         price_cents: price in cents (e.g. 30 = 30c)
         count: number of contracts
         """
-        from kalshi_python_sync.models import CreateOrderRequest
-        order = CreateOrderRequest(
+        return self.client.create_order(
             ticker=ticker,
             client_order_id=f"ruppert_{int(time.time())}",
             type='limit',
@@ -82,7 +81,6 @@ class KalshiClient:
             count=count,
             yes_price=price_cents if side == 'yes' else (100 - price_cents),
         )
-        return self.client.create_order(order)
 
     def sell_position(self, ticker, side, price_cents, count):
         """
@@ -91,17 +89,15 @@ class KalshiClient:
         price_cents: limit price to sell at
         count: number of contracts to sell
         """
-        from kalshi_python_sync.models import CreateOrderRequest
-        order = CreateOrderRequest(
+        return self.client.create_order(
             ticker=ticker,
-            client_order_id=f"ruppert_exit_{int(time.time())}",
+            client_order_id=f"ruppert_exit_{int(time.time() * 1000)}",
             type='limit',
             action='sell',
             side=side,
             count=count,
             yes_price=price_cents if side == 'yes' else (100 - price_cents),
         )
-        return self.client.create_order(order)
 
     def get_positions(self):
         """Get current open positions."""
