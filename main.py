@@ -22,7 +22,7 @@ from datetime import datetime
 from kalshi_client import KalshiClient
 from edge_detector import find_opportunities
 from trader import Trader
-from logger import log_activity, get_daily_summary, get_daily_exposure
+from logger import log_activity, get_daily_summary, get_daily_exposure, get_computed_capital
 from economics_scanner import find_econ_opportunities
 from gaming_scout import run_daily_scout, format_scout_brief
 from geopolitical_scanner import run_geo_scan, format_geo_brief
@@ -246,7 +246,9 @@ def run_weather_scan(dry_run=True):
         client = KalshiClient()
 
         # ── Daily cap check ───────────────────────────────────────────────────
-        total_capital  = client.get_balance()
+        # Use computed capital (deposits + realized P&L) — NOT client.get_balance()
+        # which returns a stale Kalshi API demo balance.
+        total_capital  = get_computed_capital()
         deployed_today = get_daily_exposure()
         cap_remaining  = check_daily_cap(total_capital, deployed_today)
         log_activity(

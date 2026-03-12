@@ -77,6 +77,52 @@ def get_daily_exposure():
     return total
 
 
+def get_computed_capital():
+    """
+    Compute true available capital from first principles:
+      deposits (logs/demo_deposits.jsonl) + realized closed P&L (all logs/trades_*.jsonl exit records).
+
+    This is the source-of-truth capital figure for demo mode.
+    Do NOT use client.get_balance() for capital sizing — it returns a stale Kalshi API value.
+    """
+    import glob
+
+    # ── Sum all deposits ──────────────────────────────────────────────────────
+    deposits_path = os.path.join(LOG_DIR, 'demo_deposits.jsonl')
+    total_deposits = 0.0
+    if os.path.exists(deposits_path):
+        with open(deposits_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    total_deposits += float(record.get('amount', 0.0))
+                except Exception:
+                    pass
+
+    # ── Sum realized P&L from all exit records across all trade logs ──────────
+    total_realized_pnl = 0.0
+    trade_log_pattern = os.path.join(LOG_DIR, 'trades_*.jsonl')
+    for log_path in sorted(glob.glob(trade_log_pattern)):
+        with open(log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                    if record.get('action') == 'exit':
+                        pnl = record.get('realized_pnl')
+                        if pnl is not None:
+                            total_realized_pnl += float(pnl)
+                except Exception:
+                    pass
+
+    return round(total_deposits + total_realized_pnl, 2)
+
+
 def get_daily_summary():
     """Return a summary of today's trading activity."""
     log_path = _today_log_path()

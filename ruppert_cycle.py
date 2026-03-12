@@ -20,7 +20,7 @@ ALERT_LOG   = LOGS / 'cycle_log.jsonl'
 
 import config
 from kalshi_client import KalshiClient
-from logger import log_trade, log_activity, get_daily_exposure
+from logger import log_trade, log_activity, get_daily_exposure, get_computed_capital
 from bot.strategy import check_daily_cap
 
 DRY_RUN = True  # Flip to False when going live
@@ -407,7 +407,9 @@ try:
 
     # ── Issue 5: Daily cap check before executing crypto trades ───────────────
     try:
-        _total_capital  = client.get_balance()
+        # Use computed capital (deposits + realized P&L) — NOT client.get_balance()
+        # which returns a stale Kalshi API demo balance.
+        _total_capital  = get_computed_capital()
         _deployed_today = get_daily_exposure()
         _cap_remaining  = check_daily_cap(_total_capital, _deployed_today)
         if _cap_remaining <= 0:
