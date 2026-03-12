@@ -844,6 +844,7 @@ def get_pnl_history():
     closed_by_src_period = {'bot': {'month':0.0,'year':0.0,'all':0.0}, 'manual': {'month':0.0,'year':0.0,'all':0.0}}
     closed_wins = 0
     closed_total = 0
+    closed_count_by_source = {'bot': 0, 'manual': 0}
 
     from datetime import date as _date
     _today = _date.today()
@@ -895,11 +896,21 @@ def get_pnl_history():
             is_manual = src in ('economics', 'geo', 'manual')
             if is_manual:
                 closed_by_source['manual'] += pnl
+                closed_count_by_source['manual'] += 1
             else:
                 closed_by_source['bot'] += pnl
+                closed_count_by_source['bot'] += 1
 
-            # Bucket by settlement date parsed from ticker
-            sdate = settlement_date_from_ticker(ticker)
+            # Bucket by exit date (for manual exits) or settlement date
+            # Using exit date ensures P&L is counted in the month it was realized
+            if ticker in exit_records and exit_records[ticker].get('timestamp'):
+                try:
+                    from datetime import datetime as _dt2
+                    sdate = _dt2.fromisoformat(exit_records[ticker]['timestamp']).date()
+                except Exception:
+                    sdate = settlement_date_from_ticker(ticker)
+            else:
+                sdate = settlement_date_from_ticker(ticker)
             if sdate:
                 if sdate == _today:
                     closed_by_period['day']   += pnl
@@ -984,13 +995,14 @@ def get_pnl_history():
     # Today: total (closed + open)
     points.append({"date": today, "pnl": round(total_pnl, 2)})
 
-    # Deployed costs for % calculation (use account endpoint values)
+    # Deployed costs for % calculation — exclude settled AND manually exited positions
     all_t = read_all_trades()
+    exited2 = {t.get('ticker') for t in all_t if t.get('action') == 'exit'}
     seen2 = set()
     open_t = []
     for t in all_t:
         tk = t.get('ticker','')
-        if not tk or tk in seen2 or t.get('action')=='exit': continue
+        if not tk or tk in seen2 or tk in exited2 or t.get('action')=='exit': continue
         seen2.add(tk)
         if not is_settled_ticker(tk): open_t.append(t)
     BOT_SRC = ('bot','weather','crypto')
@@ -1018,6 +1030,8 @@ def get_pnl_history():
         "closed_pnl_month": round(closed_by_period["month"], 2),
         "closed_pnl_year":  round(closed_by_period["year"], 2),
         "closed_win_rate": round(closed_wins / closed_total * 100, 1) if closed_total else None,
+        "bot_trades":  closed_count_by_source['bot'],
+        "man_trades":  closed_count_by_source['manual'],
         "points": points,
         "total":  round(total_pnl, 2),
     }
