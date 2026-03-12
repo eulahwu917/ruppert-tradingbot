@@ -31,7 +31,7 @@ def read_today_trades():
 def read_all_trades():
     all_trades = []
     for path in sorted(LOGS_DIR.glob("trades_*.jsonl")):
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             for line in f:
                 try:
                     t = json.loads(line)
@@ -294,45 +294,96 @@ async def add_deposit(request: Request):
 
 @app.get("/api/trades")
 def get_trades():
-    """Trade history — closed/settled positions only. Computes realized_pnl from last_price."""
+    """Trade history — closed positions only (settled OR manually exited).
+    Computes realized_pnl from exit record (manual exits) or Kalshi API (settled markets).
+    """
     all_trades = read_all_trades()
+
+    # Pre-build exit records dict: ticker -> exit record
+    exits = {}
+    for t in all_trades:
+        if t.get('action') == 'exit':
+            ticker = t.get('ticker', '')
+            if ticker:
+                exits[ticker] = t
+
     closed = []
     seen = set()
     for t in all_trades:
         ticker = t.get('ticker', '')
         if not ticker or ticker in seen: continue
-        if t.get('action') == 'exit': continue
+        if t.get('action') == 'exit': continue  # skip raw exit records; they inform via exits dict
         seen.add(ticker)
-        if not is_settled_ticker(ticker):
+
+        is_settled       = is_settled_ticker(ticker)
+        is_manually_exited = ticker in exits
+
+        # Only show in closed if settled OR manually exited
+        if not is_settled and not is_manually_exited:
             continue
-        # Compute realized P&L from last_price
-        try:
-            import requests as req
-            r = req.get(
-                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
-                timeout=4
-            )
-            if r.status_code == 200:
-                m = r.json().get('market', {})
-                result   = m.get('result')   # 'yes' or 'no' for finalized markets
-                lp       = m.get('last_price')
-                if lp is not None or result:
-                    side      = t.get('side', 'no')
-                    mp        = t.get('market_prob', 0.5) or 0.5
-                    entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
-                    contracts = t.get('contracts', 0) or 0
-                    # Use actual settlement result if finalized (more accurate than last_price)
-                    if result == 'yes':
-                        settle_yes = 100
-                    elif result == 'no':
-                        settle_yes = 0
-                    else:
-                        settle_yes = lp or 50
-                    cur_p = (100 - settle_yes) if side == 'no' else settle_yes
-                    t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
-                    t['settled_price'] = settle_yes
-        except Exception:
-            pass
+
+        if is_manually_exited and not is_settled:
+            # Compute P&L directly from exit record fields
+            exit_rec  = exits[ticker]
+            ep        = exit_rec.get('entry_price')
+            xp        = exit_rec.get('exit_price')
+            contracts = exit_rec.get('contracts')
+            if ep is not None and xp is not None and contracts:
+                t['realized_pnl'] = round((xp - ep) * contracts / 100, 2)
+                t['exit_price']   = xp
+                t['exit_type']    = exit_rec.get('exit_type', 'manual')
+                t['exit_reason']  = exit_rec.get('reason', '')
+            else:
+                # Fallback: try market API
+                try:
+                    import requests as req
+                    r = req.get(
+                        f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                        timeout=4
+                    )
+                    if r.status_code == 200:
+                        m         = r.json().get('market', {})
+                        result    = m.get('result')
+                        lp        = m.get('last_price')
+                        if lp is not None or result:
+                            side      = t.get('side', 'no')
+                            mp        = t.get('market_prob', 0.5) or 0.5
+                            entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+                            contracts = t.get('contracts', 0) or 0
+                            if result == 'yes':   settle_yes = 100
+                            elif result == 'no':  settle_yes = 0
+                            else:                 settle_yes = lp or 50
+                            cur_p = (100 - settle_yes) if side == 'no' else settle_yes
+                            t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
+                            t['settled_price'] = settle_yes
+                except Exception:
+                    pass
+        else:
+            # Settled market — fetch final result from Kalshi API
+            try:
+                import requests as req
+                r = req.get(
+                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                    timeout=4
+                )
+                if r.status_code == 200:
+                    m         = r.json().get('market', {})
+                    result    = m.get('result')
+                    lp        = m.get('last_price')
+                    if lp is not None or result:
+                        side      = t.get('side', 'no')
+                        mp        = t.get('market_prob', 0.5) or 0.5
+                        entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+                        contracts = t.get('contracts', 0) or 0
+                        if result == 'yes':   settle_yes = 100
+                        elif result == 'no':  settle_yes = 0
+                        else:                 settle_yes = lp or 50
+                        cur_p = (100 - settle_yes) if side == 'no' else settle_yes
+                        t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
+                        t['settled_price'] = settle_yes
+            except Exception:
+                pass
+
         closed.append(t)
     return closed
 
@@ -767,6 +818,13 @@ def get_pnl_history():
     from collections import defaultdict
 
     all_trades = read_all_trades()
+
+    # Build exit records index first
+    exit_records = {}
+    for t in all_trades:
+        if t.get('action') == 'exit':
+            exit_records[t.get('ticker', '')] = t
+
     settled_tickers = {}
     open_tickers    = {}
     seen = set()
@@ -775,7 +833,7 @@ def get_pnl_history():
         if not ticker or ticker in seen: continue
         if t.get('action') == 'exit': continue
         seen.add(ticker)
-        if is_settled_ticker(ticker):
+        if is_settled_ticker(ticker) or ticker in exit_records:
             settled_tickers[ticker] = t
         else:
             open_tickers[ticker] = t
@@ -790,37 +848,50 @@ def get_pnl_history():
     from datetime import date as _date
     _today = _date.today()
 
-    # ── Settled positions ────────────────────────────────────────────────────
+    # ── Settled / manually exited positions ─────────────────────────────────
     for ticker, t in settled_tickers.items():
         try:
-            r = req.get(
-                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
-                timeout=4
-            )
-            if r.status_code != 200: continue
-            m = r.json().get('market', {})
-            lp     = m.get('last_price')
-            result = m.get('result')
-            if lp is None and not result: continue
-            # Use actual settlement result for finalized markets
-            if result == 'yes':   lp = 100
-            elif result == 'no':  lp = 0
+            # Check if this was manually exited — use exit record for P&L (no API call needed)
+            if ticker in exit_records:
+                ex = exit_records[ticker]
+                pnl = ex.get('realized_pnl')
+                if pnl is None:
+                    ep = ex.get('entry_price', 50)
+                    xp = ex.get('exit_price', 50)
+                    ct = ex.get('contracts', 0)
+                    side = ex.get('side', t.get('side', 'no'))
+                    pnl = round((xp - ep) * ct / 100, 2) if side == 'no' else round((xp - ep) * ct / 100, 2)
+                pnl = round(float(pnl), 2)
+                side = ex.get('side', t.get('side', 'no'))
+            else:
+                r = req.get(
+                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                    timeout=4
+                )
+                if r.status_code != 200: continue
+                m = r.json().get('market', {})
+                lp     = m.get('last_price')
+                result = m.get('result')
+                if lp is None and not result: continue
+                # Use actual settlement result for finalized markets
+                if result == 'yes':   lp = 100
+                elif result == 'no':  lp = 0
 
-            side      = t.get('side', 'no')
-            mp        = t.get('market_prob', 0.5) or 0.5
-            entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
-            cost      = t.get('size_dollars', 25)
-            contracts = t.get('contracts', 0) or 0
-            if contracts > 0 and cost > 0:
-                contracts = min(contracts, int(cost / max(entry_p, 1) * 100) + 2)
+                side      = t.get('side', 'no')
+                mp        = t.get('market_prob', 0.5) or 0.5
+                entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+                cost      = t.get('size_dollars', 25)
+                contracts = t.get('contracts', 0) or 0
+                if contracts > 0 and cost > 0:
+                    contracts = min(contracts, int(cost / max(entry_p, 1) * 100) + 2)
 
-            cur_p = (100 - lp) if side == 'no' else lp
-            pnl   = round((cur_p - entry_p) * contracts / 100, 2)
+                cur_p = (100 - lp) if side == 'no' else lp
+                pnl   = round((cur_p - entry_p) * contracts / 100, 2)
             closed_pnl_total += pnl
             closed_total += 1
             if pnl > 0: closed_wins += 1
 
-            src = t.get('source', 'bot')
+            src = exit_records[ticker].get('source', t.get('source', 'bot')) if ticker in exit_records else t.get('source', 'bot')
             is_manual = src in ('economics', 'geo', 'manual')
             if is_manual:
                 closed_by_source['manual'] += pnl
