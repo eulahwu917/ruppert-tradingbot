@@ -14,6 +14,19 @@ from pathlib import Path
 
 app = FastAPI(title="Ruppert Trading Dashboard")
 LOGS_DIR = Path(__file__).parent.parent / "logs"
+MODE_FILE = Path(__file__).parent.parent / "mode.json"
+
+def get_mode() -> str:
+    """Returns 'demo' or 'live'."""
+    try:
+        if MODE_FILE.exists():
+            return json.loads(MODE_FILE.read_text(encoding='utf-8')).get('mode', 'demo')
+    except Exception:
+        pass
+    return 'demo'
+
+def set_mode(mode: str):
+    MODE_FILE.write_text(json.dumps({"mode": mode}, indent=2), encoding='utf-8')
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -202,8 +215,7 @@ def get_account():
     Kalshi balance already reflects open positions in live mode.
     ─────────────────────────────────────────────────────────────────────────
     """
-    # DEMO: fixed starting capital ($200 weather + $200 crypto)
-    STARTING_CAPITAL = 400.00
+    current_mode = get_mode()
 
     all_trades = read_all_trades()
 
@@ -232,18 +244,28 @@ def get_account():
     manual_cost  = sum(t.get('size_dollars',0) for t in open_trades if t.get('source','bot') in MANUAL_SOURCES)
     total_deployed = bot_cost + manual_cost
 
-    # Starting capital = sum of demo deposits (replaces hardcoded $400)
-    deposits_path = LOGS_DIR / "demo_deposits.jsonl"
-    STARTING_CAPITAL = 0.0
-    if deposits_path.exists():
-        with open(deposits_path) as f:
-            for line in f:
-                try: STARTING_CAPITAL += json.loads(line).get('amount', 0)
-                except: pass
-    if STARTING_CAPITAL == 0: STARTING_CAPITAL = 400.0  # fallback
-
-    # Buying power = what's not currently locked in open trades
-    buying_power = max(STARTING_CAPITAL - total_deployed, 0)
+    # Capital source: Live = Kalshi API balance; Demo = sum of demo deposits
+    if current_mode == 'live':
+        try:
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from kalshi_client import KalshiClient
+            STARTING_CAPITAL = KalshiClient().get_balance()
+        except Exception as e:
+            STARTING_CAPITAL = 400.0  # fallback if API fails
+        # In live mode, Kalshi balance already reflects settled P&L
+        # Buying power = balance minus currently deployed (open positions)
+        buying_power = max(STARTING_CAPITAL - total_deployed, 0)
+    else:
+        # Demo: sum of demo deposits
+        deposits_path = LOGS_DIR / "demo_deposits.jsonl"
+        STARTING_CAPITAL = 0.0
+        if deposits_path.exists():
+            with open(deposits_path, encoding='utf-8') as f:
+                for line in f:
+                    try: STARTING_CAPITAL += json.loads(line).get('amount', 0)
+                    except: pass
+        if STARTING_CAPITAL == 0: STARTING_CAPITAL = 400.0  # fallback
+        buying_power = max(STARTING_CAPITAL - total_deployed, 0)
 
     return {
         "starting_capital":   STARTING_CAPITAL,
@@ -258,9 +280,23 @@ def get_account():
         "open_trade_count":   len(open_trades),
         "bot_deployed":       round(bot_cost, 2),
         "manual_deployed":    round(manual_cost, 2),
-        "is_dry_run":         True,
+        "is_dry_run":         current_mode == 'demo',
+        "mode":               current_mode,
     }
 
+
+@app.get("/api/mode")
+def get_mode_endpoint():
+    return {"mode": get_mode()}
+
+@app.post("/api/mode")
+async def set_mode_endpoint(request: Request):
+    body = await request.json()
+    mode = body.get("mode", "demo").lower()
+    if mode not in ("demo", "live"):
+        return {"error": "Invalid mode. Must be 'demo' or 'live'"}
+    set_mode(mode)
+    return {"mode": mode, "ok": True}
 
 @app.get("/api/deposits")
 def get_deposits():

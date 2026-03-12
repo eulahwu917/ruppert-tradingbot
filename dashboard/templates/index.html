@@ -8,6 +8,26 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0d0d; color: #e0e0e0; }
 
+/* Live mode banner */
+#live-banner { display:none; background:#dc2626; color:#fff; text-align:center; font-size:13px; font-weight:700; padding:7px; letter-spacing:1px; }
+/* Mode toggle */
+.mode-toggle { display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none; }
+.mode-toggle-track { width:44px; height:24px; border-radius:12px; background:#333; position:relative; transition:background .2s; }
+.mode-toggle-track.live { background:#dc2626; }
+.mode-toggle-knob { width:18px; height:18px; border-radius:50%; background:#fff; position:absolute; top:3px; left:3px; transition:left .2s; }
+.mode-toggle-track.live .mode-toggle-knob { left:23px; }
+.mode-toggle-label { font-size:12px; font-weight:600; color:#888; }
+.mode-toggle-label.live { color:#dc2626; }
+/* Confirmation modal */
+#mode-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,.7); z-index:1000; align-items:center; justify-content:center; }
+#mode-modal.show { display:flex; }
+.mode-modal-box { background:#1a1a1a; border:1px solid #dc2626; border-radius:12px; padding:28px 32px; max-width:380px; width:90%; text-align:center; }
+.mode-modal-box h2 { color:#dc2626; font-size:18px; margin:0 0 12px; }
+.mode-modal-box p { color:#aaa; font-size:13px; margin:0 0 20px; line-height:1.6; }
+.mode-modal-btns { display:flex; gap:10px; justify-content:center; }
+.mode-modal-btns button { padding:9px 22px; border-radius:6px; border:none; font-size:13px; font-weight:600; cursor:pointer; }
+.btn-confirm-live { background:#dc2626; color:#fff; }
+.btn-cancel-live { background:#333; color:#aaa; }
 .header { background: #111; border-bottom: 1px solid #1e1e1e; padding: 12px 22px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
 .header h1 { font-size: 15px; font-weight: 600; color: #fff; }
 .header h1 span { color: #4ade80; }
@@ -267,12 +287,32 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 <div class="ovl" id="ovl" onclick="closeSB()"></div>
 <div class="sb" id="sb"><div class="sb-inner" id="sb-inner"></div></div>
 
+<!-- Live mode banner -->
+<div id="live-banner">&#x26A0;&#xFE0F; LIVE TRADING ACTIVE — REAL MONEY AT RISK</div>
+
+<!-- Mode switch confirmation modal -->
+<div id="mode-modal">
+  <div class="mode-modal-box">
+    <h2>&#x26A0;&#xFE0F; Switch to LIVE?</h2>
+    <p>You are about to enable <strong style="color:#fff;">LIVE trading</strong>.<br>Real money will be deployed on Kalshi.<br>Make sure you have reviewed all positions and settings.</p>
+    <div class="mode-modal-btns">
+      <button class="btn-cancel-live" onclick="cancelModeSwitch()">Cancel</button>
+      <button class="btn-confirm-live" onclick="confirmModeSwitch()">Yes, Go LIVE</button>
+    </div>
+  </div>
+</div>
+
 <div class="header">
   <h1>&#x1F4CA; <span>Ruppert</span> Dashboard</h1>
-  <div>
+  <div style="display:flex;align-items:center;gap:10px;">
     <span class="pill pill-g">&#x25CF; Running</span>
-    <span class="pill pill-b">Demo</span>
-    <span id="ts" style="color:#1e1e1e;font-size:10px;margin-left:12px;"></span>
+    <div class="mode-toggle" onclick="requestModeSwitch()" title="Toggle Demo/Live mode">
+      <div class="mode-toggle-track" id="mode-track">
+        <div class="mode-toggle-knob"></div>
+      </div>
+      <span class="mode-toggle-label" id="mode-label">DEMO</span>
+    </div>
+    <span id="ts" style="color:#1e1e1e;font-size:10px;margin-left:6px;"></span>
   </div>
 </div>
 
@@ -281,7 +321,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
   <!-- Account Bar -->
   <div class="acct-bar">
     <div class="acct-item" onclick="openDepositSB()" style="cursor:pointer;" title="Click to deposit">
-      <div class="acct-label">Demo Account Value</div>
+      <div class="acct-label" id="av-label">Account Value</div>
       <div class="acct-right"><div class="acct-main" id="av">--</div></div>
     </div>
     <div class="acct-item">
@@ -405,7 +445,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 
 </div>
 
-<div class="footer">Ruppert v1.4 &mdash; Dry Run &mdash; No real money at risk &mdash; Auto-refreshes 30s</div>
+<div class="footer" id="footer-bar">Ruppert v1.4 &mdash; Demo Mode &mdash; No real money at risk &mdash; Auto-refreshes 30s</div>
 
 <script>
 
@@ -499,9 +539,69 @@ async function submitDeposit() {
 }
 
 // ── Account ────────────────────────────────────────────────────────────────────
+// ── Mode toggle logic ────────────────────────────────────────────────────────
+window._currentMode = 'demo';
+window._pendingMode = null;
+
+function applyMode(mode) {
+  window._currentMode = mode;
+  const isLive = mode === 'live';
+  const track = document.getElementById('mode-track');
+  const label = document.getElementById('mode-label');
+  const banner = document.getElementById('live-banner');
+  const avLabel = document.getElementById('av-label');
+  const footer = document.getElementById('footer-bar');
+  if (track) { track.classList.toggle('live', isLive); }
+  if (label) { label.textContent = isLive ? 'LIVE' : 'DEMO'; label.classList.toggle('live', isLive); }
+  if (banner) { banner.style.display = isLive ? 'block' : 'none'; }
+  if (avLabel) { avLabel.textContent = isLive ? 'Account Value (Live)' : 'Account Value (Demo)'; }
+  if (footer) { footer.textContent = isLive
+    ? 'Ruppert v1.4 — LIVE MODE — Real money at risk — Auto-refreshes 30s'
+    : 'Ruppert v1.4 — Demo Mode — No real money at risk — Auto-refreshes 30s'; }
+}
+
+function requestModeSwitch() {
+  const next = window._currentMode === 'demo' ? 'live' : 'demo';
+  if (next === 'demo') {
+    // Switching back to demo — no confirmation needed
+    switchMode('demo');
+  } else {
+    // Switching to live — show confirmation modal
+    window._pendingMode = 'live';
+    document.getElementById('mode-modal').classList.add('show');
+  }
+}
+
+function cancelModeSwitch() {
+  window._pendingMode = null;
+  document.getElementById('mode-modal').classList.remove('show');
+}
+
+async function confirmModeSwitch() {
+  document.getElementById('mode-modal').classList.remove('show');
+  await switchMode('live');
+}
+
+async function switchMode(mode) {
+  try {
+    await api('/api/mode', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mode}) });
+    applyMode(mode);
+    loadAccount();
+  } catch(e) { console.error('Mode switch failed', e); }
+}
+
+async function loadMode() {
+  const d = await api('/api/mode');
+  if (d && d.mode) applyMode(d.mode);
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 async function loadAccount() {
   const acct = await api('/api/account');
   if (!acct || acct.error) return;
+
+  // Apply mode from account response
+  if (acct.mode) applyMode(acct.mode);
 
   // Store globally so loadLivePrices can compute Account Value = Balance + Open P&L
 
@@ -1091,6 +1191,7 @@ async function loadScouts(){
 async function loadAll(){
   await Promise.all([loadAccount(), loadPositions(), loadTrades(), loadScouts(), loadClosedPnl()]);
 }
+loadMode();
 loadAll();
 setInterval(loadAll, 30000);
 
