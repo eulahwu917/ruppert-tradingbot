@@ -643,10 +643,19 @@ function setSplitPnl(id, pctId, val, cost) {
   el.className   = 'acct-main ' + pcls(val);
   el.textContent = (val >= 0 ? '+' : '') + dollar(val);
   const pe = document.getElementById(pctId);
-  if (pe && cost) {
-    const pp = val / cost * 100;
-    pe.className   = 'acct-pct ' + pcls(val);
-    pe.textContent = (pp >= 0 ? '+' : '') + pp.toFixed(2) + '%';
+  if (pe) {
+    // Guard: if cost is 0 or near-zero, show N/A instead of an astronomical %
+    if (!cost || Math.abs(cost) < 0.01) {
+      pe.className   = 'acct-pct pnl-neu';
+      pe.textContent = 'N/A';
+    } else {
+      // Cap at ±999% so even legitimately high-% trades don't break the UI
+      let pp = val / cost * 100;
+      const capped = Math.abs(pp) > 999;
+      pp = Math.max(-999, Math.min(999, pp));
+      pe.className   = 'acct-pct ' + pcls(val);
+      pe.textContent = (pp >= 0 ? '+' : '') + pp.toFixed(2) + '%' + (capped ? '*' : '');
+    }
   }
 }
 
@@ -1132,9 +1141,11 @@ async function loadClosedPnl() {
     const cpnlVal = window._cpnlData[window._cpnlFrame || 'month'];
     setPnl('cpnl', 'cpnl-pct', cpnlVal, window._kalshiBalance || 400);
 
-    // Split cards
-    setSplitPnl('bot-pnl', 'bot-pnl-pct', window._botCpnlData[window._botCpnlFrame||'month'], pnl.bot_deployed||1);
-    setSplitPnl('man-pnl', 'man-pnl-pct', window._manCpnlData[window._manCpnlFrame||'month'], pnl.man_deployed||1);
+    // Split cards — use cost basis (sum of entry costs for CLOSED positions) as denominator.
+    // bot_deployed/man_deployed are OPEN deployed capital; when all positions are closed
+    // they become 0, causing the ||1 fallback and absurd percentages like +67200%.
+    setSplitPnl('bot-pnl', 'bot-pnl-pct', window._botCpnlData[window._botCpnlFrame||'month'], pnl.bot_cost_basis);
+    setSplitPnl('man-pnl', 'man-pnl-pct', window._manCpnlData[window._manCpnlFrame||'month'], pnl.man_cost_basis);
 
     // Deployed + Trades counters
     if ($('bot-dep')) $('bot-dep').textContent = dollar(pnl.bot_deployed||0);

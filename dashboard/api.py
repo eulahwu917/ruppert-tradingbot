@@ -901,6 +901,11 @@ def get_pnl_history():
     closed_wins = 0
     closed_total = 0
     closed_count_by_source = {'bot': 0, 'manual': 0}
+    # Cost basis for closed positions — used to compute a meaningful P&L % on the dashboard.
+    # Must be in dollars. bot_deployed/man_deployed are OPEN deployed capital (wrong denominator
+    # when all positions are closed; causes ÷0 fallback → absurd %).
+    bot_cost_basis = 0.0
+    manual_cost_basis = 0.0
 
     from datetime import date as _date
     _today = _date.today()
@@ -956,6 +961,13 @@ def get_pnl_history():
             else:
                 closed_by_source['bot'] += pnl
                 closed_count_by_source['bot'] += 1
+            # Accumulate cost basis (dollars) so frontend can compute a sane P&L %.
+            # size_dollars is the original entry cost in dollars (already dollars, not cents).
+            position_cost = float(t.get('size_dollars') or 0)
+            if is_manual:
+                manual_cost_basis += position_cost
+            else:
+                bot_cost_basis += position_cost
 
             # Bucket by exit date (for manual exits) or settlement date
             # Using exit date ensures P&L is counted in the month it was realized
@@ -1090,6 +1102,11 @@ def get_pnl_history():
         "man_trades":  closed_count_by_source['manual'],
         "points": points,
         "total":  round(total_pnl, 2),
+        # Cost basis for closed positions (sum of original entry costs in dollars).
+        # Use these as the denominator for P&L % — NOT bot_deployed/man_deployed,
+        # which are OPEN position costs and become 0 when all positions are closed.
+        "bot_cost_basis": round(bot_cost_basis, 2),
+        "man_cost_basis": round(manual_cost_basis, 2),
     }
     # Write closed_pnl to cache so bot can read correct capital without duplicate API calls
     try:
