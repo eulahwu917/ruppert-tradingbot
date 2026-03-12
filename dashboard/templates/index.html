@@ -701,8 +701,8 @@ async function loadPositions() {
     const cur   = '<span style="color:#555;font-size:10px;">live↓</span>';
     const _s = (p.ticker||"").split("-")[0].toLowerCase(); const url = `https://kalshi.com/markets/${_s}`; 
     const pnlH  = v => v!=null ? `<span class="${pcls(v)}">${sign(v)}${dollar(v)}</span>` : '<span style="color:#333">--</span>';
-    const src   = (['geo','gaming','manual'].includes(p.source))
-                  ? '<span class="b-manual">MANUAL</span>' : '<span class="b-bot">BOT</span>';
+    const src   = (['economics','geo','manual'].includes(p.source))
+                  ? '<span class="b-manual">MANUAL</span>' : '<span class="b-bot">BOT</span>';  // BOT: bot, weather, crypto
     // Signal: weather=NOAA vs mkt, crypto=smart money, economics=model vs mkt, default=--
     const sym = (p.ticker||'').split('-')[0];
     let sigVal = '--';
@@ -789,7 +789,7 @@ async function loadLivePrices(positions) {
         : (lv.no_bid != null ? lv.no_bid : (lv.yes_ask != null ? 100 - lv.yes_ask : null));
       if (cp == null) continue;
       const pnl = ((cp - p.entry_price) * p.contracts) / 100;
-      if (p.source && ['geo','gaming','manual'].includes(p.source)) manPnl += pnl;
+      if (p.source && ['economics','geo','manual'].includes(p.source)) manPnl += pnl;
       else botPnl += pnl;
     }
     const totalPnl = botPnl + manPnl;
@@ -833,9 +833,9 @@ async function loadTrades() {
     const side   = t.side==='yes'
       ? '<span class="b-yes">YES</span>'
       : '<span class="b-no">NO</span>';
-    const src    = (['geo','gaming','manual','crypto'].includes(t.source))
+    const src    = (['economics','geo','manual'].includes(t.source))
       ? '<span class="b-manual">MANUAL</span>'
-      : '<span class="b-bot">BOT</span>';
+      : '<span class="b-bot">BOT</span>';  // BOT: bot, weather, crypto
     const mp     = t.market_prob||0;
     const entryP = t.side==='no' ? Math.round((1-mp)*100) : Math.round(mp*100);
     const cost   = t.size_dollars ? dollar(t.size_dollars) : '--';
