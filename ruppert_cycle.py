@@ -353,8 +353,10 @@ try:
     xrp = prices.get('xrp', 1.38)
     print(f"  BTC=${btc:,.0f}  ETH=${eth:,.2f}  XRP=${xrp:.4f}")
 
-    # Bearish drift
-    drift_sigma = -0.6 if direction == 'bearish' else (0.4 if direction == 'bullish' else 0.0)
+    # Bearish block removed (approved 2026-03-12: CEO + David).
+    # Direction signal is kept for logging/reporting below, but no longer
+    # used to bias the edge model — the NO/high-strike logic runs regardless.
+    drift_sigma = 0.0
 
     SERIES_CFG = [
         ('KXBTC', btc, 250, 0.025, 18),
