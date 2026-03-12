@@ -144,14 +144,17 @@ SPORTS_EXCLUSIONS = [
 
 
 def settlement_date_from_ticker(ticker: str):
-    """Parse settlement date from ticker, e.g. 26MAR10 -> date(2026,3,10). Returns None if not found."""
+    """Parse settlement date from ticker, e.g. 26MAR10 -> date(2026,3,10).
+    Also handles date+hour format, e.g. 26MAR1117 -> date(2026,3,11).
+    Returns None if not found."""
     import re as _re
     months = {'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,
               'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
     for part in ticker.upper().split('-'):
-        m = _re.match(r'^(\d{2})([A-Z]{3})(\d{2})$', part)
+        # Match 26MAR11 (date only) OR 26MAR1117 (date + 2-digit hour)
+        m = _re.match(r'^(\d{2})([A-Z]{3})(\d{2})(\d{2})?$', part)
         if m:
-            yy, mon, dd = m.groups()
+            yy, mon, dd = m.group(1), m.group(2), m.group(3)
             mn = months.get(mon)
             if mn:
                 try:
@@ -913,6 +916,20 @@ def get_pnl_history():
     # ── Settled / manually exited positions ─────────────────────────────────
     for ticker, t in settled_tickers.items():
         try:
+            # Determine source and cost basis BEFORE any API call or `continue`.
+            # Bug fix: original code placed these after the if/else block, so API-path
+            # failures (status!=200, no price yet) would skip via `continue` and leave
+            # both bot_cost_basis and manual_cost_basis unupdated for those positions.
+            src = exit_records[ticker].get('source', t.get('source', 'bot')) if ticker in exit_records else t.get('source', 'bot')
+            is_manual = src in ('economics', 'geo', 'manual')
+            # Accumulate cost basis for ALL closed positions — always, regardless of
+            # whether the Kalshi API call succeeds.
+            position_cost = float(t.get('size_dollars') or 0)
+            if is_manual:
+                manual_cost_basis += position_cost
+            else:
+                bot_cost_basis += position_cost
+
             # Check if this was manually exited — use exit record for P&L (no API call needed)
             if ticker in exit_records:
                 ex = exit_records[ticker]
@@ -953,21 +970,13 @@ def get_pnl_history():
             closed_total += 1
             if pnl > 0: closed_wins += 1
 
-            src = exit_records[ticker].get('source', t.get('source', 'bot')) if ticker in exit_records else t.get('source', 'bot')
-            is_manual = src in ('economics', 'geo', 'manual')
+            # is_manual already determined above — accumulate by source
             if is_manual:
                 closed_by_source['manual'] += pnl
                 closed_count_by_source['manual'] += 1
             else:
                 closed_by_source['bot'] += pnl
                 closed_count_by_source['bot'] += 1
-            # Accumulate cost basis (dollars) so frontend can compute a sane P&L %.
-            # size_dollars is the original entry cost in dollars (already dollars, not cents).
-            position_cost = float(t.get('size_dollars') or 0)
-            if is_manual:
-                manual_cost_basis += position_cost
-            else:
-                bot_cost_basis += position_cost
 
             # Bucket by exit date (for manual exits) or settlement date
             # Using exit date ensures P&L is counted in the month it was realized
