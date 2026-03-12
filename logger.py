@@ -117,27 +117,42 @@ def get_computed_capital():
         )
         total_deposits = 400.0
 
-    # ── Sum realized P&L from all exit records across all trade logs ──────────
-    total_realized_pnl = 0.0
-    trade_log_pattern = os.path.join(LOG_DIR, 'trades_*.jsonl')
-    for log_path in sorted(glob.glob(trade_log_pattern)):
-        try:  # W2: wrap each trade log open in try/except
-            with open(log_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        record = json.loads(line)
-                        if record.get('action') == 'exit':
-                            pnl = record.get('realized_pnl')
-                            if pnl is not None:
-                                total_realized_pnl += float(pnl)
-                    except Exception:
-                        pass
+    # ── Closed P&L: prefer dashboard cache (includes naturally settled losses) ──
+    # Dashboard /api/pnl calls Kalshi API for settled positions and writes pnl_cache.json.
+    # This is more accurate than summing exit records, which miss naturally settled losses.
+    pnl_cache_path = os.path.join(LOG_DIR, 'pnl_cache.json')
+    total_realized_pnl = None
+    if os.path.exists(pnl_cache_path):
+        try:
+            with open(pnl_cache_path, 'r', encoding='utf-8') as f:
+                cache = json.load(f)
+                total_realized_pnl = float(cache.get('closed_pnl', 0.0))
         except Exception as _e:
             import sys as _sys
-            print(f"[WARNING] get_computed_capital: failed to read trade log {log_path}: {_e}", file=_sys.stderr)
+            print(f"[WARNING] get_computed_capital: pnl_cache.json unreadable, falling back to exit records: {_e}", file=_sys.stderr)
+
+    # Fallback: sum exit records if cache not available
+    if total_realized_pnl is None:
+        total_realized_pnl = 0.0
+        trade_log_pattern = os.path.join(LOG_DIR, 'trades_*.jsonl')
+        for log_path in sorted(glob.glob(trade_log_pattern)):
+            try:
+                with open(log_path, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                            if record.get('action') == 'exit':
+                                pnl = record.get('realized_pnl')
+                                if pnl is not None:
+                                    total_realized_pnl += float(pnl)
+                        except Exception:
+                            pass
+            except Exception as _e:
+                import sys as _sys
+                print(f"[WARNING] get_computed_capital: failed to read trade log {log_path}: {_e}", file=_sys.stderr)
 
     return round(total_deposits + total_realized_pnl, 2)
 

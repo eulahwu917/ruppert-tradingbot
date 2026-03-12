@@ -1066,7 +1066,7 @@ def get_pnl_history():
     bot_dep = sum(t.get('size_dollars',0) for t in open_t if t.get('source','bot') in BOT_SRC)
     man_dep = sum(t.get('size_dollars',0) for t in open_t if t.get('source','bot') in MAN_SRC)
 
-    return {
+    pnl_result = {
         "open_pnl":   round(open_pnl_total, 2),
         "closed_pnl": round(closed_pnl_total, 2),
         "total_pnl":  round(total_pnl, 2),
@@ -1091,5 +1091,13 @@ def get_pnl_history():
         "points": points,
         "total":  round(total_pnl, 2),
     }
+    # Write closed_pnl to cache so bot can read correct capital without duplicate API calls
+    try:
+        pnl_cache = LOGS_DIR / "pnl_cache.json"
+        with open(pnl_cache, 'w', encoding='utf-8') as _f:
+            json.dump({"closed_pnl": round(closed_pnl_total, 2)}, _f)
+    except Exception:
+        pass
+    return pnl_result
 
 
