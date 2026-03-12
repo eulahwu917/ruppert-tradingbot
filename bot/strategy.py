@@ -31,7 +31,39 @@ MIN_HOURS_ADD    = 2.0           # must be ≥ 2 h from settlement to add
 DAILY_CAP_RATIO  = 0.70          # max fraction of total capital deployable per day
 MAX_POSITION_CAP = 25.0          # hard dollar cap per single position entry
 PCT_CAPITAL_CAP  = 0.025         # max 2.5% of total capital per entry
-KELLY_FRACTION   = 0.25          # fractional Kelly multiplier (conservative)
+KELLY_FRACTION   = 0.25          # max fractional Kelly multiplier (80%+ confidence tier)
+
+
+# ---------------------------------------------------------------------------
+# 0. Confidence-tiered Kelly fraction
+# ---------------------------------------------------------------------------
+
+def kelly_fraction_for_confidence(confidence: float) -> float:
+    """
+    Return the fractional Kelly multiplier appropriate for a given confidence level.
+
+    Higher confidence → larger fraction of the Kelly-optimal bet.
+    This prevents oversizing on borderline signals where the model is less certain.
+
+    Tiers:
+        80%+    → 0.25  (full conservative Kelly)
+        70–80%  → 0.20
+        60–70%  → 0.15
+        50–60%  → 0.10  (minimum — just above entry threshold)
+
+    Args:
+        confidence: Model confidence score (0–1).
+
+    Returns:
+        Kelly multiplier as a float.
+    """
+    if confidence >= 0.80:
+        return 0.25
+    if confidence >= 0.70:
+        return 0.20
+    if confidence >= 0.60:
+        return 0.15
+    return 0.10  # 50–60% confidence band
 
 
 # ---------------------------------------------------------------------------
@@ -39,31 +71,36 @@ KELLY_FRACTION   = 0.25          # fractional Kelly multiplier (conservative)
 # ---------------------------------------------------------------------------
 
 def calculate_position_size(edge: float, win_prob: float, capital: float,
-                             vol_ratio: float = 1.0) -> float:
+                             vol_ratio: float = 1.0,
+                             confidence: float = 0.80) -> float:
     """
-    Compute a dollar position size using fractional Kelly criterion.
+    Compute a dollar position size using confidence-tiered fractional Kelly.
 
     Args:
-        edge:      Estimated edge = model_prob − market_implied_prob.
-        win_prob:  Model's estimated probability of winning (0 < p < 1).
-        capital:   Total available capital in dollars.
-        vol_ratio: Volatility ratio vs baseline; >1.0 = higher vol → smaller
-                   position.  Defaults to 1.0 (no adjustment).
+        edge:       Estimated edge = model_prob − market_implied_prob.
+        win_prob:   Model's estimated probability of winning (0 < p < 1).
+        capital:    Total available capital in dollars.
+        vol_ratio:  Volatility ratio vs baseline; >1.0 = higher vol → smaller
+                    position.  Defaults to 1.0 (no adjustment).
+        confidence: Model confidence score (0–1); selects Kelly tier.
+                    Defaults to 0.80 (max tier) for backward compatibility.
 
     Returns:
         Dollar amount to deploy (float).  Always ≥ 0.
 
     Formula:
+        kf          = kelly_fraction_for_confidence(confidence)  ← tiered
         f           = edge / (1 − win_prob)    ← Kelly fraction
-        kelly_size  = KELLY_FRACTION * f * capital
+        kelly_size  = kf * f * capital
         kelly_size *= 1 / vol_ratio            ← vol shrinkage
         size        = min(kelly_size, $25, 2.5% of capital)
     """
     if win_prob <= 0 or win_prob >= 1 or edge <= 0 or capital <= 0:
         return 0.0
 
+    kf = kelly_fraction_for_confidence(confidence)
     f = edge / (1.0 - win_prob)
-    kelly_size = KELLY_FRACTION * f * capital
+    kelly_size = kf * f * capital
 
     # Vol adjustment: high vol → smaller position
     if vol_ratio > 0:
@@ -145,17 +182,18 @@ def should_enter(signal: dict, capital: float, deployed_today: float) -> dict:
         return {'enter': False, 'size': 0.0, 'reason': 'daily_cap_reached'}
 
     # --- Size ---
-    raw_size = calculate_position_size(edge, win_prob, capital, vol_ratio)
+    raw_size = calculate_position_size(edge, win_prob, capital, vol_ratio, confidence)
     size = round(min(raw_size, room), 2)
 
     if size <= 0:
         return {'enter': False, 'size': 0.0, 'reason': 'kelly_size_zero'}
 
+    kf = kelly_fraction_for_confidence(confidence)
     return {
         'enter':  True,
         'size':   size,
         'reason': f'ok (edge={edge:.3f}, conf={confidence:.2f}, '
-                  f'kelly=${raw_size:.2f}, capped=${size:.2f})',
+                  f'kf={kf:.0%}, kelly=${raw_size:.2f}, capped=${size:.2f})',
     }
 
 
@@ -299,7 +337,11 @@ def get_strategy_summary() -> dict:
         dict of parameter names → values.
     """
     return {
-        'kelly_fraction':           KELLY_FRACTION,
+        'kelly_fraction_max':           KELLY_FRACTION,   # 80%+ confidence tier
+        'kelly_fraction_tier_80plus':   0.25,
+        'kelly_fraction_tier_70_80':    0.20,
+        'kelly_fraction_tier_60_70':    0.15,
+        'kelly_fraction_tier_50_60':    0.10,
         'max_position_cap_dollars': MAX_POSITION_CAP,
         'pct_capital_cap':          PCT_CAPITAL_CAP,
         'daily_cap_ratio':          DAILY_CAP_RATIO,
@@ -338,16 +380,25 @@ if __name__ == '__main__':
     # ------------------------------------------------------------------
     print("\n[1] calculate_position_size")
 
-    s1 = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL)
-    print(f"  Normal:       edge=0.20, win_prob=0.70 -> ${s1}")
+    s1 = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL, confidence=0.85)
+    print(f"  conf=0.85 (kf=0.25): edge=0.20, win_prob=0.70 -> ${s1}")
 
-    s2 = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL, vol_ratio=2.0)
-    print(f"  High vol x2:  edge=0.20, win_prob=0.70 -> ${s2}  (should be ~half of ${s1})")
+    s1b = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL, confidence=0.75)
+    print(f"  conf=0.75 (kf=0.20): edge=0.20, win_prob=0.70 -> ${s1b}  (should be ~80% of ${s1})")
 
-    s3 = calculate_position_size(edge=0.50, win_prob=0.90, capital=CAPITAL)
-    print(f"  High edge:    edge=0.50, win_prob=0.90 -> ${s3}  (should be capped at $25 or 2.5%)")
+    s1c = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL, confidence=0.65)
+    print(f"  conf=0.65 (kf=0.15): edge=0.20, win_prob=0.70 -> ${s1c}  (should be ~60% of ${s1})")
 
-    s4 = calculate_position_size(edge=0.00, win_prob=0.70, capital=CAPITAL)
+    s1d = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL, confidence=0.55)
+    print(f"  conf=0.55 (kf=0.10): edge=0.20, win_prob=0.70 -> ${s1d}  (should be ~40% of ${s1})")
+
+    s2 = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL, vol_ratio=2.0, confidence=0.85)
+    print(f"  High vol x2 (conf=0.85):  -> ${s2}  (should be ~half of ${s1})")
+
+    s3 = calculate_position_size(edge=0.50, win_prob=0.90, capital=CAPITAL, confidence=0.90)
+    print(f"  High edge (conf=0.90):    edge=0.50, win_prob=0.90 -> ${s3}  (should be capped at $25 or 2.5%)")
+
+    s4 = calculate_position_size(edge=0.00, win_prob=0.70, capital=CAPITAL, confidence=0.85)
     print(f"  Zero edge:    -> ${s4}  (should be 0.0)")
 
     # ------------------------------------------------------------------

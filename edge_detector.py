@@ -176,6 +176,18 @@ def analyze_market(market: dict) -> dict | None:
             confidence = signal.get("final_confidence", 0.0)
             signal_src = "open_meteo_ensemble"
             ens = signal.get("ensemble", {})
+
+            # NWS data unavailable — degrade confidence
+            # nws_current_f is the combined NWS result (official → legacy obs fallback);
+            # None means both NWS sources failed (e.g. Miami MFL 404, network error).
+            nws_data = signal.get("nws_current_f")
+            if not nws_data:
+                confidence = max(confidence - 0.15, 0.50)
+                logger.warning(
+                    f"[Edge] {ticker}: NWS data unavailable — confidence degraded "
+                    f"by 0.15 → {confidence:.2f} (floored at 0.50)"
+                )
+
             logger.info(
                 f"[Edge] {ticker}: ensemble {ens.get('members_above')}/{ens.get('total_members')} "
                 f"above {threshold_f}°F → prob={model_prob:.2f} conf={confidence:.2f}"
@@ -260,6 +272,8 @@ def analyze_market(market: dict) -> dict | None:
         result['total_members']    = ens.get("total_members")
         result['current_temp_f']   = ensemble_data.get("conditions", {}).get("current_temp_f")
         result['today_high_f']     = ensemble_data.get("conditions", {}).get("today_high_f")
+        # Flag whether NWS was degraded (set in confidence block above)
+        result['nws_degraded']     = not bool(ensemble_data.get("nws_current_f"))
 
     return result
 

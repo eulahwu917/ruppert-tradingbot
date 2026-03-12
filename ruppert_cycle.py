@@ -179,6 +179,116 @@ if MODE == 'check':
     print(f"\nCheck-only cycle done. {ts()}")
     sys.exit(0)
 
+# ── REPORT MODE: 7am P&L summary + loss detection ────────────────────────────
+if MODE == 'report':
+    print("\n[7AM REPORT] P&L Summary + Loss Detection...")
+    from datetime import timedelta
+
+    today_str     = date.today().isoformat()
+    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+
+    # ── Load all trades: today + yesterday ───────────────────────────────────
+    all_records: list = []
+    for day_str in [yesterday_str, today_str]:
+        log_path = LOGS / f'trades_{day_str}.jsonl'
+        if log_path.exists():
+            for line in log_path.read_text(encoding='utf-8').splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    all_records.append(json.loads(line))
+                except Exception:
+                    pass
+
+    print(f"  Loaded {len(all_records)} record(s) from today + yesterday")
+
+    # ── Group records: latest entry per ticker, all exits ────────────────────
+    entries_by_ticker: dict = {}
+    exit_records: list = []
+
+    for rec in all_records:
+        action = rec.get('action', 'buy')
+        ticker = rec.get('ticker')
+        if not ticker:
+            continue
+        if action in ('buy', 'open'):
+            entries_by_ticker[ticker] = rec   # keep latest entry per ticker
+        elif action == 'exit':
+            exit_records.append(rec)
+
+    # ── Compute high-level P&L summary ───────────────────────────────────────
+    total_deployed = sum(
+        r.get('size_dollars', 0.0)
+        for r in all_records
+        if r.get('action') in ('buy', 'open')
+    )
+    total_exited = sum(r.get('size_dollars', 0.0) for r in exit_records)
+    net_pnl_approx = round(total_exited - total_deployed, 2)
+
+    print(f"  Deployed: ${total_deployed:.2f}  "
+          f"Exited: ${total_exited:.2f}  "
+          f"Net approx: ${net_pnl_approx:+.2f}")
+
+    # ── Scan for losses: explicit exits with negative realized_pnl ───────────
+    # A loss = action=="exit" AND realized_pnl < 0.
+    # If realized_pnl is not stored in the record, compute it from
+    # size_dollars: exit_value - entry_cost (cost basis from the open record).
+    losses: list = []
+
+    for exit_rec in exit_records:
+        ticker = exit_rec.get('ticker')
+
+        # Prefer a logged realized_pnl field; fall back to size_dollars diff
+        realized_pnl = exit_rec.get('realized_pnl')
+        if realized_pnl is None:
+            entry = entries_by_ticker.get(ticker)
+            if entry:
+                exit_value   = float(exit_rec.get('size_dollars') or 0.0)
+                entry_cost   = float(entry.get('size_dollars') or 0.0)
+                realized_pnl = round(exit_value - entry_cost, 2)
+
+        if realized_pnl is not None and realized_pnl < 0:
+            entry = entries_by_ticker.get(ticker)
+            losses.append({
+                'ticker':       ticker,
+                'side':         exit_rec.get('side', ''),
+                'realized_pnl': realized_pnl,
+                'entry_edge':   entry.get('edge') if entry else None,
+                'source':       exit_rec.get('source') or (entry.get('source') if entry else ''),
+                'timestamp':    exit_rec.get('timestamp', ''),
+            })
+
+    print(f"  Losses found: {len(losses)}")
+
+    # ── Write optimizer review file if losses exist ──────────────────────────
+    if losses:
+        total_loss = round(sum(l['realized_pnl'] for l in losses), 2)
+
+        review_file = LOGS / 'pending_optimizer_review.json'
+        review_data = {
+            'date':       today_str,
+            'losses':     losses,
+            'total_loss': total_loss,
+        }
+        review_file.write_text(json.dumps(review_data, indent=2), encoding='utf-8')
+        print(f"  Wrote pending_optimizer_review.json — "
+              f"{len(losses)} loss(es) totaling ${total_loss:.2f}")
+
+        # ── Append optimizer alert ────────────────────────────────────────────
+        alert_msg = (
+            f"Loss review ready: {len(losses)} losing trade(s) totaling "
+            f"${abs(total_loss):.2f}. Optimizer review needed."
+        )
+        push_alert('optimizer', alert_msg)
+        print(f"  Alert queued: {alert_msg}")
+    else:
+        print("  No losses detected — skipping optimizer review file")
+
+    log_cycle('done', {'mode': 'report', 'exit_count': len(exit_records), 'losses': len(losses)})
+    print(f"\n7am report complete. {ts()}")
+    sys.exit(0)
+
 # ── STEP 2: SMART MONEY REFRESH (full mode only) ─────────────────────────────
 print("\n[2] Refreshing smart money signal...")
 try:
