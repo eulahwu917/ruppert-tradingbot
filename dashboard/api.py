@@ -184,11 +184,13 @@ def is_settled_ticker(ticker: str) -> bool:
                     # Same day but with hour — check if settlement time has passed
                     if mkt_date == today and m.group(4):
                         hour = int(m.group(4))
-                        # Convert EDT (UTC-4) to local comparison
-                        from datetime import datetime as _dt
-                        import time as _time
-                        now_hour_edt = (_dt.utcnow().hour - 4) % 24
-                        if now_hour_edt >= hour:
+                        # W6 fix: use full EDT datetime comparison to avoid midnight
+                        # crossover bug where (utc_hour - 4) % 24 wraps 0-2 and
+                        # fails the >= check against settlement hours like 17.
+                        from datetime import datetime as _dt, timedelta as _td
+                        now_edt = _dt.utcnow() - _td(hours=4)
+                        settle_edt = _dt(mkt_date.year, mkt_date.month, mkt_date.day, hour)
+                        if now_edt >= settle_edt:
                             return True
                 except Exception:
                     pass
@@ -275,16 +277,12 @@ def get_account():
                     try: STARTING_CAPITAL += json.loads(line).get('amount', 0)
                     except: pass
         if STARTING_CAPITAL == 0: STARTING_CAPITAL = 400.0  # fallback
-        closed_pnl_realized = 0.0  # frontend adds closed P&L from /api/pnl
         buying_power = max(STARTING_CAPITAL - total_deployed, 0)
 
     return {
-        "starting_capital":   STARTING_CAPITAL,
         "kalshi_balance":     STARTING_CAPITAL,  # alias kept so frontend formula is unchanged
         "buying_power":       round(buying_power, 2),
         "total_deployed":     round(total_deployed, 2),
-        "bot_deployed":       round(bot_cost, 2),
-        "manual_deployed":    round(manual_cost, 2),
         "starting_capital":   round(STARTING_CAPITAL, 2),
         "bot_trade_count":    len([t for t in trades if t.get('source','bot') in AUTO_SOURCES]),
         "manual_trade_count": len([t for t in trades if t.get('source','bot') in MANUAL_SOURCES]),

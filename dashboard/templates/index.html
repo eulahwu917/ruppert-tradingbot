@@ -1193,7 +1193,10 @@ async function loadScouts(){
   await Promise.all([loadHighConviction(), loadCryptoSignal()]);
 }
 async function loadAll(){
-  await Promise.all([loadAccount(), loadPositions(), loadTrades(), loadScouts(), loadClosedPnl()]);
+  // W1 fix: loadClosedPnl() must complete first so window._closedPnl is set
+  // before loadAccount() reads it to compute buying power.
+  await loadClosedPnl();
+  await Promise.all([loadAccount(), loadPositions(), loadTrades(), loadScouts()]);
 }
 loadMode();
 loadAll();
