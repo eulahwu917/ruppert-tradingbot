@@ -1064,6 +1064,17 @@ def get_pnl_history():
     open_wins = 0
     open_total = 0
 
+    # Per-module open stats — deployed capital, trade count, and open P&L
+    # open_pnl is accumulated below using live prices from Kalshi API.
+    module_open_stats = {m: {'open_deployed': 0.0, 'open_trades': 0, 'open_pnl': 0.0} for m in module_keys}
+    for ticker, t in open_tickers.items():
+        src = t.get('source', 'bot')
+        if src in ('economics', 'geo', 'manual'):
+            continue
+        mod = classify_module(src, ticker)
+        module_open_stats[mod]['open_deployed'] += t.get('size_dollars', 0)
+        module_open_stats[mod]['open_trades'] += 1
+
     for ticker, t in open_tickers.items():
         try:
             r = req.get(
@@ -1111,20 +1122,13 @@ def get_pnl_history():
                 open_by_source['manual'] += pnl
             else:
                 open_by_source['bot'] += pnl
+                # Accumulate per-module open P&L (uses live prices from Kalshi API above)
+                mod_open = classify_module(src, ticker)
+                module_open_stats[mod_open]['open_pnl'] += pnl
         except Exception:
             pass
 
     total_pnl = closed_by_source['bot'] + open_by_source['bot']
-
-    # Per-module open stats — deployed capital and count of open bot positions
-    module_open_stats = {m: {'open_deployed': 0.0, 'open_trades': 0} for m in module_keys}
-    for ticker, t in open_tickers.items():
-        src = t.get('source', 'bot')
-        if src in ('economics', 'geo', 'manual'):
-            continue  # skip manual positions
-        mod = classify_module(src, ticker)
-        module_open_stats[mod]['open_deployed'] += t.get('size_dollars', 0)
-        module_open_stats[mod]['open_trades'] += 1
 
     # Build chart time-series (cumulative per day) — BOT-only closed P&L
     from datetime import date as date_cls
@@ -1166,6 +1170,7 @@ def get_pnl_history():
             'wins':              ms['wins'],
             'win_rate':          wr,
             'open_deployed':     round(module_open_stats[mod]['open_deployed'], 2),
+            'open_pnl':          round(module_open_stats[mod]['open_pnl'], 2),
             'open_trades':       module_open_stats[mod]['open_trades'],
         }
 

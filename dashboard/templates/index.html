@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -221,6 +221,9 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
   /* Main grid — single column */
   .main-grid { grid-template-columns: 1fr; gap: 10px; }
 
+  /* Module cards — stack vertically */
+  #module-cards-row { grid-template-columns: 1fr !important; }
+
   /* Tabs — scroll horizontally */
   .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; gap: 0; padding: 0 10px; }
   .tabs::-webkit-scrollbar { display: none; }
@@ -320,44 +323,46 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;" id="module-cards-row">
 
     <!-- 🌤 Weather -->
-    <div class="card" style="border-top:3px solid #4ade80;">
+    <div class="card" style="border-left:3px solid #4ade80;">
       <div style="padding:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-size:18px;">🌤</span>
-            <div>
-              <div style="font-size:13px;font-weight:700;color:#fff;">Weather</div>
-              <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.7px;">Module P&amp;L</div>
+        <!-- Top bar: icon + name -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+          <span style="font-size:18px;">🌤</span>
+          <span style="font-size:13px;font-weight:700;color:#fff;">Weather</span>
+        </div>
+        <!-- Row 1: Open P&L | Closed P&L | Win Rate -->
+        <div style="display:flex;margin-bottom:14px;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
+            <div class="pnl-neu" id="weather-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+          </div>
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+              Closed P&amp;L
+              <select id="weather-period" onchange="setModulePeriod('weather',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
+                <option value="month" selected>This Month</option>
+                <option value="year">This Year</option>
+                <option value="all">All Time</option>
+              </select>
             </div>
-          </div>
-          <select id="weather-period" onchange="setModulePeriod('weather',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:4px;color:#666;padding:2px 5px;cursor:pointer;outline:none;">
-            <option value="month" selected>This Month</option>
-            <option value="year">This Year</option>
-            <option value="all">All Time</option>
-          </select>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div>
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Closed P&amp;L</div>
             <div class="pnl-neu" id="weather-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
-            <div class="pnl-neu" id="weather-pnl-pct" style="font-size:10px;font-weight:600;margin-top:2px;"></div>
           </div>
-          <div>
+          <div style="flex:1;padding-left:12px;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
-            <div style="font-size:22px;font-weight:700;color:#888;" id="weather-winrate">--</div>
-            <div style="font-size:10px;color:#555;margin-top:2px;" id="weather-trades">-- trades</div>
+            <div style="font-size:22px;font-weight:700;color:#4ade80;" id="weather-winrate">--</div>
           </div>
         </div>
-        <div style="border-top:1px solid #1a1a1a;margin-top:10px;padding-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
-          <div>
+        <!-- Row 2: Open Deployed | Open Trades | Total Trades -->
+        <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="weather-open-dep">--</div>
           </div>
-          <div>
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="weather-open-cnt">--</div>
           </div>
-          <div>
+          <div style="flex:1;padding-left:12px;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="weather-total-trades">--</div>
           </div>
@@ -366,44 +371,46 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
     </div>
 
     <!-- ₿ Crypto -->
-    <div class="card" style="border-top:3px solid #a78bfa;">
+    <div class="card" style="border-left:3px solid #a78bfa;">
       <div style="padding:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-size:18px;">₿</span>
-            <div>
-              <div style="font-size:13px;font-weight:700;color:#fff;">Crypto</div>
-              <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.7px;">Module P&amp;L</div>
+        <!-- Top bar: icon + name -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+          <span style="font-size:18px;">₿</span>
+          <span style="font-size:13px;font-weight:700;color:#fff;">Crypto</span>
+        </div>
+        <!-- Row 1: Open P&L | Closed P&L | Win Rate -->
+        <div style="display:flex;margin-bottom:14px;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
+            <div class="pnl-neu" id="crypto-module-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+          </div>
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+              Closed P&amp;L
+              <select id="crypto-module-period" onchange="setModulePeriod('crypto',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
+                <option value="month" selected>This Month</option>
+                <option value="year">This Year</option>
+                <option value="all">All Time</option>
+              </select>
             </div>
-          </div>
-          <select id="crypto-module-period" onchange="setModulePeriod('crypto',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:4px;color:#666;padding:2px 5px;cursor:pointer;outline:none;">
-            <option value="month" selected>This Month</option>
-            <option value="year">This Year</option>
-            <option value="all">All Time</option>
-          </select>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div>
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Closed P&amp;L</div>
             <div class="pnl-neu" id="crypto-module-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
-            <div class="pnl-neu" id="crypto-module-pnl-pct" style="font-size:10px;font-weight:600;margin-top:2px;"></div>
           </div>
-          <div>
+          <div style="flex:1;padding-left:12px;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
-            <div style="font-size:22px;font-weight:700;color:#888;" id="crypto-module-winrate">--</div>
-            <div style="font-size:10px;color:#555;margin-top:2px;" id="crypto-module-trades">-- trades</div>
+            <div style="font-size:22px;font-weight:700;color:#4ade80;" id="crypto-module-winrate">--</div>
           </div>
         </div>
-        <div style="border-top:1px solid #1a1a1a;margin-top:10px;padding-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
-          <div>
+        <!-- Row 2: Open Deployed | Open Trades | Total Trades -->
+        <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-open-dep">--</div>
           </div>
-          <div>
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-open-cnt">--</div>
           </div>
-          <div>
+          <div style="flex:1;padding-left:12px;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-total-trades">--</div>
           </div>
@@ -412,44 +419,46 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
     </div>
 
     <!-- 🏛 Fed -->
-    <div class="card" style="border-top:3px solid #60a5fa;">
+    <div class="card" style="border-left:3px solid #60a5fa;">
       <div style="padding:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <span style="font-size:18px;">🏛</span>
-            <div>
-              <div style="font-size:13px;font-weight:700;color:#fff;">Fed</div>
-              <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.7px;">Module P&amp;L</div>
+        <!-- Top bar: icon + name -->
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+          <span style="font-size:18px;">🏛</span>
+          <span style="font-size:13px;font-weight:700;color:#fff;">Fed</span>
+        </div>
+        <!-- Row 1: Open P&L | Closed P&L | Win Rate -->
+        <div style="display:flex;margin-bottom:14px;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
+            <div class="pnl-neu" id="fed-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+          </div>
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+              Closed P&amp;L
+              <select id="fed-period" onchange="setModulePeriod('fed',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
+                <option value="month" selected>This Month</option>
+                <option value="year">This Year</option>
+                <option value="all">All Time</option>
+              </select>
             </div>
-          </div>
-          <select id="fed-period" onchange="setModulePeriod('fed',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:4px;color:#666;padding:2px 5px;cursor:pointer;outline:none;">
-            <option value="month" selected>This Month</option>
-            <option value="year">This Year</option>
-            <option value="all">All Time</option>
-          </select>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-          <div>
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Closed P&amp;L</div>
             <div class="pnl-neu" id="fed-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
-            <div class="pnl-neu" id="fed-pnl-pct" style="font-size:10px;font-weight:600;margin-top:2px;"></div>
           </div>
-          <div>
+          <div style="flex:1;padding-left:12px;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
-            <div style="font-size:22px;font-weight:700;color:#888;" id="fed-winrate">--</div>
-            <div style="font-size:10px;color:#555;margin-top:2px;" id="fed-trades">-- trades</div>
+            <div style="font-size:22px;font-weight:700;color:#4ade80;" id="fed-winrate">--</div>
           </div>
         </div>
-        <div style="border-top:1px solid #1a1a1a;margin-top:10px;padding-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
-          <div>
+        <!-- Row 2: Open Deployed | Open Trades | Total Trades -->
+        <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="fed-open-dep">--</div>
           </div>
-          <div>
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="fed-open-cnt">--</div>
           </div>
-          <div>
+          <div style="flex:1;padding-left:12px;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="fed-total-trades">--</div>
           </div>
@@ -544,36 +553,35 @@ function renderModuleCard(mod) {
   const period  = window._modulePeriod[mod] || 'month';
   const pfx     = MODULE_ID[mod] || mod;
   const pnl     = period === 'month' ? d.closed_pnl_month  : period === 'year' ? d.closed_pnl_year  : d.closed_pnl;
-  const count   = period === 'month' ? d.trade_count_month : period === 'year' ? d.trade_count_year : d.trade_count;
 
-  // Closed P&L value
+  // Open P&L (always current, not period-filtered — from live Kalshi prices)
+  const openPnlEl = document.getElementById(pfx + '-open-pnl');
+  if (openPnlEl) {
+    const opnl = d.open_pnl != null ? d.open_pnl : 0;
+    openPnlEl.className = pcls(opnl);
+    openPnlEl.style.cssText = 'font-size:22px;font-weight:700;letter-spacing:-0.5px;';
+    openPnlEl.textContent = (opnl >= 0 ? '+' : '') + dollar(opnl);
+  }
+
+  // Closed P&L value (period-filtered)
   const pnlEl = document.getElementById(pfx + '-pnl');
   if (pnlEl) {
     pnlEl.className = pcls(pnl);
     pnlEl.style.cssText = 'font-size:22px;font-weight:700;letter-spacing:-0.5px;';
     pnlEl.textContent = (pnl >= 0 ? '+' : '') + dollar(pnl);
   }
-  // P&L % — use all-time trade_count as proxy; skip if no trades
-  const pctEl = document.getElementById(pfx + '-pnl-pct');
-  if (pctEl) {
-    pctEl.className = pcls(pnl);
-    pctEl.style.cssText = 'font-size:10px;font-weight:600;margin-top:2px;';
-    pctEl.textContent = '';  // cost basis not returned per-module yet
-  }
-  // Win Rate (all-time)
+
+  // Win Rate (all-time, always green per spec)
   const wrEl = document.getElementById(pfx + '-winrate');
   if (wrEl) {
     if (d.win_rate != null) {
-      wrEl.textContent   = d.win_rate.toFixed(0) + '%';
-      wrEl.style.color   = d.win_rate >= 50 ? '#4ade80' : '#f87171';
+      wrEl.textContent = d.win_rate.toFixed(0) + '%';
+      wrEl.style.color = '#4ade80';
     } else {
-      wrEl.textContent   = '--';
-      wrEl.style.color   = '#888';
+      wrEl.textContent = '--';
+      wrEl.style.color = '#888';
     }
   }
-  // Trade count for period (period-filtered, shown below Win Rate)
-  const trEl = document.getElementById(pfx + '-trades');
-  if (trEl) trEl.textContent = count + ' trade' + (count !== 1 ? 's' : '');
 
   // Open Capital Deployed
   const openDepEl = document.getElementById(pfx + '-open-dep');
