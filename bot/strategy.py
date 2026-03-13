@@ -29,7 +29,7 @@ MIN_CONFIDENCE   = 0.50          # universal minimum confidence to enter
 MIN_HOURS_ENTRY  = 0.5           # must be ≥ 30 min from settlement to open
 MIN_HOURS_ADD    = 2.0           # must be ≥ 2 h from settlement to add
 DAILY_CAP_RATIO  = 0.70          # max fraction of total capital deployable per day
-MAX_POSITION_CAP = 25.0          # hard dollar cap per single position entry
+MAX_POSITION_CAP = 50.0          # hard dollar cap per single position entry
 PCT_CAPITAL_CAP  = 0.025         # max 2.5% of total capital per entry
 KELLY_FRACTION   = 0.25          # max fractional Kelly multiplier (80%+ confidence tier)
 
@@ -187,6 +187,11 @@ def should_enter(signal: dict, capital: float, deployed_today: float) -> dict:
 
     if size <= 0:
         return {'enter': False, 'size': 0.0, 'reason': 'kelly_size_zero'}
+
+    # --- Minimum viable trade ---
+    min_viable = round(max(5.0, capital * 0.01), 2)
+    if size < min_viable:
+        return {'enter': False, 'size': 0.0, 'reason': f'below_min_viable (${size:.2f} < ${min_viable:.2f})'}
 
     kf = kelly_fraction_for_confidence(confidence)
     return {
