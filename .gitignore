@@ -7,6 +7,8 @@ telegram_config.json
 
 # Logs — runtime data, not code
 logs/
+logs-live/*.jsonl
+logs-live/*.json
 *.jsonl
 *.log
 

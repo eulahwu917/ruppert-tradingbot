@@ -30,7 +30,10 @@ class KalshiClient:
         configuration.private_key_pem = private_key_pem
 
         self.client = _KalshiClient(configuration)
+        self.is_live = (self.environment == 'live')
         print(f"[Kalshi] Initialized in {self.environment.upper()} mode")
+        if not self.is_live:
+            print("[Kalshi] DEMO mode — all order methods are BLOCKED. Read-only API calls are active.")
 
     def get_balance(self):
         """Get account balance in dollars."""
@@ -65,6 +68,11 @@ class KalshiClient:
         result = self.client.get_market(ticker)
         return result.market
 
+    def _demo_block(self, method_name):
+        """Called by order-placing methods in demo mode. Logs and returns a safe stub."""
+        print(f"[Kalshi] ORDER BLOCKED — demo mode. No API call made. (method: {method_name})")
+        return {"dry_run": True, "simulated": True, "environment": "demo"}
+
     def place_order(self, ticker, side, price_cents, count):
         """
         Place a limit order.
@@ -72,6 +80,8 @@ class KalshiClient:
         price_cents: price in cents (e.g. 30 = 30c)
         count: number of contracts
         """
+        if not self.is_live:
+            return self._demo_block("place_order")
         return self.client.create_order(
             ticker=ticker,
             client_order_id=f"ruppert_{int(time.time())}",
@@ -89,6 +99,8 @@ class KalshiClient:
         price_cents: limit price to sell at
         count: number of contracts to sell
         """
+        if not self.is_live:
+            return self._demo_block("sell_position")
         return self.client.create_order(
             ticker=ticker,
             client_order_id=f"ruppert_exit_{int(time.time() * 1000)}",
@@ -98,6 +110,18 @@ class KalshiClient:
             count=count,
             yes_price=price_cents if side == 'yes' else (100 - price_cents),
         )
+
+    def cancel_order(self, order_id):
+        """Cancel an open order."""
+        if not self.is_live:
+            return self._demo_block("cancel_order")
+        return self.client.cancel_order(order_id=order_id)
+
+    def amend_order(self, order_id, **kwargs):
+        """Amend an open order (price or count)."""
+        if not self.is_live:
+            return self._demo_block("amend_order")
+        return self.client.amend_order(order_id=order_id, **kwargs)
 
     def get_positions(self):
         """Get current open positions."""

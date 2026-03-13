@@ -332,16 +332,14 @@ def get_account():
 
 @app.get("/api/mode")
 def get_mode_endpoint():
-    return {"mode": get_mode()}
+    # Mode is always 'demo' for the DEMO dashboard — determined by config, not UI toggle.
+    return {"mode": "demo"}
 
 @app.post("/api/mode")
 async def set_mode_endpoint(request: Request):
-    body = await request.json()
-    mode = body.get("mode", "demo").lower()
-    if mode not in ("demo", "live"):
-        return {"error": "Invalid mode. Must be 'demo' or 'live'"}
-    set_mode(mode)
-    return {"mode": mode, "ok": True}
+    # This endpoint is intentionally a no-op on the DEMO dashboard.
+    # Mode switching is no longer supported via the UI — use config/live_env.json + run_live_dashboard.py.
+    return {"mode": "demo", "ok": True, "note": "Mode is config-driven. Toggle disabled."}
 
 @app.get("/api/deposits")
 def get_deposits():
