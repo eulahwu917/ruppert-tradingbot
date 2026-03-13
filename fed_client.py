@@ -51,12 +51,12 @@ logger = logging.getLogger(__name__)
 FOMC_DECISION_DATES_2026 = [
     date(2026, 1, 29),
     date(2026, 3, 18),
-    date(2026, 4, 29),
-    date(2026, 6, 10),
+    date(2026, 5,  7),
+    date(2026, 6, 17),
     date(2026, 7, 29),
     date(2026, 9, 16),
     date(2026, 10, 28),
-    date(2026, 12,  9),
+    date(2026, 12, 16),
 ]
 
 # ── Strategy Parameters ───────────────────────────────────────────────────────
@@ -131,9 +131,10 @@ def get_current_fed_rate() -> float | None:
 
 # ── Polymarket FOMC Data ──────────────────────────────────────────────────────
 
-POLYMARKET_FOMC_URL = (
-    "https://gamma-api.polymarket.com/markets?tag=fomc&limit=20&active=true"
-)
+# Slug config — maps FOMC decision date (ISO) → Polymarket event slug
+# Slug-based lookup is the only reliable method; tag=fomc filter returns stale markets.
+_FOMC_SLUGS_FILE    = Path(__file__).parent / "config" / "fomc_slugs.json"
+POLYMARKET_EVENTS_URL = "https://gamma-api.polymarket.com/events"
 
 
 def _classify_polymarket_outcome(question: str) -> str | None:
@@ -157,83 +158,125 @@ def _classify_polymarket_outcome(question: str) -> str | None:
 
 def get_polymarket_fomc_probabilities(meeting_date: date) -> dict | None:
     """
-    Fetch FOMC rate decision probabilities from Polymarket gamma API.
+    Fetch FOMC rate decision probabilities from Polymarket via direct slug lookup.
 
-    Endpoint: https://gamma-api.polymarket.com/markets?tag=fomc&limit=20&active=true
+    Endpoint: https://gamma-api.polymarket.com/events?slug=<slug>
 
-    Filters active markets by endDate proximity to meeting_date (within 5 days),
-    classifies each by outcome, and returns YES prices as probabilities.
+    Slug-based lookup is the only reliable method — the tag=fomc filter returns
+    unrelated old markets and cannot be trusted. Slugs are maintained in
+    logs/fomc_slugs.json keyed by FOMC decision date (ISO format).
+
+    Flow:
+      1. Load fomc_slugs.json
+      2. Look up slug for meeting_date
+      3. If slug is None/missing → save no_signal(slug_unknown) and return sentinel
+      4. Fetch /events?slug=<slug>
+      5. Parse all outcome markets; classify each by question text
+      6. Return {outcome: YES_price} dict (all values in [0, 1])
 
     Returns:
-        {'maintain': float, 'cut_25': float, 'cut_50': float, 'hike': float}
-        All values in [0, 1]. Or None if no matching market found.
+        - {'maintain': float, ...}    on success
+        - {"status": "no_signal", "skip_reason": "slug_unknown", ...}  if slug not yet known
+        - None                        on API / parse error
     """
+    date_key = meeting_date.isoformat()  # e.g. "2026-03-18"
+
+    # ── 1. Load slug config ──────────────────────────────────────────────────
     try:
-        r = requests.get(POLYMARKET_FOMC_URL, timeout=15)
+        with open(_FOMC_SLUGS_FILE, encoding="utf-8") as f:
+            fomc_slugs: dict = json.load(f)
+    except Exception as e:
+        logger.error(f"[FedClient] Could not load fomc_slugs.json: {e}")
+        return None
+
+    # ── 2. Look up slug ──────────────────────────────────────────────────────
+    slug = fomc_slugs.get(date_key)  # None if key missing or value is null
+
+    # ── 3. Slug unknown → early exit ─────────────────────────────────────────
+    if not slug:
+        logger.info(
+            f"[FedClient] No Polymarket slug configured for {date_key} — "
+            f"update config/fomc_slugs.json when slug becomes available"
+        )
+        days_left = (meeting_date - date.today()).days
+        no_signal: dict = {
+            "status":          "no_signal",
+            "skip_reason":     "slug_unknown",
+            "meeting_date":    date_key,
+            "days_to_meeting": days_left,
+        }
+        _save_scan_result(no_signal)
+        return no_signal  # sentinel dict — caller must check status
+
+    # ── 4. Fetch event by slug ───────────────────────────────────────────────
+    try:
+        r = requests.get(POLYMARKET_EVENTS_URL, params={"slug": slug}, timeout=15)
         r.raise_for_status()
-        raw = r.json()
+        events = r.json()
 
-        # API may return a list directly or a wrapper object
-        markets = raw if isinstance(raw, list) else raw.get("markets", [])
-
-        # Filter markets whose endDate is within 5 days of the target meeting
-        matching = []
-        for m in markets:
-            end_date_str = m.get("endDate", "")
-            if not end_date_str:
-                continue
-            try:
-                end_date = datetime.fromisoformat(
-                    end_date_str.replace("Z", "+00:00")
-                ).date()
-                if abs((end_date - meeting_date).days) <= 5:
-                    matching.append(m)
-            except Exception:
-                # Fallback: year-month string match
-                if meeting_date.strftime("%Y-%m") in end_date_str:
-                    matching.append(m)
-
-        if not matching:
-            logger.warning(
-                f"[FedClient] No Polymarket FOMC markets matched meeting date {meeting_date}"
-            )
+        if not events:
+            logger.warning(f"[FedClient] No Polymarket event returned for slug '{slug}'")
             return None
 
-        # Build {outcome: YES_price} dict from matching markets
-        probs: dict[str, float] = {}
-        for m in matching:
-            question = m.get("question", "")
-            outcome  = _classify_polymarket_outcome(question)
-            if outcome is None:
-                logger.debug(f"[FedClient] Polymarket: unclassified question — '{question}'")
-                continue
+        event   = events[0] if isinstance(events, list) else events
+        markets = event.get("markets", [])
 
-            # outcomePrices: ["<yes_price>", "<no_price>"] as string floats (0-1 scale)
+        if not markets:
+            logger.warning(f"[FedClient] Event '{slug}' has no nested markets")
+            return None
+
+        # ── 5. Parse outcome markets ─────────────────────────────────────────
+        # Primary target: "no change" market — the outcome we care most about.
+        # outcomePrices: ["<yes_price>", "<no_price>"] as string floats (0-1 scale)
+        probs: dict[str, float] = {}
+        for m in markets:
+            question       = m.get("question", "")
             outcome_prices = m.get("outcomePrices", [])
             if not outcome_prices:
+                continue
+
+            # Prefer explicit "no change" check before general classifier
+            if "no change" in question.lower():
+                try:
+                    yes_price = float(outcome_prices[0])
+                    probs["maintain"] = round(yes_price, 4)
+                    logger.info(
+                        f"[FedClient] Polymarket no-change prob: {yes_price:.1%} "
+                        f"('{question}', slug: {slug})"
+                    )
+                except (ValueError, IndexError) as exc:
+                    logger.warning(
+                        f"[FedClient] outcomePrices parse error for '{question}': {exc}"
+                    )
+                continue
+
+            # Classify remaining outcomes via keyword mapping
+            outcome = _classify_polymarket_outcome(question)
+            if outcome is None:
+                logger.debug(f"[FedClient] Polymarket: unclassified question — '{question}'")
                 continue
             try:
                 yes_price = float(outcome_prices[0])
                 probs[outcome] = round(yes_price, 4)
             except (ValueError, IndexError) as exc:
-                logger.debug(f"[FedClient] Polymarket price parse error for '{question}': {exc}")
-                continue
+                logger.debug(
+                    f"[FedClient] Polymarket price parse error for '{question}': {exc}"
+                )
 
         if not probs:
             logger.warning(
-                f"[FedClient] Polymarket markets found for {meeting_date} but none "
-                f"could be classified to standard outcomes"
+                f"[FedClient] Event '{slug}': markets found but none could be classified"
             )
             return None
 
         logger.info(
-            f"[FedClient] Polymarket probs for {meeting_date}: "
+            f"[FedClient] Polymarket probs for {meeting_date} (slug={slug}): "
             + " ".join(f"{k}={v:.1%}" for k, v in probs.items())
         )
         return probs
 
     except Exception as e:
-        logger.error(f"[FedClient] Polymarket FOMC fetch failed: {e}")
+        logger.error(f"[FedClient] Polymarket FOMC fetch failed (slug={slug}): {e}")
         return None
 
 
@@ -368,6 +411,18 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
     fed_rate        = get_current_fed_rate()
     polymarket_probs = get_polymarket_fomc_probabilities(meeting_date)
     markets          = get_kalshi_fed_markets(meeting_date)
+
+    # slug_unknown: function already saved the no_signal result — just pass it through
+    if (
+        isinstance(polymarket_probs, dict)
+        and polymarket_probs.get("status") == "no_signal"
+        and polymarket_probs.get("skip_reason") == "slug_unknown"
+    ):
+        logger.info(
+            f"[FedClient] Polymarket slug unknown for {meeting_date} — "
+            f"update config/fomc_slugs.json when slug becomes available"
+        )
+        return polymarket_probs
 
     if not polymarket_probs:
         logger.warning("[FedClient] No Polymarket FOMC probability data — cannot compute edge")
