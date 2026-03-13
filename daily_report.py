@@ -6,6 +6,7 @@ Writes to pending_alerts.json for heartbeat to forward.
 import sys, json, requests, time
 from pathlib import Path
 from datetime import date, datetime
+from logger import send_telegram
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -90,4 +91,8 @@ alerts.append({
     'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
 })
 ALERTS.write_text(json.dumps(alerts, indent=2), encoding='utf-8')
-print(f"\nReport queued for delivery.")
+print(f"\nReport queued to pending_alerts.json (backup).")
+
+# Send directly via Telegram Bot API — no heartbeat delay
+send_telegram(msg)
+print("Report sent directly via Telegram.")

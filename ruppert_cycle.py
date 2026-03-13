@@ -20,7 +20,7 @@ ALERT_LOG   = LOGS / 'cycle_log.jsonl'
 
 import config
 from kalshi_client import KalshiClient
-from logger import log_trade, log_activity, get_daily_exposure, get_computed_capital
+from logger import log_trade, log_activity, get_daily_exposure, get_computed_capital, send_telegram
 from bot.strategy import check_daily_cap
 
 DRY_RUN = True  # Flip to False when going live
@@ -647,9 +647,10 @@ try:
         f"\U0001f4b0 Capital: {_cap_line}"
     )
 
-    push_alert('warning', _scan_msg)
-    log_activity('[SCAN NOTIFY] Cycle summary queued for Telegram')
-    print('  Scan summary alert queued.')
+    push_alert('warning', _scan_msg)  # backup: pending_alerts.json for heartbeat
+    send_telegram(_scan_msg)          # direct: send immediately via Bot API
+    log_activity('[SCAN NOTIFY] Cycle summary sent directly via Telegram')
+    print('  Scan summary sent via Telegram.')
 
 except Exception as _scan_ex:
     print(f'  Scan notify error (non-fatal): {_scan_ex}')
