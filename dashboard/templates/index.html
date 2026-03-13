@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ruppert | Trading Dashboard</title>
+<title>Ruppert | DEMO Dashboard</title>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0d0d0d; color: #e0e0e0; }
@@ -251,10 +251,8 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 </div>
 
 <div class="header">
-  <h1>&#x1F4CA; <span>Ruppert</span> Dashboard</h1>
+  <h1>&#x1F4CA; <span>Ruppert</span></h1>
   <div style="display:flex;align-items:center;gap:10px;">
-    <span class="pill pill-g">&#x25CF; Running</span>
-    <span class="pill pill-b">DEMO</span>
     <span id="ts" style="color:#1e1e1e;font-size:10px;margin-left:6px;"></span>
   </div>
 </div>
@@ -669,7 +667,7 @@ function applyMode(mode) {
   if (track) { track.classList.toggle('live', isLive); }
   if (label) { label.textContent = isLive ? 'LIVE' : 'DEMO'; label.classList.toggle('live', isLive); }
   if (banner) { banner.style.display = isLive ? 'block' : 'none'; }
-  if (avLabel) { avLabel.textContent = isLive ? 'Account Value (Live)' : 'Account Value (Demo)'; }
+  if (avLabel) { avLabel.textContent = 'Account Value'; }
   if (footer) { footer.textContent = isLive
     ? 'Ruppert v1.4 — LIVE MODE — Real money at risk — Auto-refreshes 30s'
     : 'Ruppert v1.4 — Demo Mode — No real money at risk — Auto-refreshes 30s'; }
@@ -741,7 +739,7 @@ async function loadPositions() {
   const positions = await api('/api/positions/active');
   const tb = $('pos-b');
   if (!positions || !positions.length) {
-    tb.innerHTML='<tr><td colspan="10" class="loading">No open positions today</td></tr>';
+    tb.innerHTML='<tr><td colspan="10" class="loading">No open positions</td></tr>';
     window._cachedPositions = [];
     return;
   }
