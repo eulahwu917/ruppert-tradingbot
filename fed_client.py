@@ -373,6 +373,13 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
                else "no upcoming meeting in calendar")
         )
         logger.info(f"[FedClient] Outside signal window — skipping ({reason})")
+        _save_scan_result({
+            "status":        "no_signal",
+            "skip_reason":   "outside_window",
+            "reason":        reason,
+            "meeting_date":  meeting_date.isoformat() if meeting_date else None,
+            "days_to_meeting": days_to_meeting,
+        })
         return None
 
     logger.info(f"[FedClient] In signal window: {days_to_meeting} days to {meeting_date} FOMC")
@@ -384,22 +391,28 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
 
     if not fedwatch_probs:
         logger.warning("[FedClient] No FedWatch probability data — cannot compute edge")
-        return {
+        _result = {
+            "status":          "no_signal",
             "skip_reason":     "fedwatch_unavailable",
             "meeting_date":    meeting_date.isoformat(),
             "days_to_meeting": days_to_meeting,
             "fed_rate":        fed_rate,
         }
+        _save_scan_result(_result)
+        return _result
 
     if not markets:
         logger.warning("[FedClient] No Kalshi KXFEDDECISION markets found")
-        return {
+        _result = {
+            "status":          "no_signal",
             "skip_reason":     "kalshi_markets_unavailable",
             "meeting_date":    meeting_date.isoformat(),
             "days_to_meeting": days_to_meeting,
             "fed_rate":        fed_rate,
             "fedwatch_probs":  fedwatch_probs,
         }
+        _save_scan_result(_result)
+        return _result
 
     # Find best edge opportunity across all outcomes
     best_signal = None
@@ -468,13 +481,16 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
 
     if best_signal is None:
         logger.info("[FedClient] No classifiable KXFEDDECISION outcomes found")
-        return {
+        _result = {
+            "status":          "no_signal",
             "skip_reason":     "no_classifiable_outcomes",
             "meeting_date":    meeting_date.isoformat(),
             "days_to_meeting": days_to_meeting,
             "fed_rate":        fed_rate,
             "fedwatch_probs":  fedwatch_probs,
         }
+        _save_scan_result(_result)
+        return _result
 
     # Strategy gates
     if best_signal["edge"] < FED_MIN_EDGE:
@@ -521,10 +537,12 @@ def _save_scan_result(signal: dict):
 
 # ── Scan-Only (no trade logic) ────────────────────────────────────────────────
 
-def run_fed_scan(dry_run: bool = True) -> dict | None:
+def run_fed_scan() -> dict | None:
     """
     Run a Fed scan cycle. Returns signal dict or None.
     Trade execution is handled by ruppert_cycle.py (strategy gate + logger.log_trade).
+    dry_run is intentionally not a parameter here — execution mode is determined
+    by the DRY_RUN flag in ruppert_cycle.py (the caller).
     """
     signal = get_fed_signal()
     if signal and not signal.get("skip_reason"):

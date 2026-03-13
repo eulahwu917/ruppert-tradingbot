@@ -474,7 +474,7 @@ try:
     if not in_window:
         print(f"  Fed signal window inactive — next FOMC {fed_meeting} ({fed_days}d away)")
     else:
-        fed_signal = run_fed_scan(dry_run=DRY_RUN)
+        fed_signal = run_fed_scan()
 
         if fed_signal and not fed_signal.get("skip_reason"):
             ticker     = fed_signal.get("ticker", "KXFEDDECISION-?")
@@ -528,7 +528,6 @@ try:
                 }
 
                 if DRY_RUN:
-                    from logger import log_trade, log_activity
                     log_trade(opp, actual_cost, contracts, {"dry_run": True})
                     log_activity(
                         f"[AUTO-FED] BUY {side.upper()} {ticker} {contracts}@{bet_price}c "
@@ -542,7 +541,6 @@ try:
                 else:
                     try:
                         result = client.place_order(ticker, side, bet_price, contracts)
-                        from logger import log_trade, log_activity
                         log_trade(opp, actual_cost, contracts, result)
                         log_activity(
                             f"[AUTO-FED] EXECUTED {ticker} {side.upper()} "
