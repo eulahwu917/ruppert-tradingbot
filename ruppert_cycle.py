@@ -8,7 +8,7 @@ Modes:
 """
 import sys, json, time, math, requests
 from pathlib import Path
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -518,7 +518,7 @@ try:
                     "outcome":    outcome,
                     "meeting_date": fed_signal.get("meeting_date"),
                     "days_to_meeting": fed_signal.get("days_to_meeting"),
-                    "fedwatch_prob": fed_signal.get("prob"),
+                    "polymarket_prob": fed_signal.get("prob"),
                     "note": (f"FOMC {fed_signal.get('meeting_date')} {outcome.upper()} "
                              f"FedWatch={fed_signal.get('prob', 0):.0%} "
                              f"Kalshi={fed_signal.get('market_price', 0):.0%} "
@@ -598,9 +598,11 @@ print(f"{'='*60}\n")
 # Sends a Telegram message to David via pending_alerts.json (heartbeat forwards it).
 # Level 'warning' is used so it always forwards without additional filtering.
 try:
-    from datetime import timezone as _tz, timedelta as _td
-    _PDT      = _tz(_td(hours=-7))
-    _time_str = datetime.now(_PDT).strftime('%I:%M %p')
+    import time as _time
+    is_dst = _time.daylight and _time.localtime().tm_isdst > 0
+    offset = -7 if is_dst else -8
+    tz_pdt = timezone(timedelta(hours=offset))
+    _time_str = datetime.now(tz_pdt).strftime('%I:%M %p')
 
     # ── Fed status ────────────────────────────────────────────────────────────
     _fed_status = 'no signal (outside window)'

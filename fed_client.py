@@ -404,8 +404,8 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
         if outcome is None:
             continue
 
-        fedwatch_p = polymarket_probs.get(outcome)
-        if fedwatch_p is None:
+        polymarket_p = polymarket_probs.get(outcome)
+        if polymarket_p is None:
             continue
 
         yes_ask = market.get("yes_ask")
@@ -427,21 +427,21 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
             )
             continue
 
-        raw_edge = fedwatch_p - kalshi_price
+        raw_edge = polymarket_p - kalshi_price
 
-        # Confidence: higher when FedWatch probability is extreme (>70% or <30%)
+        # Confidence: higher when Polymarket probability is extreme (>70% or <30%)
         # and when prices agree directionally
-        base_conf = min(abs(fedwatch_p - 0.5) * 2, 1.0)  # 0 at 50-50, 1.0 at 0% or 100%
-        confidence = round(0.5 + base_conf * 0.5, 3)     # compress to [0.50, 1.00] range
+        base_conf = min(abs(polymarket_p - 0.5) * 2, 1.0)  # 0 at 50-50, 1.0 at 0% or 100%
+        confidence = round(0.5 + base_conf * 0.5, 3)       # compress to [0.50, 1.00] range
 
-        # Direction: BUY YES if FedWatch prob > Kalshi price, BUY NO otherwise
+        # Direction: BUY YES if Polymarket prob > Kalshi price, BUY NO otherwise
         direction = "yes" if raw_edge > 0 else "no"
         edge      = abs(raw_edge)
 
         if edge > best_edge:
             best_edge = edge
             best_signal = {
-                "prob":             round(fedwatch_p, 4),
+                "prob":             round(polymarket_p, 4),
                 "confidence":       confidence,
                 "edge":             round(edge, 4),
                 "raw_edge":         round(raw_edge, 4),

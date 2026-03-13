@@ -29,13 +29,13 @@ def get_environment():
 # Risk settings — Weather / Economics
 MAX_POSITION_SIZE = 25.00      # Max $ per single trade
 MAX_DAILY_EXPOSURE = 200.00    # Max $ total per day (weather + econ)
-MIN_EDGE_THRESHOLD = 0.15      # Min edge (15%) to trigger a trade
+MIN_EDGE_THRESHOLD = 0.12      # Min edge (12%) to trigger a trade
 MIN_MARKET_LIQUIDITY = 100.00  # Min $ volume in market to trade
 
 # Risk settings — Crypto (separate budget, FULLY AUTO like weather)
 CRYPTO_MAX_POSITION_SIZE = 25.00   # Max $ per single crypto trade
 CRYPTO_MAX_DAILY_EXPOSURE = 200.00 # Separate $200 daily budget for crypto
-CRYPTO_MIN_EDGE_THRESHOLD = 0.10   # 10% min edge (crypto is noisier)
+CRYPTO_MIN_EDGE_THRESHOLD = 0.12   # 12% min edge (consistent with weather)
 
 # Auto-trade settings
 # Weather + Crypto = fully autonomous (no notification, no approval)
