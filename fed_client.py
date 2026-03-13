@@ -1,20 +1,20 @@
 """
 Fed Rate Decision Client — v1 (Option B: slow repricing / structural window)
 ─────────────────────────────────────────────────────────────────────────────
-Signal approach: Compare CME FedWatch EOD probability to Kalshi market price
-2–7 days before FOMC meeting. Edge = abs(fedwatch_prob - kalshi_price).
+Signal approach: Compare Polymarket FOMC implied probability to Kalshi market
+price 2–7 days before FOMC meeting. Edge = abs(polymarket_prob - kalshi_price).
 Entry if edge > 12% and confidence > 55%.
 
 v1 scope (secondary window only — per SA-1 Optimizer validation 2026-03-12):
   - Targets 2-7 day window before FOMC meetings (structural mispricing).
   - Does NOT attempt to capture the 30-60 min CPI/NFP post-print window
     (requires intraday data + calendar-triggered scan — deferred to v2).
-  - Uses EOD FedWatch data (free CME scrape) — sufficient for slow repricing.
+  - Uses Polymarket FOMC market prices (free, no auth) — sufficient for slow repricing.
   - Skip if days_to_meeting < 2 (market efficient near decision day).
   - Skip if days_to_meeting > 7 (too early for reliable edge).
 
-Data sources (all free):
-  1. CME FedWatch public page scrape — current FOMC outcome probabilities
+Data sources (all free, no auth required):
+  1. Polymarket gamma API — active FOMC rate decision market prices
   2. FRED FEDFUNDS series CSV — current effective federal funds rate
   3. Kalshi API (public) — KXFEDDECISION market prices
 
@@ -29,16 +29,15 @@ Kalshi KXFEDDECISION outcomes:
   'cut_50'    — 50bps+ cut
   'hike'      — rate hike
 
-CME FedWatch outcome mapping:
-  "No Change (Unchanged)" → maintain
-  "25bps decrease"        → cut_25
-  "50bps decrease"        → cut_50
-  "25bps increase"        → hike
+Polymarket FOMC outcome mapping (by question text):
+  "hold" / "maintain" / "unchanged" / "pause" → maintain
+  "cut 25" / "25bps" / "cut rates" / "decrease" → cut_25
+  "cut 50" / "50bps" / "50+"                    → cut_50
+  "hike" / "increase" / "raise"                 → hike
 """
 
 import json
 import logging
-import re
 import requests
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -130,131 +129,111 @@ def get_current_fed_rate() -> float | None:
         return None
 
 
-# ── CME FedWatch Scrape ───────────────────────────────────────────────────────
+# ── Polymarket FOMC Data ──────────────────────────────────────────────────────
 
-def _parse_fedwatch_json(data: dict, meeting_date: date) -> dict | None:
+POLYMARKET_FOMC_URL = (
+    "https://gamma-api.polymarket.com/markets?tag=fomc&limit=20&active=true"
+)
+
+
+def _classify_polymarket_outcome(question: str) -> str | None:
     """
-    Parse CME FedWatch JSON response into {outcome: probability} dict.
-    Tries multiple known CME response formats.
+    Map a Polymarket FOMC market question to a standard outcome name.
+    Returns: 'maintain', 'cut_25', 'cut_50', 'hike', or None.
+
+    Order matters: check cut_50 before cut_25 to avoid false matches.
+    """
+    q = question.lower()
+    if any(w in q for w in ["cut 50", "50bps", "50 bps", "-50", "50+"]):
+        return "cut_50"
+    if any(w in q for w in ["cut 25", "25bps", "25 bps", "-25", "cut rates", "decrease"]):
+        return "cut_25"
+    if any(w in q for w in ["hold", "maintain", "unchanged", "no change", "pause"]):
+        return "maintain"
+    if any(w in q for w in ["hike", "increase", "raise"]):
+        return "hike"
+    return None
+
+
+def get_polymarket_fomc_probabilities(meeting_date: date) -> dict | None:
+    """
+    Fetch FOMC rate decision probabilities from Polymarket gamma API.
+
+    Endpoint: https://gamma-api.polymarket.com/markets?tag=fomc&limit=20&active=true
+
+    Filters active markets by endDate proximity to meeting_date (within 5 days),
+    classifies each by outcome, and returns YES prices as probabilities.
 
     Returns:
         {'maintain': float, 'cut_25': float, 'cut_50': float, 'hike': float}
-        or None if parsing fails.
+        All values in [0, 1]. Or None if no matching market found.
     """
     try:
-        # Format A: meetingData list
-        meeting_data = data.get("meetingData") or data.get("meetings") or []
-        target_str   = meeting_date.strftime("%Y%m%d")
-
-        for meeting in meeting_data:
-            m_date = str(meeting.get("meetingDate", "") or meeting.get("date", ""))
-            if target_str not in m_date and meeting_date.isoformat() not in m_date:
-                continue
-
-            probs = (meeting.get("probabilities") or
-                     meeting.get("data", {}) or
-                     meeting.get("impliedProbabilities", {}))
-            if not probs:
-                continue
-
-            # Normalize keys to standard outcome names
-            def _find(keys):
-                for k in keys:
-                    for pk, pv in probs.items():
-                        if k.lower() in pk.lower():
-                            return float(pv) / 100.0 if float(pv) > 1 else float(pv)
-                return None
-
-            result = {
-                "maintain": _find(["unchanged", "no change", "hold", "maintain"]),
-                "cut_25":   _find(["25bps decrease", "25 bps", "-25", "cut 25"]),
-                "cut_50":   _find(["50bps", "50 bps", "-50", "cut 50", "50+"]),
-                "hike":     _find(["increase", "hike", "+25", "raise"]),
-            }
-            if any(v is not None for v in result.values()):
-                # Fill None with 0.0
-                return {k: (v if v is not None else 0.0) for k, v in result.items()}
-
-        return None
-
-    except Exception as e:
-        logger.debug(f"[FedClient] FedWatch JSON parse error: {e}")
-        return None
-
-
-def get_fedwatch_probabilities(meeting_date: date) -> dict | None:
-    """
-    Fetch CME FedWatch implied probabilities for an FOMC meeting.
-
-    Tries two CME endpoints sequentially; returns None if both fail.
-
-    Returns:
-        {'maintain': float, 'cut_25': float, 'cut_50': float, 'hike': float}
-        All values in [0, 1]. Or None on failure.
-    """
-    # Known CME FedWatch API endpoints (public, no auth needed)
-    endpoints = [
-        "https://www.cmegroup.com/CmeWS/mvc/FedWatch/currentFedWatchTool.getCMEFedWatchToolData.json",
-        "https://www.cmegroup.com/CmeWS/mvc/FedWatch/fedwatchtool.getCMEFedWatchToolData.json",
-    ]
-    headers = {
-        "User-Agent":  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept":      "application/json, text/plain, */*",
-        "Referer":     "https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html",
-    }
-
-    for url in endpoints:
-        try:
-            r = requests.get(url, headers=headers, timeout=20)
-            if r.status_code == 200:
-                data   = r.json()
-                result = _parse_fedwatch_json(data, meeting_date)
-                if result:
-                    logger.info(
-                        f"[FedClient] FedWatch probs for {meeting_date}: "
-                        f"maintain={result.get('maintain', 0):.1%} "
-                        f"cut_25={result.get('cut_25', 0):.1%} "
-                        f"cut_50={result.get('cut_50', 0):.1%}"
-                    )
-                    return result
-        except Exception as e:
-            logger.debug(f"[FedClient] FedWatch endpoint {url} failed: {e}")
-            continue
-
-    # HTML fallback: scrape probability from FedWatch tool page
-    logger.warning("[FedClient] CME JSON endpoints failed — trying HTML scrape fallback")
-    return _scrape_fedwatch_html(meeting_date)
-
-
-def _scrape_fedwatch_html(meeting_date: date) -> dict | None:
-    """
-    Fallback: parse FedWatch probabilities from CME HTML page.
-    Looks for embedded JSON data in script tags.
-    Returns probability dict or None.
-    """
-    try:
-        url     = "https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html"
-        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-        r       = requests.get(url, headers=headers, timeout=20)
+        r = requests.get(POLYMARKET_FOMC_URL, timeout=15)
         r.raise_for_status()
-        html = r.text
+        raw = r.json()
 
-        # Look for JSON blobs containing probability data
-        json_matches = re.findall(r'window\.__PRELOADED_STATE__\s*=\s*({.*?})\s*;', html, re.DOTALL)
-        for match in json_matches:
+        # API may return a list directly or a wrapper object
+        markets = raw if isinstance(raw, list) else raw.get("markets", [])
+
+        # Filter markets whose endDate is within 5 days of the target meeting
+        matching = []
+        for m in markets:
+            end_date_str = m.get("endDate", "")
+            if not end_date_str:
+                continue
             try:
-                data   = json.loads(match)
-                result = _parse_fedwatch_json(data, meeting_date)
-                if result:
-                    return result
+                end_date = datetime.fromisoformat(
+                    end_date_str.replace("Z", "+00:00")
+                ).date()
+                if abs((end_date - meeting_date).days) <= 5:
+                    matching.append(m)
             except Exception:
+                # Fallback: year-month string match
+                if meeting_date.strftime("%Y-%m") in end_date_str:
+                    matching.append(m)
+
+        if not matching:
+            logger.warning(
+                f"[FedClient] No Polymarket FOMC markets matched meeting date {meeting_date}"
+            )
+            return None
+
+        # Build {outcome: YES_price} dict from matching markets
+        probs: dict[str, float] = {}
+        for m in matching:
+            question = m.get("question", "")
+            outcome  = _classify_polymarket_outcome(question)
+            if outcome is None:
+                logger.debug(f"[FedClient] Polymarket: unclassified question — '{question}'")
                 continue
 
-        logger.warning(f"[FedClient] HTML scrape could not extract FedWatch data for {meeting_date}")
-        return None
+            # outcomePrices: ["<yes_price>", "<no_price>"] as string floats (0-1 scale)
+            outcome_prices = m.get("outcomePrices", [])
+            if not outcome_prices:
+                continue
+            try:
+                yes_price = float(outcome_prices[0])
+                probs[outcome] = round(yes_price, 4)
+            except (ValueError, IndexError) as exc:
+                logger.debug(f"[FedClient] Polymarket price parse error for '{question}': {exc}")
+                continue
+
+        if not probs:
+            logger.warning(
+                f"[FedClient] Polymarket markets found for {meeting_date} but none "
+                f"could be classified to standard outcomes"
+            )
+            return None
+
+        logger.info(
+            f"[FedClient] Polymarket probs for {meeting_date}: "
+            + " ".join(f"{k}={v:.1%}" for k, v in probs.items())
+        )
+        return probs
 
     except Exception as e:
-        logger.error(f"[FedClient] HTML scrape failed: {e}")
+        logger.error(f"[FedClient] Polymarket FOMC fetch failed: {e}")
         return None
 
 
@@ -334,8 +313,8 @@ def _classify_kalshi_outcome(market: dict) -> str | None:
 
 def get_fed_signal(kalshi_client=None) -> dict | None:
     """
-    Main signal function. Compare CME FedWatch probabilities to Kalshi market
-    prices and compute edge for the upcoming FOMC meeting.
+    Main signal function. Compare Polymarket FOMC implied probabilities to
+    Kalshi market prices and compute edge for the upcoming FOMC meeting.
 
     Filters:
       - Only fires 2-7 days before meeting (secondary window)
@@ -348,19 +327,20 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
     Returns:
         Signal dict or None if no actionable opportunity.
         {
-          'prob':          float,   # FedWatch probability for best outcome
-          'confidence':    float,   # computed confidence score
-          'edge':          float,   # abs(fedwatch_prob - kalshi_price)
-          'direction':     str,     # 'yes' or 'no'
-          'outcome':       str,     # 'maintain'|'cut_25'|'cut_50'|'hike'
-          'ticker':        str,     # Kalshi market ticker
-          'market_price':  float,   # Kalshi YES price (0-1)
-          'meeting_date':  str,     # ISO date
-          'days_to_meeting': int,
-          'fed_rate':      float,   # current FEDFUNDS rate
-          'fedwatch_probs': dict,   # all outcome probabilities from CME
-          'signal_window': '2-7d',
-          'skip_reason':   None,
+          'prob':             float,  # Polymarket YES price for best outcome
+          'confidence':       float,  # computed confidence score
+          'edge':             float,  # abs(polymarket_prob - kalshi_price)
+          'direction':        str,    # 'yes' or 'no'
+          'outcome':          str,    # 'maintain'|'cut_25'|'cut_50'|'hike'
+          'ticker':           str,    # Kalshi market ticker
+          'market_price':     float,  # Kalshi YES price (0-1)
+          'meeting_date':     str,    # ISO date
+          'days_to_meeting':  int,
+          'fed_rate':         float,  # current FEDFUNDS rate
+          'polymarket_probs': dict,   # all outcome probabilities from Polymarket
+          'prob_source':      str,    # 'polymarket'
+          'signal_window':    '2-7d',
+          'skip_reason':      None,
         }
     """
     in_window, meeting_date, days_to_meeting = is_in_signal_window()
@@ -385,15 +365,15 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
     logger.info(f"[FedClient] In signal window: {days_to_meeting} days to {meeting_date} FOMC")
 
     # Fetch data
-    fed_rate      = get_current_fed_rate()
-    fedwatch_probs = get_fedwatch_probabilities(meeting_date)
-    markets        = get_kalshi_fed_markets(meeting_date)
+    fed_rate        = get_current_fed_rate()
+    polymarket_probs = get_polymarket_fomc_probabilities(meeting_date)
+    markets          = get_kalshi_fed_markets(meeting_date)
 
-    if not fedwatch_probs:
-        logger.warning("[FedClient] No FedWatch probability data — cannot compute edge")
+    if not polymarket_probs:
+        logger.warning("[FedClient] No Polymarket FOMC probability data — cannot compute edge")
         _result = {
             "status":          "no_signal",
-            "skip_reason":     "fedwatch_unavailable",
+            "skip_reason":     "polymarket_unavailable",
             "meeting_date":    meeting_date.isoformat(),
             "days_to_meeting": days_to_meeting,
             "fed_rate":        fed_rate,
@@ -404,12 +384,13 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
     if not markets:
         logger.warning("[FedClient] No Kalshi KXFEDDECISION markets found")
         _result = {
-            "status":          "no_signal",
-            "skip_reason":     "kalshi_markets_unavailable",
-            "meeting_date":    meeting_date.isoformat(),
-            "days_to_meeting": days_to_meeting,
-            "fed_rate":        fed_rate,
-            "fedwatch_probs":  fedwatch_probs,
+            "status":           "no_signal",
+            "skip_reason":      "kalshi_markets_unavailable",
+            "meeting_date":     meeting_date.isoformat(),
+            "days_to_meeting":  days_to_meeting,
+            "fed_rate":         fed_rate,
+            "polymarket_probs": polymarket_probs,
+            "prob_source":      "polymarket",
         }
         _save_scan_result(_result)
         return _result
@@ -423,7 +404,7 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
         if outcome is None:
             continue
 
-        fedwatch_p = fedwatch_probs.get(outcome)
+        fedwatch_p = polymarket_probs.get(outcome)
         if fedwatch_p is None:
             continue
 
@@ -460,34 +441,36 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
         if edge > best_edge:
             best_edge = edge
             best_signal = {
-                "prob":          round(fedwatch_p, 4),
-                "confidence":    confidence,
-                "edge":          round(edge, 4),
-                "raw_edge":      round(raw_edge, 4),
-                "direction":     direction,
-                "outcome":       outcome,
-                "ticker":        market.get("ticker", ""),
-                "title":         market.get("title", ""),
-                "market_price":  round(kalshi_price, 4),
-                "yes_ask":       yes_ask,
-                "yes_bid":       yes_bid,
-                "meeting_date":  meeting_date.isoformat(),
-                "days_to_meeting": days_to_meeting,
-                "fed_rate":      fed_rate,
-                "fedwatch_probs": fedwatch_probs,
-                "signal_window": "2-7d",
-                "skip_reason":   None,
+                "prob":             round(fedwatch_p, 4),
+                "confidence":       confidence,
+                "edge":             round(edge, 4),
+                "raw_edge":         round(raw_edge, 4),
+                "direction":        direction,
+                "outcome":          outcome,
+                "ticker":           market.get("ticker", ""),
+                "title":            market.get("title", ""),
+                "market_price":     round(kalshi_price, 4),
+                "yes_ask":          yes_ask,
+                "yes_bid":          yes_bid,
+                "meeting_date":     meeting_date.isoformat(),
+                "days_to_meeting":  days_to_meeting,
+                "fed_rate":         fed_rate,
+                "polymarket_probs": polymarket_probs,
+                "prob_source":      "polymarket",
+                "signal_window":    "2-7d",
+                "skip_reason":      None,
             }
 
     if best_signal is None:
         logger.info("[FedClient] No classifiable KXFEDDECISION outcomes found")
         _result = {
-            "status":          "no_signal",
-            "skip_reason":     "no_classifiable_outcomes",
-            "meeting_date":    meeting_date.isoformat(),
-            "days_to_meeting": days_to_meeting,
-            "fed_rate":        fed_rate,
-            "fedwatch_probs":  fedwatch_probs,
+            "status":           "no_signal",
+            "skip_reason":      "no_classifiable_outcomes",
+            "meeting_date":     meeting_date.isoformat(),
+            "days_to_meeting":  days_to_meeting,
+            "fed_rate":         fed_rate,
+            "polymarket_probs": polymarket_probs,
+            "prob_source":      "polymarket",
         }
         _save_scan_result(_result)
         return _result
@@ -513,7 +496,7 @@ def get_fed_signal(kalshi_client=None) -> dict | None:
     logger.info(
         f"[FedClient] SIGNAL: {best_signal['outcome'].upper()} {best_signal['direction'].upper()} "
         f"edge={best_signal['edge']:.1%} conf={best_signal['confidence']:.1%} "
-        f"FedWatch={best_signal['prob']:.1%} Kalshi={best_signal['market_price']:.1%} "
+        f"Polymarket={best_signal['prob']:.1%} Kalshi={best_signal['market_price']:.1%} "
         f"({days_to_meeting}d to meeting)"
     )
 
@@ -565,13 +548,13 @@ if __name__ == "__main__":
     print(f"FEDFUNDS rate: {rate}%")
 
     if mtg:
-        print(f"\nFetching FedWatch probabilities for {mtg}...")
-        probs = get_fedwatch_probabilities(mtg)
+        print(f"\nFetching Polymarket FOMC probabilities for {mtg}...")
+        probs = get_polymarket_fomc_probabilities(mtg)
         if probs:
             for outcome, p in probs.items():
                 print(f"  {outcome:12} {p:.1%}")
         else:
-            print("  FedWatch data unavailable (scrape may need updating)")
+            print("  Polymarket data unavailable (no active FOMC markets found)")
 
         print(f"\nFetching Kalshi KXFEDDECISION markets...")
         markets = get_kalshi_fed_markets(mtg)

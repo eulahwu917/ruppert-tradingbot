@@ -593,3 +593,61 @@ print(f"  CYCLE COMPLETE  {ts()}")
 print(f"  Weather: {summary['weather_trades']} new | Crypto: {summary['crypto_trades']} new | Fed: {summary['fed_trades']} new")
 print(f"  Auto-exits: {summary['auto_exits']} | Signal: {direction.upper()}")
 print(f"{'='*60}\n")
+
+# ── SCAN SUMMARY NOTIFICATION ─────────────────────────────────────────────────
+# Sends a Telegram message to David via pending_alerts.json (heartbeat forwards it).
+# Level 'warning' is used so it always forwards without additional filtering.
+try:
+    from datetime import timezone as _tz, timedelta as _td
+    _PDT      = _tz(_td(hours=-7))
+    _time_str = datetime.now(_PDT).strftime('%I:%M %p')
+
+    # ── Fed status ────────────────────────────────────────────────────────────
+    _fed_status = 'no signal (outside window)'
+    try:
+        _fed_latest_path = LOGS / 'fed_scan_latest.json'
+        if _fed_latest_path.exists():
+            _fed_data = json.loads(_fed_latest_path.read_text(encoding='utf-8'))
+            _skip = _fed_data.get('skip_reason')
+            if _skip:
+                _fed_status = f'no signal ({_skip})'
+            elif _fed_data.get('direction'):
+                _fed_dir  = _fed_data['direction'].upper()
+                _fed_edge = round(_fed_data.get('edge', 0) * 100)
+                _fed_conf = round(_fed_data.get('confidence', 0) * 100)
+                _fed_status = f'{_fed_dir} edge={_fed_edge}% conf={_fed_conf}%'
+            else:
+                _fed_status = 'no signal'
+    except Exception:
+        _fed_status = 'error reading fed data'
+
+    # ── Capital ───────────────────────────────────────────────────────────────
+    try:
+        _capital  = get_computed_capital()
+        _deployed = get_daily_exposure()
+        _bp       = max(0.0, round(_capital * 0.70 - _deployed, 2))
+        _cap_line = f'${_capital:.2f} | Deployed: ${_deployed:.2f} | BP: ${_bp:.2f}'
+    except Exception:
+        _cap_line = 'N/A'
+
+    # ── Build message ─────────────────────────────────────────────────────────
+    _w_opps   = len(new_weather) if isinstance(new_weather, list) else 0
+    _w_trades = summary['weather_trades']
+    _c_opps   = len(new_crypto) if isinstance(new_crypto, list) else 0
+    _c_trades = summary['crypto_trades']
+    _c_dir    = direction.upper() if direction else 'NEUTRAL'
+
+    _scan_msg = (
+        f"\U0001f4ca Ruppert Scan \u2014 {_time_str} PDT\n\n"
+        f"\U0001f324 Weather: {_w_opps} opportunities | {_w_trades} trades placed\n"
+        f"\u20bf Crypto: {_c_dir} | {_c_opps} opportunities | {_c_trades} trades placed\n"
+        f"\U0001f3db Fed: {_fed_status}\n\n"
+        f"\U0001f4b0 Capital: {_cap_line}"
+    )
+
+    push_alert('warning', _scan_msg)
+    log_activity('[SCAN NOTIFY] Cycle summary queued for Telegram')
+    print('  Scan summary alert queued.')
+
+except Exception as _scan_ex:
+    print(f'  Scan notify error (non-fatal): {_scan_ex}')
