@@ -1254,8 +1254,6 @@ window._cpnlFrame    = 'month';
 window._cpnlData     = {all: 0, day: 0, month: 0, year: 0};
 window._botCpnlFrame = 'month';
 window._botCpnlData  = {month: 0, year: 0, all: 0};
-window._manCpnlFrame = 'month';
-window._manCpnlData  = {month: 0, year: 0, all: 0};
 
 function setCpnlFrame(frame) {
   window._cpnlFrame = frame;
@@ -1263,7 +1261,6 @@ function setCpnlFrame(frame) {
   setPnl('cpnl', 'cpnl-pct', val, window._kalshiBalance || 400);
 }
 function setBotCpnlFrame(frame) { window._botCpnlFrame = frame; loadClosedPnl(); }
-function setManCpnlFrame(frame) { window._manCpnlFrame = frame; loadClosedPnl(); }
 
 async function loadClosedPnl() {
   try {
@@ -1273,7 +1270,6 @@ async function loadClosedPnl() {
     window._closedPnl   = pnl.closed_pnl || 0;
     window._cpnlData    = {all: pnl.closed_pnl||0, day: pnl.closed_pnl_day||0, month: pnl.closed_pnl_month||0, year: pnl.closed_pnl_year||0};
     window._botCpnlData = {month: pnl.bot_closed_month||0, year: pnl.bot_closed_year||0, all: pnl.bot_closed_all||0};
-    window._manCpnlData = {month: pnl.manual_closed_month||0, year: pnl.manual_closed_year||0, all: pnl.manual_closed_all||0};
 
     // Account bar Closed P&L
     const cpnlVal = window._cpnlData[window._cpnlFrame || 'month'];
@@ -1283,13 +1279,10 @@ async function loadClosedPnl() {
     // bot_deployed/man_deployed are OPEN deployed capital; when all positions are closed
     // they become 0, causing the ||1 fallback and absurd percentages like +67200%.
     setSplitPnl('bot-pnl', 'bot-pnl-pct', window._botCpnlData[window._botCpnlFrame||'month'], pnl.bot_cost_basis);
-    setSplitPnl('man-pnl', 'man-pnl-pct', window._manCpnlData[window._manCpnlFrame||'month'], pnl.man_cost_basis);
 
     // Deployed + Trades counters
     if ($('bot-dep')) $('bot-dep').textContent = dollar(pnl.bot_deployed||0);
     if ($('bot-cnt')) $('bot-cnt').textContent = pnl.bot_trades||0;
-    if ($('man-dep')) $('man-dep').textContent = dollar(pnl.man_deployed||0);
-    if ($('man-cnt')) $('man-cnt').textContent = pnl.man_trades||0;
 
     // Win Rate
     const wrEl = document.getElementById('winrate');

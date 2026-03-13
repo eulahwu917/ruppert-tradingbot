@@ -928,14 +928,14 @@ def get_pnl_history():
     def classify_module(src, ticker):
         """Classify a bot-sourced trade into a module bucket."""
         t = (ticker or '').upper()
-        if src == 'weather' or (src == 'bot' and t.startswith('KXHIGH')):
+        if (src in ('weather', 'bot')) and t.startswith('KXHIGH'):
             return 'weather'
         if src == 'crypto' or (src == 'bot' and (
             t.startswith('KXBTC') or t.startswith('KXETH') or
             t.startswith('KXXRP') or t.startswith('KXDOGE')
         )):
             return 'crypto'
-        if src == 'fed' or t.startswith('KXFED') or t.startswith('KXFEDDECISION'):
+        if src == 'fed' or t.startswith('KXFED'):
             return 'fed'
         return 'other'
 
