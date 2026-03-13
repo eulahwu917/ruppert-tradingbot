@@ -1046,23 +1046,48 @@ def get_pnl_history():
                     else:         closed_by_src_period['bot']['year']     += pnl
                 if is_manual: closed_by_src_period['manual']['all'] += pnl
                 else:         closed_by_src_period['bot']['all']    += pnl
-            # Per-module accumulation (bot trades only)
-            if not is_manual:
-                mod = classify_module(src, ticker)
-                ms = module_stats[mod]
-                ms['closed_pnl'] += pnl
-                ms['trade_count'] += 1
-                if pnl > 0:
-                    ms['wins'] += 1
-                if sdate:
-                    if sdate.year == _today.year and sdate.month == _today.month:
-                        ms['closed_pnl_month'] += pnl
-                        ms['trade_count_month'] += 1
-                    if sdate.year == _today.year:
-                        ms['closed_pnl_year'] += pnl
-                        ms['trade_count_year'] += 1
         except Exception:
             pass
+
+    # ── Per-module closed P&L — sourced from get_trades() for exact parity with table ──
+    # Calling get_trades() ensures module card numbers are computed identically to
+    # the closed positions table: BUY records from trade logs + Kalshi API settlement
+    # result for each ticker. This covers both actively-exited positions (95¢ wins)
+    # AND naturally settled losses that have no exit record in the logs.
+    # get_trades() already excludes manual trades (source in manual/economics/geo).
+    # Note: account-level closed_pnl (top of response) still comes from pnl_cache /
+    # Kalshi settled positions above. A small gap between the two is expected and
+    # acceptable (Kalshi P&L not captured in trade logs).
+    try:
+        _closed_trades = get_trades()
+        from datetime import date as _date_cls2
+        for _ct in _closed_trades:
+            _mod = _ct.get('module', 'other')
+            if _mod not in module_stats:
+                _mod = 'other'
+            _rpnl = float(_ct.get('realized_pnl') or 0.0)
+            _ms = module_stats[_mod]
+            _ms['closed_pnl'] += _rpnl
+            _ms['trade_count'] += 1
+            if _rpnl > 0:
+                _ms['wins'] += 1
+            # _date is set by read_all_trades() from the trade log filename (entry date)
+            _date_str = (_ct.get('_date') or _ct.get('date', ''))[:10]
+            _rdate = None
+            if _date_str:
+                try:
+                    _rdate = _date_cls2.fromisoformat(_date_str)
+                except Exception:
+                    pass
+            if _rdate:
+                if _rdate.year == _today.year and _rdate.month == _today.month:
+                    _ms['closed_pnl_month'] += _rpnl
+                    _ms['trade_count_month'] += 1
+                if _rdate.year == _today.year:
+                    _ms['closed_pnl_year'] += _rpnl
+                    _ms['trade_count_year'] += 1
+    except Exception:
+        pass
 
     # ── Open positions ───────────────────────────────────────────────────────
     open_pnl_total = 0.0
