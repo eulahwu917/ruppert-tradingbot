@@ -286,11 +286,18 @@ def get_account():
                 pass
         if STARTING_CAPITAL == 0:
             STARTING_CAPITAL = 400.0  # fallback if deposits file missing or empty
-        # Note: DO NOT add realized P&L here — frontend JS adds window._closedPnl
-        # (from /api/pnl which correctly accounts for both exits AND settled positions)
-        # Adding it here would double-count it.
         STARTING_CAPITAL = round(STARTING_CAPITAL, 2)
-        buying_power = max(STARTING_CAPITAL - total_deployed, 0)
+        # Read bot-only closed P&L from cache (written by /api/pnl, manual trades excluded).
+        # buying_power = starting_capital + bot_closed_pnl - open_deployed
+        # Frontend JS also computes this using window._closedPnl (bot-only after Fix 1).
+        _bot_closed_cached = 0.0
+        try:
+            _pnl_cache_path = LOGS_DIR / "pnl_cache.json"
+            if _pnl_cache_path.exists():
+                _bot_closed_cached = json.loads(_pnl_cache_path.read_text(encoding='utf-8')).get('closed_pnl', 0.0)
+        except Exception:
+            pass
+        buying_power = max(STARTING_CAPITAL + _bot_closed_cached - total_deployed, 0)
 
     return {
         "kalshi_balance":     STARTING_CAPITAL,  # alias kept so frontend formula is unchanged
@@ -905,6 +912,7 @@ def get_pnl_history():
     closed_by_period = {'day': 0.0, 'month': 0.0, 'year': 0.0}
     closed_by_src_period = {'bot': {'month':0.0,'year':0.0,'all':0.0}, 'manual': {'month':0.0,'year':0.0,'all':0.0}}
     closed_wins = 0
+    bot_wins = 0
     closed_total = 0
     closed_count_by_source = {'bot': 0, 'manual': 0}
     # Cost basis for closed positions — used to compute a meaningful P&L % on the dashboard.
@@ -1006,6 +1014,8 @@ def get_pnl_history():
             else:
                 closed_by_source['bot'] += pnl
                 closed_count_by_source['bot'] += 1
+                if pnl > 0:
+                    bot_wins += 1
 
             # Bucket by exit date (for manual exits) or settlement date
             # Using exit date ensures P&L is counted in the month it was realized
@@ -1104,16 +1114,27 @@ def get_pnl_history():
         except Exception:
             pass
 
-    total_pnl = open_pnl_total + closed_pnl_total
+    total_pnl = open_pnl_total + closed_by_source['bot']
 
-    # Build chart time-series (cumulative per day)
+    # Per-module open stats — deployed capital and count of open bot positions
+    module_open_stats = {m: {'open_deployed': 0.0, 'open_trades': 0} for m in module_keys}
+    for ticker, t in open_tickers.items():
+        src = t.get('source', 'bot')
+        if src in ('economics', 'geo', 'manual'):
+            continue  # skip manual positions
+        mod = classify_module(src, ticker)
+        module_open_stats[mod]['open_deployed'] += t.get('size_dollars', 0)
+        module_open_stats[mod]['open_trades'] += 1
+
+    # Build chart time-series (cumulative per day) — BOT-only closed P&L
     from datetime import date as date_cls
     today = str(date_cls.today())
     points = []
-    # Day 1: closed P&L (settled trades from prior days)
-    if closed_pnl_total != 0:
-        points.append({"date": "2026-03-10", "pnl": round(closed_pnl_total, 2)})
-    # Today: total (closed + open)
+    bot_closed_pnl = closed_by_source['bot']
+    # Day 1: bot-only closed P&L (settled trades from prior days)
+    if bot_closed_pnl != 0:
+        points.append({"date": "2026-03-10", "pnl": round(bot_closed_pnl, 2)})
+    # Today: total bot (closed + open)
     points.append({"date": today, "pnl": round(total_pnl, 2)})
 
     # Deployed costs for % calculation — exclude settled AND manually exited positions
@@ -1144,11 +1165,13 @@ def get_pnl_history():
             'trade_count_year':  ms['trade_count_year'],
             'wins':              ms['wins'],
             'win_rate':          wr,
+            'open_deployed':     round(module_open_stats[mod]['open_deployed'], 2),
+            'open_trades':       module_open_stats[mod]['open_trades'],
         }
 
     pnl_result = {
         "open_pnl":   round(open_pnl_total, 2),
-        "closed_pnl": round(closed_pnl_total, 2),
+        "closed_pnl": round(closed_by_source['bot'], 2),   # BOT-only (manual excluded)
         "total_pnl":  round(total_pnl, 2),
         "bot_closed_pnl":    round(closed_by_source['bot'], 2),
         "manual_closed_pnl": round(closed_by_source['manual'], 2),
@@ -1165,7 +1188,8 @@ def get_pnl_history():
         "manual_closed_all":   round(closed_by_source["manual"], 2),
         "closed_pnl_month": round(closed_by_period["month"], 2),
         "closed_pnl_year":  round(closed_by_period["year"], 2),
-        "closed_win_rate": round(closed_wins / closed_total * 100, 1) if closed_total else None,
+        "closed_win_rate": round(bot_wins / closed_count_by_source['bot'] * 100, 1) if closed_count_by_source['bot'] else None,  # BOT-only
+        "total_trades": closed_count_by_source['bot'],   # BOT-only trade count
         "bot_trades":  closed_count_by_source['bot'],
         "man_trades":  closed_count_by_source['manual'],
         "points": points,
@@ -1177,11 +1201,11 @@ def get_pnl_history():
         "man_cost_basis": round(manual_cost_basis, 2),
         "modules": modules_out,
     }
-    # Write closed_pnl to cache so bot can read correct capital without duplicate API calls
+    # Write bot-only closed_pnl to cache so bot can read correct capital without duplicate API calls
     try:
         pnl_cache = LOGS_DIR / "pnl_cache.json"
         with open(pnl_cache, 'w', encoding='utf-8') as _f:
-            json.dump({"closed_pnl": round(closed_pnl_total, 2)}, _f)
+            json.dump({"closed_pnl": round(closed_by_source['bot'], 2)}, _f)
     except Exception:
         pass
     return pnl_result

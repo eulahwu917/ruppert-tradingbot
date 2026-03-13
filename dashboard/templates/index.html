@@ -342,27 +342,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
     </div>
   </div>
 
-  <!-- Bot Performance summary -->
-  <div class="split-row">
-    <div class="split-card">
-      <div class="split-side-label">Bot Performance</div>
-      <div class="split-divider"></div>
-      <div class="split-metrics">
-        <div class="split-metric">
-          <div class="split-metric-label" style="margin-bottom:0;max-width:70px;"><span style="white-space:nowrap;display:block;">Closed P&amp;L</span><select id="bot-cpnl-select" onchange="setBotCpnlFrame(this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:4px;color:#666;padding:1px 4px;cursor:pointer;outline:none;display:block;margin-top:2px;"><option value="month" selected>This Month</option><option value="year">This Year</option><option value="all">All Time</option></select></div>
-          <div class="acct-right"><div class="acct-main pnl-neu" id="bot-pnl">--</div><div class="acct-pct pnl-neu" id="bot-pnl-pct"></div></div>
-        </div>
-        <div class="split-metric">
-          <div class="split-metric-label" style="margin-bottom:0;max-width:110px;">Open Capital Deployed</div>
-          <div class="acct-right"><div class="acct-main" style="color:#888;" id="bot-dep">--</div></div>
-        </div>
-        <div class="split-metric">
-          <div class="split-metric-label" style="margin-bottom:0;max-width:70px;">Total Trades</div>
-          <div class="acct-right"><div class="acct-main" style="color:#888;" id="bot-cnt">--</div></div>
-        </div>
-      </div>
-    </div>
-  </div>
+
 
   <!-- Module Performance Cards: Weather / Crypto / Fed -->
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;" id="module-cards-row">
@@ -394,6 +374,20 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
             <div style="font-size:22px;font-weight:700;color:#888;" id="weather-winrate">--</div>
             <div style="font-size:10px;color:#555;margin-top:2px;" id="weather-trades">-- trades</div>
+          </div>
+        </div>
+        <div style="border-top:1px solid #1a1a1a;margin-top:10px;padding-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="weather-open-dep">--</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="weather-open-cnt">--</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="weather-total-trades">--</div>
           </div>
         </div>
       </div>
@@ -428,6 +422,20 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <div style="font-size:10px;color:#555;margin-top:2px;" id="crypto-module-trades">-- trades</div>
           </div>
         </div>
+        <div style="border-top:1px solid #1a1a1a;margin-top:10px;padding-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-open-dep">--</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-open-cnt">--</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-total-trades">--</div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -458,6 +466,20 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
             <div style="font-size:22px;font-weight:700;color:#888;" id="fed-winrate">--</div>
             <div style="font-size:10px;color:#555;margin-top:2px;" id="fed-trades">-- trades</div>
+          </div>
+        </div>
+        <div style="border-top:1px solid #1a1a1a;margin-top:10px;padding-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;">
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="fed-open-dep">--</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="fed-open-cnt">--</div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="fed-total-trades">--</div>
           </div>
         </div>
       </div>
@@ -577,9 +599,21 @@ function renderModuleCard(mod) {
       wrEl.style.color   = '#888';
     }
   }
-  // Trade count for period
+  // Trade count for period (period-filtered, shown below Win Rate)
   const trEl = document.getElementById(pfx + '-trades');
   if (trEl) trEl.textContent = count + ' trade' + (count !== 1 ? 's' : '');
+
+  // Open Capital Deployed
+  const openDepEl = document.getElementById(pfx + '-open-dep');
+  if (openDepEl) openDepEl.textContent = dollar(d.open_deployed || 0);
+
+  // Open Trades
+  const openCntEl = document.getElementById(pfx + '-open-cnt');
+  if (openCntEl) openCntEl.textContent = d.open_trades != null ? d.open_trades : '--';
+
+  // Total Trades (all-time closed + currently open)
+  const totalTrEl = document.getElementById(pfx + '-total-trades');
+  if (totalTrEl) totalTrEl.textContent = (d.trade_count || 0) + (d.open_trades || 0);
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────────────
@@ -938,8 +972,6 @@ async function loadLivePrices(positions) {
     // Open P&L in account bar
     setPnl('opnl', 'opnl-pct', totalPnl, totCost);
 
-    // Manual closed P&L set by loadPnlChart — do NOT overwrite here
-    // NOTE: bot-pnl shows CLOSED P&L (set by loadPnlChart) — do NOT overwrite here
   }
 }
 
@@ -1250,39 +1282,26 @@ function setPnlFrame(frame, btn) {
 }
 
 // ── Closed P&L period toggles ─────────────────────────────────────────────────
-window._cpnlFrame    = 'month';
-window._cpnlData     = {all: 0, day: 0, month: 0, year: 0};
-window._botCpnlFrame = 'month';
-window._botCpnlData  = {month: 0, year: 0, all: 0};
+window._cpnlFrame = 'month';
+window._cpnlData  = {all: 0, day: 0, month: 0, year: 0};
 
 function setCpnlFrame(frame) {
   window._cpnlFrame = frame;
   const val = frame === 'month' ? window._cpnlData.month : frame === 'year' ? window._cpnlData.year : window._cpnlData.all;
   setPnl('cpnl', 'cpnl-pct', val, window._kalshiBalance || 400);
 }
-function setBotCpnlFrame(frame) { window._botCpnlFrame = frame; loadClosedPnl(); }
 
 async function loadClosedPnl() {
   try {
     const pnl = await api('/api/pnl');
     if (!pnl) return;
 
-    window._closedPnl   = pnl.closed_pnl || 0;
-    window._cpnlData    = {all: pnl.closed_pnl||0, day: pnl.closed_pnl_day||0, month: pnl.closed_pnl_month||0, year: pnl.closed_pnl_year||0};
-    window._botCpnlData = {month: pnl.bot_closed_month||0, year: pnl.bot_closed_year||0, all: pnl.bot_closed_all||0};
+    window._closedPnl = pnl.closed_pnl || 0;  // BOT-only (manual excluded)
+    window._cpnlData  = {all: pnl.closed_pnl||0, day: pnl.closed_pnl_day||0, month: pnl.closed_pnl_month||0, year: pnl.closed_pnl_year||0};
 
-    // Account bar Closed P&L
+    // Account bar Closed P&L (now BOT-only — period selector still works)
     const cpnlVal = window._cpnlData[window._cpnlFrame || 'month'];
     setPnl('cpnl', 'cpnl-pct', cpnlVal, window._kalshiBalance || 400);
-
-    // Split cards — use cost basis (sum of entry costs for CLOSED positions) as denominator.
-    // bot_deployed/man_deployed are OPEN deployed capital; when all positions are closed
-    // they become 0, causing the ||1 fallback and absurd percentages like +67200%.
-    setSplitPnl('bot-pnl', 'bot-pnl-pct', window._botCpnlData[window._botCpnlFrame||'month'], pnl.bot_cost_basis);
-
-    // Deployed + Trades counters
-    if ($('bot-dep')) $('bot-dep').textContent = dollar(pnl.bot_deployed||0);
-    if ($('bot-cnt')) $('bot-cnt').textContent = pnl.bot_trades||0;
 
     // Win Rate
     const wrEl = document.getElementById('winrate');
