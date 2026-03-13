@@ -47,6 +47,7 @@ COINGECKO = 'https://api.coingecko.com/api/v3'
 KRAKEN = 'https://api.kraken.com/0/public'
 POLYMARKET_DATA = 'https://data-api.polymarket.com'
 POLYMARKET_GAMMA = 'https://gamma-api.polymarket.com'
+BINANCE_FUTURES = 'https://fapi.binance.com/fapi/v1'
 
 # CoinGecko ID, Kraken pair, symbol
 ASSET_CONFIG = {
@@ -115,6 +116,117 @@ def _cache_get(key: str, ttl: int = 300):
 
 def _cache_set(key: str, data):
     _CACHE[key] = {'data': data, 'ts': time.time()}
+
+
+# ─────────────────────────────── Funding Rates ───────────────────────────────
+
+# Binance Futures perpetual symbols for funding rate data
+# Note: public market data endpoint — no auth required, US accessible
+FUNDING_SYMBOLS = {
+    'BTC': 'BTCUSDT',
+    'ETH': 'ETHUSDT',
+    'XRP': 'XRPUSDT',
+}
+
+# Limit = 96 × 8h intervals ≈ 32 days ≈ rolling 30-day window
+FUNDING_RATE_LIMIT = 96
+
+# Contrarian z-score thresholds
+FUNDING_Z_BEARISH =  2.0   # z > +2.0 → longs crowded → bearish signal
+FUNDING_Z_BULLISH = -2.0   # z < -2.0 → shorts crowded → bullish signal
+
+
+def get_funding_rates(symbol: str, limit: int = FUNDING_RATE_LIMIT) -> list | None:
+    """
+    Fetch recent funding rates for a Binance perpetual futures symbol.
+
+    Args:
+        symbol: Binance futures symbol (e.g. "BTCUSDT")
+        limit:  number of funding rate records (8h each; 96 ≈ 32 days)
+
+    Returns:
+        List of funding rates as floats (most recent last), or None on failure.
+    """
+    cached = _cache_get(f'funding_{symbol}', ttl=3600)  # cache 1h (funding settles 8h)
+    if cached is not None:
+        return cached
+
+    try:
+        r = requests.get(
+            f'{BINANCE_FUTURES}/fundingRate',
+            params={'symbol': symbol, 'limit': limit},
+            timeout=12,
+        )
+        r.raise_for_status()
+        data = r.json()
+        if not isinstance(data, list) or not data:
+            logger.warning('Binance funding rate empty response for %s', symbol)
+            return None
+
+        rates = [float(item['fundingRate']) for item in data if 'fundingRate' in item]
+        _cache_set(f'funding_{symbol}', rates)
+        logger.debug('Binance funding %s: %d records, latest=%.6f', symbol, len(rates), rates[-1])
+        return rates
+
+    except Exception as e:
+        logger.warning('Binance funding rate fetch failed for %s: %s', symbol, e)
+        return None
+
+
+def _compute_funding_z_scores() -> dict:
+    """
+    Compute funding rate z-scores for BTC, ETH, XRP.
+
+    z_score = (current_rate - rolling_mean) / rolling_std
+    Contrarian:
+      z > +2.0 → longs crowded → bearish signal
+      z < -2.0 → shorts crowded → bullish signal
+
+    Returns:
+        {
+          'btc': float or None,
+          'eth': float or None,
+          'xrp': float or None,
+          'raw_rates': {symbol: latest_rate},
+          'available': bool,
+        }
+    """
+    cached = _cache_get('funding_z_scores', ttl=3600)
+    if cached is not None:
+        return cached
+
+    result = {'btc': None, 'eth': None, 'xrp': None, 'raw_rates': {}, 'available': False}
+
+    for asset, symbol in FUNDING_SYMBOLS.items():
+        try:
+            rates = get_funding_rates(symbol)
+            if not rates or len(rates) < 10:
+                logger.warning('Insufficient funding rate data for %s (%d records)', symbol, len(rates) if rates else 0)
+                continue
+
+            current_rate  = rates[-1]
+            rolling_mean  = statistics.mean(rates)
+            rolling_std   = statistics.stdev(rates) if len(rates) >= 2 else 0.0
+
+            if rolling_std < 1e-10:
+                z_score = 0.0  # degenerate case: no variation
+            else:
+                z_score = (current_rate - rolling_mean) / rolling_std
+
+            result[asset.lower()]              = round(z_score, 3)
+            result['raw_rates'][symbol]        = round(current_rate, 8)
+            result['available']                = True
+
+            logger.info(
+                'Funding %s: rate=%.6f mean=%.6f std=%.6f z=%.3f',
+                symbol, current_rate, rolling_mean, rolling_std, z_score
+            )
+
+        except Exception as e:
+            logger.warning('Funding z-score failed for %s: %s', symbol, e)
+
+    _cache_set('funding_z_scores', result)
+    return result
 
 
 # ─────────────────────────────── Stats Helpers ───────────────────────────────
@@ -317,6 +429,17 @@ def _build_signal(symbol: str) -> dict:
     else:
         direction = 'NEUTRAL'
 
+    # ── Funding rate z-score signal
+    funding_z_scores = _compute_funding_z_scores()
+    asset_key        = symbol.lower()  # 'btc', 'eth', 'xrp', 'doge'
+    funding_z        = funding_z_scores.get(asset_key)  # None for DOGE (not tracked)
+    funding_signal   = {
+        'btc': funding_z_scores.get('btc'),
+        'eth': funding_z_scores.get('eth'),
+        'xrp': funding_z_scores.get('xrp'),
+        'available': funding_z_scores.get('available', False),
+    }
+
     return {
         'symbol': symbol,
         'price': current_price,
@@ -334,6 +457,8 @@ def _build_signal(symbol: str) -> dict:
         'bull_signals': bull_count,
         'bear_signals': bear_count,
         'hourly_vol_pct': cfg['hourly_vol_pct'],
+        'funding_z': funding_z,        # this asset's z-score (or None if unavailable)
+        'funding_signal': funding_signal,  # all tracked assets
         'fetched_at': datetime.now(timezone.utc).isoformat(),
     }
 
@@ -798,6 +923,37 @@ def get_crypto_edge(market: dict, all_event_markets: list | None = None) -> dict
     else:
         confidence = 'low'
 
+    # ── Funding rate confidence modifier (±5%)
+    # Contrarian: extreme positive z (longs crowded) → bearish → lower confidence
+    #             extreme negative z (shorts crowded) → bullish → raise confidence
+    # Applied as a numeric modifier then converted back to string tier.
+    _conf_map    = {'low': 0.50, 'medium': 0.65, 'high': 0.80}
+    _conf_num    = _conf_map.get(confidence, 0.50)
+    funding_z    = signal.get('funding_z')
+    funding_conf_adj = 0.0
+
+    if funding_z is not None:
+        if funding_z > FUNDING_Z_BEARISH:
+            funding_conf_adj = -0.05  # bearish pressure → lower confidence
+        elif funding_z < FUNDING_Z_BULLISH:
+            funding_conf_adj = +0.05  # bullish pressure → raise confidence
+
+    _conf_num = max(0.0, min(1.0, _conf_num + funding_conf_adj))
+
+    # Re-map numeric back to string tier
+    if _conf_num >= 0.72:
+        confidence = 'high'
+    elif _conf_num >= 0.57:
+        confidence = 'medium'
+    else:
+        confidence = 'low'
+
+    if funding_conf_adj != 0.0:
+        logger.info(
+            'Funding z=%.3f → confidence_adj=%+.2f → confidence=%s (asset=%s)',
+            funding_z, funding_conf_adj, confidence, asset
+        )
+
     # ── Smart money boost
     smart_money = get_polymarket_smart_money()
     sm_asset = smart_money.get(asset, {})
@@ -838,6 +994,10 @@ def get_crypto_edge(market: dict, all_event_markets: list | None = None) -> dict
         'edge': round(edge, 4),
         'direction': trade_direction,
         'confidence': confidence,
+        'confidence_score': round(_conf_num, 3),
+        'funding_z': funding_z,
+        'funding_conf_adj': round(funding_conf_adj, 3),
+        'funding_signal': signal.get('funding_signal', {}),
         'hours_to_settlement': round(hours_left, 2),
         'sigma': round(sigma, 4),
         'current_price': current_price,

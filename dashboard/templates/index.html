@@ -826,6 +826,12 @@ async function loadTrades() {
     tb.innerHTML='<tr><td colspan="7" class="loading" style="color:#555;padding:20px;">No trades yet</td></tr>';
     return;
   }
+  // Sort newest to oldest (timestamp preferred, fall back to _date)
+  trades.sort((a, b) => {
+    const da = a.timestamp || a._date || '';
+    const db = b.timestamp || b._date || '';
+    return db.localeCompare(da);
+  });
   tb.innerHTML = trades.map(t=>{
     const title  = (t.title||t.ticker||'').replace(/[*]{2}/g,'');
     const ticker = t.ticker||'';

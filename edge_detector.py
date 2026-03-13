@@ -1,15 +1,23 @@
 """
-Edge Detector v2 — Multi-source weather signal
+Edge Detector v3 — Multi-source weather signal
 ─────────────────────────────────────────────────────────────
-Primary signal:  Open-Meteo 31-member GFS ensemble (probabilistic vote)
+Primary signal:  Open-Meteo multi-model ensemble (ECMWF + GEFS + ICON)
+  - ECMWF IFS 0.25° (ecmwf_ifs025) — 51 members, weight 40%
+  - GFS/GEFS Seamless (gfs_seamless) — 31 members, weight 40%
+  - ICON Global (icon_global)         — 40 members, weight 20%
 Secondary signal: NWS current observation (live temp)
 Fallback signal:  NOAA single-model probability (original method)
 
-Key improvement over v1:
-  Instead of one NOAA forecast probability, we count how many of 31
-  independent GFS model runs predict above/below the temperature threshold.
-  28/31 members → 90% probability. 16/31 → 52% (coin flip, skip it).
-  Confidence score filters out low-agreement signals automatically.
+Key improvements:
+  v2: GFS 31-member ensemble replaces single NOAA probability.
+  v3: ECMWF + ICON added (15-20% accuracy gain at 3-7 day range).
+      NOAA GHCND rolling bias correction replaces hardcoded per-city offsets.
+      Bias refreshed daily from NOAA CDO API; falls back to hardcoded if unavailable.
+      Weighted ensemble: ECMWF 40% + GEFS 40% + ICON 20%.
+      If any model fails, remaining models carry renormalized weight.
+
+Confidence score filters out low-agreement signals automatically.
+Divergence across models (ECMWF vs GEFS > 4°F) degrades confidence.
 """
 
 import re
@@ -18,6 +26,14 @@ from datetime import date, datetime
 from noaa_client import get_probability_for_temp_range
 from openmeteo_client import get_full_weather_signal, CITIES
 import config
+
+# GHCND bias client — imported for logging/monitoring; bias is applied
+# inside openmeteo_client.get_full_weather_signal() automatically.
+try:
+    from ghcnd_client import get_bias_source as _ghcnd_source
+    _GHCND_AVAILABLE = True
+except ImportError:
+    _GHCND_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -167,14 +183,19 @@ def analyze_market(market: dict) -> dict | None:
     ensemble_data = None
 
     if series in TICKER_TO_SERIES and threshold_f is not None:
-        # Primary: Open-Meteo 31-member ensemble
+        # Primary: Open-Meteo multi-model ensemble (ECMWF + GEFS + ICON)
+        # Bias correction: NOAA GHCND rolling bias (or hardcoded fallback)
+        if _GHCND_AVAILABLE:
+            bias_src = _ghcnd_source(series)
+            logger.debug(f"[Edge] {ticker}: bias source = {bias_src}")
+
         signal = get_full_weather_signal(series, threshold_f, target_date)
         ensemble_data = signal
 
         if signal.get("final_prob") is not None:
             model_prob = signal["final_prob"]
             confidence = signal.get("final_confidence", 0.0)
-            signal_src = "open_meteo_ensemble"
+            signal_src = "open_meteo_multi_model"
             ens = signal.get("ensemble", {})
 
             # NWS data unavailable — degrade confidence
@@ -188,9 +209,12 @@ def analyze_market(market: dict) -> dict | None:
                     f"by 0.15 → {confidence:.2f} (floored at 0.50)"
                 )
 
+            models_used_names = [m.get("model", "?") for m in signal.get("models_used", [])]
             logger.info(
-                f"[Edge] {ticker}: ensemble {ens.get('members_above')}/{ens.get('total_members')} "
-                f"above {threshold_f}°F → prob={model_prob:.2f} conf={confidence:.2f}"
+                f"[Edge] {ticker}: multi-model ensemble [{', '.join(models_used_names)}] "
+                f"primary={ens.get('members_above')}/{ens.get('total_members')} "
+                f"above {threshold_f}°F → prob={model_prob:.2f} conf={confidence:.2f} "
+                f"bias={signal.get('bias_applied_f',0):.1f}°F({signal.get('bias_source','?')})"
             )
 
     # Fallback: NOAA single probability
@@ -273,6 +297,9 @@ def analyze_market(market: dict) -> dict | None:
         result['total_members']    = ens.get("total_members")
         result['current_temp_f']   = ensemble_data.get("conditions", {}).get("current_temp_f")
         result['today_high_f']     = ensemble_data.get("conditions", {}).get("today_high_f")
+        result['bias_applied_f']   = ensemble_data.get("bias_applied_f")
+        result['bias_source']      = ensemble_data.get("bias_source")
+        result['models_used']      = ensemble_data.get("models_used", [])
         # Flag whether NWS was degraded (set in confidence block above)
         result['nws_degraded']     = ensemble_data.get("nws_current_f") is None
 

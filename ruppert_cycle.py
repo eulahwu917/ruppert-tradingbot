@@ -461,6 +461,109 @@ except Exception as e:
     print(f"  Crypto scan error: {e}")
     import traceback; traceback.print_exc()
 
+# ── STEP 4b: FED RATE DECISION SCAN (full mode only) ─────────────────────────
+# v1: secondary window (2-7 days before FOMC). Captures structural mispricing.
+# Requires: edge > 12% AND confidence > 55% (harder gate than crypto/weather).
+# Favorite-longshot bias filter: never trades contracts below 15¢.
+print("\n[4b] Scanning for Fed rate decision opportunities...")
+new_fed = []
+try:
+    from fed_client import run_fed_scan, FOMC_DECISION_DATES_2026, is_in_signal_window
+
+    in_window, fed_meeting, fed_days = is_in_signal_window()
+    if not in_window:
+        print(f"  Fed signal window inactive — next FOMC {fed_meeting} ({fed_days}d away)")
+    else:
+        fed_signal = run_fed_scan(dry_run=DRY_RUN)
+
+        if fed_signal and not fed_signal.get("skip_reason"):
+            ticker     = fed_signal.get("ticker", "KXFEDDECISION-?")
+            side       = fed_signal.get("direction", "yes")
+            edge_pct   = fed_signal.get("edge", 0) * 100
+            conf_pct   = fed_signal.get("confidence", 0) * 100
+            outcome    = fed_signal.get("outcome", "?")
+            mkt_price  = int(fed_signal.get("yes_ask", 50))
+            bet_price  = mkt_price if side == "yes" else 100 - mkt_price
+
+            # Size: same formula as other modules — min($25, 2.5% of capital)
+            try:
+                _fed_capital  = get_computed_capital()
+                _fed_deployed = get_daily_exposure()
+                _fed_cap_ok   = check_daily_cap(_fed_capital, _fed_deployed)
+            except Exception:
+                _fed_cap_ok   = 25.0  # conservative fallback
+
+            if _fed_cap_ok <= 0:
+                print(f"  [CapCheck] Daily cap reached — skipping Fed trade")
+            elif ticker in traded_tickers:
+                print(f"  Already traded {ticker} this cycle — skipping")
+            else:
+                size       = min(25.0, _fed_cap_ok)
+                contracts  = max(1, int(size / bet_price * 100))
+                actual_cost = round(contracts * bet_price / 100, 2)
+
+                opp = {
+                    "ticker":     ticker,
+                    "title":      fed_signal.get("title", ticker),
+                    "side":       side,
+                    "action":     "buy",
+                    "yes_price":  mkt_price,
+                    "market_prob": fed_signal.get("market_price", 0.5),
+                    "noaa_prob":  None,
+                    "edge":       fed_signal.get("edge"),
+                    "confidence": fed_signal.get("confidence"),
+                    "size_dollars": actual_cost,
+                    "contracts":  contracts,
+                    "source":     "fed",
+                    "outcome":    outcome,
+                    "meeting_date": fed_signal.get("meeting_date"),
+                    "days_to_meeting": fed_signal.get("days_to_meeting"),
+                    "fedwatch_prob": fed_signal.get("prob"),
+                    "note": (f"FOMC {fed_signal.get('meeting_date')} {outcome.upper()} "
+                             f"FedWatch={fed_signal.get('prob', 0):.0%} "
+                             f"Kalshi={fed_signal.get('market_price', 0):.0%} "
+                             f"edge={edge_pct:.0f}%"),
+                    "timestamp":  ts(),
+                    "date":       str(date.today()),
+                }
+
+                if DRY_RUN:
+                    from logger import log_trade, log_activity
+                    log_trade(opp, actual_cost, contracts, {"dry_run": True})
+                    log_activity(
+                        f"[AUTO-FED] BUY {side.upper()} {ticker} {contracts}@{bet_price}c "
+                        f"${actual_cost:.2f} edge={edge_pct:.0f}% conf={conf_pct:.0f}%"
+                    )
+                    print(
+                        f"  [DEMO] BUY {side.upper()} {ticker:38} "
+                        f"{contracts:3}@{bet_price:3}c ${actual_cost:.2f} "
+                        f"edge={edge_pct:.0f}% conf={conf_pct:.0f}% [{outcome}]"
+                    )
+                else:
+                    try:
+                        result = client.place_order(ticker, side, bet_price, contracts)
+                        from logger import log_trade, log_activity
+                        log_trade(opp, actual_cost, contracts, result)
+                        log_activity(
+                            f"[AUTO-FED] EXECUTED {ticker} {side.upper()} "
+                            f"{contracts}@{bet_price}c edge={edge_pct:.0f}%"
+                        )
+                        print(f"  [LIVE] EXECUTED Fed trade: {ticker}")
+                    except Exception as e:
+                        print(f"  ERROR executing Fed trade {ticker}: {e}")
+
+                traded_tickers.add(ticker)
+                new_fed.append(opp)
+
+        elif fed_signal and fed_signal.get("skip_reason"):
+            print(f"  Fed signal skipped: {fed_signal['skip_reason']}")
+        else:
+            print(f"  No Fed edge in window ({fed_days}d to {fed_meeting} FOMC)")
+
+except Exception as e:
+    print(f"  Fed scan error: {e}")
+    import traceback; traceback.print_exc()
+
 # ── STEP 5: SECURITY AUDIT (weekly — Sunday only) ───────────────────────────
 if datetime.now().weekday() == 6:  # Sunday
     print("\n[5] Weekly security audit...")
@@ -481,6 +584,7 @@ if datetime.now().weekday() == 6:  # Sunday
 summary = {
     'weather_trades': len(new_weather) if new_weather else 0,
     'crypto_trades':  min(len(new_crypto), 3),
+    'fed_trades':     len(new_fed) if new_fed else 0,
     'smart_money':    direction,
     'auto_exits':     len(actions_taken) if 'actions_taken' in dir() else 0,
 }
@@ -488,6 +592,6 @@ log_cycle('done', summary)
 
 print(f"\n{'='*60}")
 print(f"  CYCLE COMPLETE  {ts()}")
-print(f"  Weather: {summary['weather_trades']} new | Crypto: {summary['crypto_trades']} new")
+print(f"  Weather: {summary['weather_trades']} new | Crypto: {summary['crypto_trades']} new | Fed: {summary['fed_trades']} new")
 print(f"  Auto-exits: {summary['auto_exits']} | Signal: {direction.upper()}")
 print(f"{'='*60}\n")
