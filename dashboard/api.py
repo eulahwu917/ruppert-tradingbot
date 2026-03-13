@@ -1114,7 +1114,7 @@ def get_pnl_history():
         except Exception:
             pass
 
-    total_pnl = open_pnl_total + closed_by_source['bot']
+    total_pnl = closed_by_source['bot'] + open_by_source['bot']
 
     # Per-module open stats — deployed capital and count of open bot positions
     module_open_stats = {m: {'open_deployed': 0.0, 'open_trades': 0} for m in module_keys}
@@ -1180,8 +1180,10 @@ def get_pnl_history():
         "bot_deployed":  round(bot_dep, 2),
         "man_deployed":  round(man_dep, 2),
         "closed_pnl_day":   round(closed_by_period["day"], 2),
-        "bot_closed_month":    round(closed_by_src_period["bot"]["month"], 2),
-        "bot_closed_year":     round(closed_by_src_period["bot"]["year"], 2),
+        "bot_closed_month":        round(closed_by_src_period["bot"]["month"], 2),
+        "bot_closed_year":         round(closed_by_src_period["bot"]["year"], 2),
+        "bot_closed_pnl_month":    round(closed_by_src_period["bot"]["month"], 2),
+        "bot_closed_pnl_year":     round(closed_by_src_period["bot"]["year"], 2),
         "bot_closed_all":      round(closed_by_source["bot"], 2),
         "manual_closed_month": round(closed_by_src_period["manual"]["month"], 2),
         "manual_closed_year":  round(closed_by_src_period["manual"]["year"], 2),
