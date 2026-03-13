@@ -1229,12 +1229,10 @@ async function doAct(uid, action, ticker, priceCents) {
 // ── Module Tags ───────────────────────────────────────────────────────────────
 function classifyModule(ticker, source) {
   const t = (ticker || '').toUpperCase();
-  if (t.startsWith('KXHIGH')) return 'weather';
-  if (t.startsWith('KXBTC') || t.startsWith('KXETH') || t.startsWith('KXXRP') || t.startsWith('KXDOGE')) return 'crypto';
-  if (t.startsWith('KXFED') || t.startsWith('KXCPI')) return 'fed';
-  if (source === 'weather') return 'weather';
-  if (source === 'crypto') return 'crypto';
-  if (source === 'fed') return 'fed';
+  const src = (source || '');
+  if ((src === 'weather' || src === 'bot') && t.startsWith('KXHIGH')) return 'weather';
+  if (src === 'crypto' || ['KXBTC','KXETH','KXXRP','KXDOGE'].some(p => t.startsWith(p))) return 'crypto';
+  if (src === 'fed' || t.startsWith('KXFED') || t.startsWith('KXCPI')) return 'fed';
   return 'other';
 }
 function moduleTag(module, ticker, source) {

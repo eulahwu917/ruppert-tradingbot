@@ -138,6 +138,22 @@ SPORTS_EXCLUSIONS = [
     'nba finals','stanley cup','world cup','march madness',
 ]
 
+
+def classify_module(src: str, ticker: str) -> str:
+    """Classify a trade into a module bucket based on source and ticker prefix."""
+    t = (ticker or '').upper()
+    if (src in ('weather', 'bot')) and t.startswith('KXHIGH'):
+        return 'weather'
+    if src == 'crypto' or (src == 'bot' and (
+        t.startswith('KXBTC') or t.startswith('KXETH') or
+        t.startswith('KXXRP') or t.startswith('KXDOGE')
+    )):
+        return 'crypto'
+    if src == 'fed' or t.startswith('KXFED') or t.startswith('KXCPI'):
+        return 'fed'
+    return 'other'
+
+
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
 
@@ -878,19 +894,6 @@ def get_crypto_scan():
 def dashboard():
     with open(Path(__file__).parent / "templates" / "index.html", encoding='utf-8') as f:
         return f.read()
-def classify_module(src: str, ticker: str) -> str:
-    """Classify a trade into a module bucket based on source and ticker prefix."""
-    t = (ticker or '').upper()
-    if (src in ('weather', 'bot')) and t.startswith('KXHIGH'):
-        return 'weather'
-    if src == 'crypto' or (src == 'bot' and (
-        t.startswith('KXBTC') or t.startswith('KXETH') or
-        t.startswith('KXXRP') or t.startswith('KXDOGE')
-    )):
-        return 'crypto'
-    if src == 'fed' or t.startswith('KXFED') or t.startswith('KXCPI'):
-        return 'fed'
-    return 'other'
 
 
 @app.get("/api/pnl")
