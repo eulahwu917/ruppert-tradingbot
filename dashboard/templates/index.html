@@ -332,12 +332,12 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
         </div>
         <!-- Row 1: Open P&L | Closed P&L | Win Rate -->
         <div style="display:flex;margin-bottom:14px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
             <div class="pnl-neu" id="weather-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
           </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
               <select id="weather-period" onchange="setModulePeriod('weather',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
                 <option value="month" selected>This Month</option>
@@ -347,22 +347,22 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             </div>
             <div class="pnl-neu" id="weather-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
           </div>
-          <div style="flex:1;padding-left:12px;">
+          <div style="flex:1;padding-left:12px;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
             <div style="font-size:22px;font-weight:700;color:#4ade80;" id="weather-winrate">--</div>
           </div>
         </div>
         <!-- Row 2: Open Deployed | Open Trades | Total Trades -->
         <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="weather-open-dep">--</div>
           </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="weather-open-cnt">--</div>
           </div>
-          <div style="flex:1;padding-left:12px;">
+          <div style="flex:1;padding-left:12px;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="weather-total-trades">--</div>
           </div>
@@ -380,12 +380,12 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
         </div>
         <!-- Row 1: Open P&L | Closed P&L | Win Rate -->
         <div style="display:flex;margin-bottom:14px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
             <div class="pnl-neu" id="crypto-module-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
           </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
               <select id="crypto-module-period" onchange="setModulePeriod('crypto',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
                 <option value="month" selected>This Month</option>
@@ -395,22 +395,22 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             </div>
             <div class="pnl-neu" id="crypto-module-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
           </div>
-          <div style="flex:1;padding-left:12px;">
+          <div style="flex:1;padding-left:12px;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
             <div style="font-size:22px;font-weight:700;color:#4ade80;" id="crypto-module-winrate">--</div>
           </div>
         </div>
         <!-- Row 2: Open Deployed | Open Trades | Total Trades -->
         <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-open-dep">--</div>
           </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-open-cnt">--</div>
           </div>
-          <div style="flex:1;padding-left:12px;">
+          <div style="flex:1;padding-left:12px;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-total-trades">--</div>
           </div>
@@ -428,12 +428,12 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
         </div>
         <!-- Row 1: Open P&L | Closed P&L | Win Rate -->
         <div style="display:flex;margin-bottom:14px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
             <div class="pnl-neu" id="fed-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
           </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
               <select id="fed-period" onchange="setModulePeriod('fed',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
                 <option value="month" selected>This Month</option>
@@ -443,22 +443,22 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             </div>
             <div class="pnl-neu" id="fed-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
           </div>
-          <div style="flex:1;padding-left:12px;">
+          <div style="flex:1;padding-left:12px;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
             <div style="font-size:22px;font-weight:700;color:#4ade80;" id="fed-winrate">--</div>
           </div>
         </div>
         <!-- Row 2: Open Deployed | Open Trades | Total Trades -->
         <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="fed-open-dep">--</div>
           </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;">
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="fed-open-cnt">--</div>
           </div>
-          <div style="flex:1;padding-left:12px;">
+          <div style="flex:1;padding-left:12px;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="fed-total-trades">--</div>
           </div>
@@ -826,8 +826,7 @@ async function loadPositions() {
     const cur   = '<span style="color:#555;font-size:10px;">live↓</span>';
     const _s = (p.ticker||"").split("-")[0].toLowerCase(); const url = `https://kalshi.com/markets/${_s}`; 
     const pnlH  = v => v!=null ? `<span class="${pcls(v)}">${sign(v)}${dollar(v)}</span>` : '<span style="color:#333">--</span>';
-    const src   = (['economics','geo','manual'].includes(p.source))
-                  ? '<span class="b-manual">MANUAL</span>' : '<span class="b-bot">BOT</span>';  // BOT: bot, weather, crypto
+
     // Signal: weather=NOAA vs mkt, crypto=smart money, economics=model vs mkt, default=--
     const sym = (p.ticker||'').split('-')[0];
     let sigVal = '--';
@@ -847,7 +846,7 @@ async function loadPositions() {
     return `<tr>
       <td class="l col-title">
         <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">
-          ${src}
+          ${moduleTag(p.module, p.ticker, p.source)}
           <a href="${url}" target="_blank" style="color:#aaa;text-decoration:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:380px;">${name}</a>
           ${expiry}
         </div>
@@ -962,9 +961,7 @@ async function loadTrades() {
     const side   = t.side==='yes'
       ? '<span class="b-yes">YES</span>'
       : '<span class="b-no">NO</span>';
-    const src    = (['economics','geo','manual'].includes(t.source))
-      ? '<span class="b-manual">MANUAL</span>'
-      : '<span class="b-bot">BOT</span>';  // BOT: bot, weather, crypto
+
     const mp     = t.market_prob||0;
     const entryP = t.side==='no' ? Math.round((1-mp)*100) : Math.round(mp*100);
     const cost   = t.size_dollars ? dollar(t.size_dollars) : '--';
@@ -975,7 +972,7 @@ async function loadTrades() {
     const qty    = t.contracts||'--';
     return `<tr>
       <td class="l" style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:260px;">
-        <div style="display:flex;align-items:center;gap:5px;">${src}<span style="color:#aaa;font-size:11px;">${title}</span></div>
+        <div style="display:flex;align-items:center;gap:5px;">${moduleTag(t.module, t.ticker, t.source)}<span style="color:#aaa;font-size:11px;">${title}</span></div>
       </td>
       <td class="ca shrink">${dt}</td>
       <td class="ca shrink">${side}</td>
@@ -1227,6 +1224,25 @@ async function doAct(uid, action, ticker, priceCents) {
   } catch(e) {
     done.style.color='#f87171'; done.textContent='Network error';
   }
+}
+
+// ── Module Tags ───────────────────────────────────────────────────────────────
+function classifyModule(ticker, source) {
+  const t = (ticker || '').toUpperCase();
+  if (t.startsWith('KXHIGH')) return 'weather';
+  if (t.startsWith('KXBTC') || t.startsWith('KXETH') || t.startsWith('KXXRP') || t.startsWith('KXDOGE')) return 'crypto';
+  if (t.startsWith('KXFED') || t.startsWith('KXCPI')) return 'fed';
+  if (source === 'weather') return 'weather';
+  if (source === 'crypto') return 'crypto';
+  if (source === 'fed') return 'fed';
+  return 'other';
+}
+function moduleTag(module, ticker, source) {
+  const mod = module || classifyModule(ticker, source);
+  if (mod === 'weather') return '<span style="background:#0d1f0d;color:#4ade80;border:1px solid #1a3d1a;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;flex-shrink:0;">Weather</span>';
+  if (mod === 'crypto')  return '<span style="background:#1a0d2e;color:#a78bfa;border:1px solid #2d1a4a;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;flex-shrink:0;">Crypto</span>';
+  if (mod === 'fed')     return '<span style="background:#0d1a2e;color:#60a5fa;border:1px solid #1a2d4a;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;flex-shrink:0;">Fed</span>';
+  return '<span style="color:#666;padding:2px 7px;border-radius:3px;font-size:9px;flex-shrink:0;">Other</span>';
 }
 
 // ── Load All ───────────────────────────────────────────────────────────────────

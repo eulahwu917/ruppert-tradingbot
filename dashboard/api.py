@@ -449,6 +449,7 @@ def get_trades():
             except Exception:
                 pass
 
+        t['module'] = classify_module(t.get('source', 'bot'), ticker)
         closed.append(t)
     # Exclude manual trades from the closed trades table display
     _MANUAL_EXCL = ('manual', 'economics', 'geo')
@@ -584,6 +585,7 @@ def get_active_positions():
             "title":       title,
             "side":        side,
             "source":      source,
+            "module":      classify_module(source, ticker),
             "entry_price": ep,
             "cur_price":   ep,
             "pnl":         0.0,
@@ -876,6 +878,21 @@ def get_crypto_scan():
 def dashboard():
     with open(Path(__file__).parent / "templates" / "index.html", encoding='utf-8') as f:
         return f.read()
+def classify_module(src: str, ticker: str) -> str:
+    """Classify a trade into a module bucket based on source and ticker prefix."""
+    t = (ticker or '').upper()
+    if (src in ('weather', 'bot')) and t.startswith('KXHIGH'):
+        return 'weather'
+    if src == 'crypto' or (src == 'bot' and (
+        t.startswith('KXBTC') or t.startswith('KXETH') or
+        t.startswith('KXXRP') or t.startswith('KXDOGE')
+    )):
+        return 'crypto'
+    if src == 'fed' or t.startswith('KXFED') or t.startswith('KXCPI'):
+        return 'fed'
+    return 'other'
+
+
 @app.get("/api/pnl")
 def get_pnl_history():
     """
@@ -932,20 +949,6 @@ def get_pnl_history():
         'trade_count_year': 0,
         'wins': 0,
     } for m in module_keys}
-
-    def classify_module(src, ticker):
-        """Classify a bot-sourced trade into a module bucket."""
-        t = (ticker or '').upper()
-        if (src in ('weather', 'bot')) and t.startswith('KXHIGH'):
-            return 'weather'
-        if src == 'crypto' or (src == 'bot' and (
-            t.startswith('KXBTC') or t.startswith('KXETH') or
-            t.startswith('KXXRP') or t.startswith('KXDOGE')
-        )):
-            return 'crypto'
-        if src == 'fed' or t.startswith('KXFED'):
-            return 'fed'
-        return 'other'
 
     from datetime import date as _date
     _today = _date.today()
