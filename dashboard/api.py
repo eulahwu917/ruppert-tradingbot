@@ -443,6 +443,9 @@ def get_trades():
                 pass
 
         closed.append(t)
+    # Exclude manual trades from the closed trades table display
+    _MANUAL_EXCL = ('manual', 'economics', 'geo')
+    closed = [t for t in closed if t.get('source', 'bot') not in _MANUAL_EXCL]
     return closed
 
 
@@ -910,6 +913,32 @@ def get_pnl_history():
     bot_cost_basis = 0.0
     manual_cost_basis = 0.0
 
+    # Per-module stats (bot trades only — weather, crypto, fed, other)
+    module_keys = ['weather', 'crypto', 'fed', 'other']
+    module_stats = {m: {
+        'closed_pnl': 0.0,
+        'closed_pnl_month': 0.0,
+        'closed_pnl_year': 0.0,
+        'trade_count': 0,
+        'trade_count_month': 0,
+        'trade_count_year': 0,
+        'wins': 0,
+    } for m in module_keys}
+
+    def classify_module(src, ticker):
+        """Classify a bot-sourced trade into a module bucket."""
+        t = (ticker or '').upper()
+        if src == 'weather' or (src == 'bot' and t.startswith('KXHIGH')):
+            return 'weather'
+        if src == 'crypto' or (src == 'bot' and (
+            t.startswith('KXBTC') or t.startswith('KXETH') or
+            t.startswith('KXXRP') or t.startswith('KXDOGE')
+        )):
+            return 'crypto'
+        if src == 'fed' or t.startswith('KXFED') or t.startswith('KXFEDDECISION'):
+            return 'fed'
+        return 'other'
+
     from datetime import date as _date
     _today = _date.today()
 
@@ -1001,6 +1030,21 @@ def get_pnl_history():
                     else:         closed_by_src_period['bot']['year']     += pnl
                 if is_manual: closed_by_src_period['manual']['all'] += pnl
                 else:         closed_by_src_period['bot']['all']    += pnl
+            # Per-module accumulation (bot trades only)
+            if not is_manual:
+                mod = classify_module(src, ticker)
+                ms = module_stats[mod]
+                ms['closed_pnl'] += pnl
+                ms['trade_count'] += 1
+                if pnl > 0:
+                    ms['wins'] += 1
+                if sdate:
+                    if sdate.year == _today.year and sdate.month == _today.month:
+                        ms['closed_pnl_month'] += pnl
+                        ms['trade_count_month'] += 1
+                    if sdate.year == _today.year:
+                        ms['closed_pnl_year'] += pnl
+                        ms['trade_count_year'] += 1
         except Exception:
             pass
 
@@ -1087,6 +1131,21 @@ def get_pnl_history():
     bot_dep = sum(t.get('size_dollars',0) for t in open_t if t.get('source','bot') in BOT_SRC)
     man_dep = sum(t.get('size_dollars',0) for t in open_t if t.get('source','bot') in MAN_SRC)
 
+    # Finalise module stats: compute win rates, round values
+    modules_out = {}
+    for mod, ms in module_stats.items():
+        wr = round(ms['wins'] / ms['trade_count'] * 100, 1) if ms['trade_count'] > 0 else None
+        modules_out[mod] = {
+            'closed_pnl':        round(ms['closed_pnl'], 2),
+            'closed_pnl_month':  round(ms['closed_pnl_month'], 2),
+            'closed_pnl_year':   round(ms['closed_pnl_year'], 2),
+            'trade_count':       ms['trade_count'],
+            'trade_count_month': ms['trade_count_month'],
+            'trade_count_year':  ms['trade_count_year'],
+            'wins':              ms['wins'],
+            'win_rate':          wr,
+        }
+
     pnl_result = {
         "open_pnl":   round(open_pnl_total, 2),
         "closed_pnl": round(closed_pnl_total, 2),
@@ -1116,6 +1175,7 @@ def get_pnl_history():
         # which are OPEN position costs and become 0 when all positions are closed.
         "bot_cost_basis": round(bot_cost_basis, 2),
         "man_cost_basis": round(manual_cost_basis, 2),
+        "modules": modules_out,
     }
     # Write closed_pnl to cache so bot can read correct capital without duplicate API calls
     try:

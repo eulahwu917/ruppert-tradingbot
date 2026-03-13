@@ -342,10 +342,10 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
     </div>
   </div>
 
-  <!-- Bot / Manual split -->
+  <!-- Bot Performance summary -->
   <div class="split-row">
     <div class="split-card">
-      <div class="split-side-label">Bot Trades</div>
+      <div class="split-side-label">Bot Performance</div>
       <div class="split-divider"></div>
       <div class="split-metrics">
         <div class="split-metric">
@@ -362,24 +362,107 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
         </div>
       </div>
     </div>
-    <div class="split-card">
-      <div class="split-side-label">Manual Trades</div>
-      <div class="split-divider"></div>
-      <div class="split-metrics">
-        <div class="split-metric">
-          <div class="split-metric-label" style="margin-bottom:0;max-width:70px;"><span style="white-space:nowrap;display:block;">Closed P&amp;L</span><select id="man-cpnl-select" onchange="setManCpnlFrame(this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:4px;color:#666;padding:1px 4px;cursor:pointer;outline:none;display:block;margin-top:2px;"><option value="month" selected>This Month</option><option value="year">This Year</option><option value="all">All Time</option></select></div>
-          <div class="acct-right"><div class="acct-main pnl-neu" id="man-pnl">--</div><div class="acct-pct pnl-neu" id="man-pnl-pct"></div></div>
+  </div>
+
+  <!-- Module Performance Cards: Weather / Crypto / Fed -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;" id="module-cards-row">
+
+    <!-- 🌤 Weather -->
+    <div class="card" style="border-top:3px solid #4ade80;">
+      <div style="padding:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:18px;">🌤</span>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#fff;">Weather</div>
+              <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.7px;">Module P&amp;L</div>
+            </div>
+          </div>
+          <select id="weather-period" onchange="setModulePeriod('weather',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:4px;color:#666;padding:2px 5px;cursor:pointer;outline:none;">
+            <option value="month" selected>This Month</option>
+            <option value="year">This Year</option>
+            <option value="all">All Time</option>
+          </select>
         </div>
-        <div class="split-metric">
-          <div class="split-metric-label" style="margin-bottom:0;max-width:110px;">Open Capital Deployed</div>
-          <div class="acct-right"><div class="acct-main" style="color:#888;" id="man-dep">--</div></div>
-        </div>
-        <div class="split-metric">
-          <div class="split-metric-label" style="margin-bottom:0;max-width:70px;">Total Trades</div>
-          <div class="acct-right"><div class="acct-main" style="color:#888;" id="man-cnt">--</div></div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Closed P&amp;L</div>
+            <div class="pnl-neu" id="weather-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+            <div class="pnl-neu" id="weather-pnl-pct" style="font-size:10px;font-weight:600;margin-top:2px;"></div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
+            <div style="font-size:22px;font-weight:700;color:#888;" id="weather-winrate">--</div>
+            <div style="font-size:10px;color:#555;margin-top:2px;" id="weather-trades">-- trades</div>
+          </div>
         </div>
       </div>
     </div>
+
+    <!-- ₿ Crypto -->
+    <div class="card" style="border-top:3px solid #a78bfa;">
+      <div style="padding:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:18px;">₿</span>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#fff;">Crypto</div>
+              <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.7px;">Module P&amp;L</div>
+            </div>
+          </div>
+          <select id="crypto-module-period" onchange="setModulePeriod('crypto',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:4px;color:#666;padding:2px 5px;cursor:pointer;outline:none;">
+            <option value="month" selected>This Month</option>
+            <option value="year">This Year</option>
+            <option value="all">All Time</option>
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Closed P&amp;L</div>
+            <div class="pnl-neu" id="crypto-module-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+            <div class="pnl-neu" id="crypto-module-pnl-pct" style="font-size:10px;font-weight:600;margin-top:2px;"></div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
+            <div style="font-size:22px;font-weight:700;color:#888;" id="crypto-module-winrate">--</div>
+            <div style="font-size:10px;color:#555;margin-top:2px;" id="crypto-module-trades">-- trades</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🏛 Fed -->
+    <div class="card" style="border-top:3px solid #60a5fa;">
+      <div style="padding:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:18px;">🏛</span>
+            <div>
+              <div style="font-size:13px;font-weight:700;color:#fff;">Fed</div>
+              <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.7px;">Module P&amp;L</div>
+            </div>
+          </div>
+          <select id="fed-period" onchange="setModulePeriod('fed',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:4px;color:#666;padding:2px 5px;cursor:pointer;outline:none;">
+            <option value="month" selected>This Month</option>
+            <option value="year">This Year</option>
+            <option value="all">All Time</option>
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Closed P&amp;L</div>
+            <div class="pnl-neu" id="fed-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+            <div class="pnl-neu" id="fed-pnl-pct" style="font-size:10px;font-weight:600;margin-top:2px;"></div>
+          </div>
+          <div>
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
+            <div style="font-size:22px;font-weight:700;color:#888;" id="fed-winrate">--</div>
+            <div style="font-size:10px;color:#555;margin-top:2px;" id="fed-trades">-- trades</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- P&L Chart | Positions + Trades -->
@@ -448,6 +531,56 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 <div class="footer" id="footer-bar">Ruppert v1.4 &mdash; Demo Mode &mdash; No real money at risk &mdash; Auto-refreshes 30s</div>
 
 <script>
+
+// ── Module Cards ──────────────────────────────────────────────────────────────
+// id prefix map: 'weather' → 'weather', 'crypto' → 'crypto-module', 'fed' → 'fed'
+const MODULE_ID = { weather: 'weather', crypto: 'crypto-module', fed: 'fed' };
+
+window._moduleData   = {};
+window._modulePeriod = { weather: 'month', crypto: 'month', fed: 'month' };
+
+function setModulePeriod(mod, period) {
+  window._modulePeriod[mod] = period;
+  renderModuleCard(mod);
+}
+
+function renderModuleCard(mod) {
+  const d = window._moduleData[mod];
+  if (!d) return;
+  const period  = window._modulePeriod[mod] || 'month';
+  const pfx     = MODULE_ID[mod] || mod;
+  const pnl     = period === 'month' ? d.closed_pnl_month  : period === 'year' ? d.closed_pnl_year  : d.closed_pnl;
+  const count   = period === 'month' ? d.trade_count_month : period === 'year' ? d.trade_count_year : d.trade_count;
+
+  // Closed P&L value
+  const pnlEl = document.getElementById(pfx + '-pnl');
+  if (pnlEl) {
+    pnlEl.className = pcls(pnl);
+    pnlEl.style.cssText = 'font-size:22px;font-weight:700;letter-spacing:-0.5px;';
+    pnlEl.textContent = (pnl >= 0 ? '+' : '') + dollar(pnl);
+  }
+  // P&L % — use all-time trade_count as proxy; skip if no trades
+  const pctEl = document.getElementById(pfx + '-pnl-pct');
+  if (pctEl) {
+    pctEl.className = pcls(pnl);
+    pctEl.style.cssText = 'font-size:10px;font-weight:600;margin-top:2px;';
+    pctEl.textContent = '';  // cost basis not returned per-module yet
+  }
+  // Win Rate (all-time)
+  const wrEl = document.getElementById(pfx + '-winrate');
+  if (wrEl) {
+    if (d.win_rate != null) {
+      wrEl.textContent   = d.win_rate.toFixed(0) + '%';
+      wrEl.style.color   = d.win_rate >= 50 ? '#4ade80' : '#f87171';
+    } else {
+      wrEl.textContent   = '--';
+      wrEl.style.color   = '#888';
+    }
+  }
+  // Trade count for period
+  const trEl = document.getElementById(pfx + '-trades');
+  if (trEl) trEl.textContent = count + ' trade' + (count !== 1 ? 's' : '');
+}
 
 // ── Utils ──────────────────────────────────────────────────────────────────────
 async function api(url, opts={}) { try { return await (await fetch(url, opts)).json(); } catch { return null; } }
@@ -1163,6 +1296,14 @@ async function loadClosedPnl() {
     if (wrEl && pnl.closed_win_rate != null) {
       wrEl.textContent = pnl.closed_win_rate.toFixed(0) + '%';
       wrEl.style.color = pnl.closed_win_rate >= 50 ? '#4ade80' : '#f87171';
+    }
+
+    // Module cards — weather / crypto / fed
+    if (pnl.modules) {
+      window._moduleData = pnl.modules;
+      ['weather', 'crypto', 'fed'].forEach(m => {
+        if (window._moduleData[m]) renderModuleCard(m);
+      });
     }
 
     updateAccountValue();
