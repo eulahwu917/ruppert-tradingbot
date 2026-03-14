@@ -23,7 +23,7 @@ import sys
 # ---------------------------------------------------------------------------
 MIN_EDGE = {
     'weather': 0.15,
-    'crypto':  0.10,
+    'crypto':  0.12,
 }
 MIN_CONFIDENCE   = 0.50          # universal minimum confidence to enter
 MIN_HOURS_ENTRY  = 0.5           # must be ≥ 30 min from settlement to open
@@ -64,6 +64,61 @@ def kelly_fraction_for_confidence(confidence: float) -> float:
     if confidence >= 0.60:
         return 0.15
     return 0.10  # 50–60% confidence band
+
+
+# ---------------------------------------------------------------------------
+# 1a. Market Impact Ceiling (Phase 1 — bid/ask spread proxy)
+# ---------------------------------------------------------------------------
+
+def apply_market_impact_ceiling(
+    base_size: float,
+    yes_ask: int,
+    yes_bid: int,
+    open_interest: float | None = None,
+) -> tuple[float, str]:
+    """
+    Apply market impact ceiling to a proposed trade size via bid/ask spread proxy.
+
+    Phase 1 (zero extra API cost): wide spread = thin market = reduced size.
+    Phase 2 (OI cap): optional additional ceiling when open_interest is provided.
+
+    Tiers:
+        spread ≤ 3¢  → liquid, full size
+        spread 4–7¢  → moderate, cap at 50% of base size
+        spread > 7¢  → thin, floor at $25 hard minimum
+
+    OI cap (Phase 2): if open_interest provided, cap at 5% of OI.
+    This protects against entering thin markets and is module-agnostic.
+
+    Args:
+        base_size:      Kelly-sized dollar amount before impact adjustment.
+        yes_ask:        YES ask price in cents (0-100).
+        yes_bid:        YES bid price in cents (0-100).
+        open_interest:  Optional open interest in dollars for OI cap (Phase 2).
+
+    Returns:
+        (adjusted_size: float, reason: str)
+    """
+    spread = yes_ask - yes_bid  # cents
+
+    if spread <= 3:
+        size = base_size
+        reason = "liquid"
+    elif spread <= 7:
+        size = base_size * 0.5
+        reason = f"moderate_spread({spread}c)"
+    else:
+        size = min(base_size, 25.0)
+        reason = f"thin_spread({spread}c)_floored"
+
+    # Phase 2: OI cap (when open_interest available)
+    if open_interest is not None and open_interest > 0:
+        oi_cap = open_interest * 0.05
+        if size > oi_cap:
+            size = oi_cap
+            reason += f"_oi_cap({oi_cap:.0f})"
+
+    return round(size, 2), reason
 
 
 # ---------------------------------------------------------------------------
@@ -181,24 +236,46 @@ def should_enter(signal: dict, capital: float, deployed_today: float) -> dict:
     if room <= 0:
         return {'enter': False, 'size': 0.0, 'reason': 'daily_cap_reached'}
 
-    # --- Size ---
+    # --- Size (Kelly) ---
     raw_size = calculate_position_size(edge, win_prob, capital, vol_ratio, confidence)
-    size = round(min(raw_size, room), 2)
+
+    # --- Market impact ceiling (Phase 1: spread proxy) ---
+    # Applied AFTER Kelly sizing, BEFORE final min/max cap.
+    # yes_ask / yes_bid must be present on the signal dict; skip gracefully if absent.
+    market_impact_reason = "skipped_no_spread_data"
+    yes_ask = signal.get('yes_ask')
+    yes_bid = signal.get('yes_bid')
+    impact_size = raw_size
+    if yes_ask is not None and yes_bid is not None:
+        open_interest = signal.get('open_interest')  # optional Phase 2
+        impact_size, market_impact_reason = apply_market_impact_ceiling(
+            base_size=raw_size,
+            yes_ask=int(yes_ask),
+            yes_bid=int(yes_bid),
+            open_interest=open_interest,
+        )
+
+    # --- Final daily-room cap ---
+    size = round(min(impact_size, room), 2)
 
     if size <= 0:
-        return {'enter': False, 'size': 0.0, 'reason': 'kelly_size_zero'}
+        return {'enter': False, 'size': 0.0, 'reason': 'kelly_size_zero',
+                'market_impact_reason': market_impact_reason}
 
     # --- Minimum viable trade ---
     min_viable = round(max(5.0, capital * 0.01), 2)
     if size < min_viable:
-        return {'enter': False, 'size': 0.0, 'reason': f'below_min_viable (${size:.2f} < ${min_viable:.2f})'}
+        return {'enter': False, 'size': 0.0,
+                'reason': f'below_min_viable (${size:.2f} < ${min_viable:.2f})',
+                'market_impact_reason': market_impact_reason}
 
     kf = kelly_fraction_for_confidence(confidence)
     return {
         'enter':  True,
         'size':   size,
         'reason': f'ok (edge={edge:.3f}, conf={confidence:.2f}, '
-                  f'kf={kf:.0%}, kelly=${raw_size:.2f}, capped=${size:.2f})',
+                  f'kf={kf:.0%}, kelly=${raw_size:.2f}, impact=${impact_size:.2f}, capped=${size:.2f})',
+        'market_impact_reason': market_impact_reason,
     }
 
 
@@ -445,11 +522,11 @@ if __name__ == '__main__':
 
     crypto_ok = {**good_signal, 'module': 'crypto', 'edge': 0.12}
     e4 = should_enter(crypto_ok, CAPITAL, deployed_today=0.0)
-    print(f"  Crypto (edge=0.12):   {e4}  (should enter; min=0.10)")
+    print(f"  Crypto (edge=0.12):   {e4}  (should enter; min=0.12)")
 
     crypto_low = {**good_signal, 'module': 'crypto', 'edge': 0.08}
     e5 = should_enter(crypto_low, CAPITAL, deployed_today=0.0)
-    print(f"  Crypto (edge=0.08):   {e5}  (should skip; min=0.10)")
+    print(f"  Crypto (edge=0.08):   {e5}  (should skip; min=0.12)")
 
     # ------------------------------------------------------------------
     # 4. should_add

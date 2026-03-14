@@ -43,29 +43,63 @@ ENSEMBLE_MODEL_WEIGHTS = {
 # ── Bias Correction ───────────────────────────────────────────────────────────
 # Kept as hardcoded fallback when GHCND API is unavailable.
 # Primary bias source: ghcnd_client.get_bias() — refreshed daily from NOAA CDO API.
-# These values are from backtest_2026-03-10.json analysis.
+# Original values from backtest_2026-03-10.json analysis.
+# Expanded cities use DEFAULT_BIAS_F (3.0) until backtest data is available.
 CITY_BIAS_F = {
-    "KXHIGHMIA": 4.0,   # Miami: +4°F (strong UHI + coastal effect)
-    "KXHIGHCHI": 4.0,   # Chicago: +4°F
-    "KXHIGHNY":  2.0,   # New York: +2°F
-    "KXHIGHLA":  3.0,   # Los Angeles: +3°F
-    "KXHIGHPHX": 3.0,   # Phoenix: +3°F
-    "KXHIGHHOU": 3.0,   # Houston: +3°F
+    # Original cities (validated via backtest)
+    "KXHIGHMIA":  4.0,   # Miami: +4°F (strong UHI + coastal effect)
+    "KXHIGHCHI":  4.0,   # Chicago: +4°F
+    "KXHIGHNY":   2.0,   # New York: +2°F
+    "KXHIGHLA":   3.0,   # Los Angeles: +3°F
+    "KXHIGHPHX":  3.0,   # Phoenix: +3°F
+    "KXHIGHHOU":  3.0,   # Houston: +3°F
+    # Expanded cities (default bias until GHCND validates, added 2026-03-13)
+    "KXHIGHAUS":  0.0,   # Austin       # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHDEN":  0.0,   # Denver       # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHLAX":  0.0,   # Los Angeles (LAX)  # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHPHIL": 0.0,   # Philadelphia # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHTMIN": 0.0,   # Minneapolis  # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHTDAL": 0.0,   # Dallas       # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHTDC":  0.0,   # Washington DC  # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHTLV":  0.0,   # Las Vegas    # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHTNOU": 0.0,   # New Orleans  # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHTOKC": 0.0,   # Oklahoma City  # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHTSFO": 0.0,   # San Francisco  # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHTSEA": 0.0,   # Seattle      # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHTSATX":0.0,   # San Antonio  # unvalidated — bias TBD pending GHCND backtest
+    "KXHIGHTATL": 0.0,   # Atlanta      # unvalidated — bias TBD pending GHCND backtest
 }
-DEFAULT_BIAS_F = 3.0  # fallback for unknown series tickers
+DEFAULT_BIAS_F = 0.0  # fallback for unknown series tickers (was 3.0; reset pending GHCND backtest)
 
 # ── NWS Official Grid Points ──────────────────────────────────────────────────
 NWS_GRID_POINTS = {
-    "KXHIGHNY":  {"office": "OKX", "gridX": 33,  "gridY": 37},
-    "KXHIGHCHI": {"office": "LOT", "gridX": 75,  "gridY": 73},
-    "KXHIGHMIA": {"office": "MFL", "gridX": 110, "gridY": 37},
-    "KXHIGHPHX": {"office": "PSR", "gridX": 157, "gridY": 57},
-    "KXHIGHHOU": {"office": "HGX", "gridX": 66,  "gridY": 99},
-    "KXHIGHLA":  {"office": "LOX", "gridX": 155, "gridY": 45},
+    # Original cities
+    "KXHIGHNY":   {"office": "OKX", "gridX": 33,  "gridY": 37},
+    "KXHIGHCHI":  {"office": "LOT", "gridX": 75,  "gridY": 73},
+    "KXHIGHMIA":  {"office": "MFL", "gridX": 110, "gridY": 50},
+    "KXHIGHPHX":  {"office": "PSR", "gridX": 157, "gridY": 57},
+    "KXHIGHHOU":  {"office": "HGX", "gridX": 66,  "gridY": 99},
+    "KXHIGHLA":   {"office": "LOX", "gridX": 155, "gridY": 45},
+    # Expanded cities (added 2026-03-13, grid points from api.weather.gov/points)
+    "KXHIGHAUS":  {"office": "EWX", "gridX": 156, "gridY": 91},   # Austin (30.2672,-97.7431)
+    "KXHIGHDEN":  {"office": "BOU", "gridX": 63,  "gridY": 62},   # Denver (39.7392,-104.9903)
+    "KXHIGHLAX":  {"office": "LOX", "gridX": 148, "gridY": 41},   # Los Angeles LAX (33.9425,-118.4081)
+    "KXHIGHPHIL": {"office": "PHI", "gridX": 50,  "gridY": 76},   # Philadelphia (39.9526,-75.1652)
+    "KXHIGHTMIN": {"office": "MPX", "gridX": 108, "gridY": 72},   # Minneapolis (44.9778,-93.2650)
+    "KXHIGHTDAL": {"office": "FWD", "gridX": 89,  "gridY": 104},  # Dallas (32.7767,-96.7970)
+    "KXHIGHTDC":  {"office": "LWX", "gridX": 96,  "gridY": 72},   # Washington DC (38.9072,-77.0369)
+    "KXHIGHTLV":  {"office": "VEF", "gridX": 123, "gridY": 98},   # Las Vegas (36.1699,-115.1398)
+    "KXHIGHTNOU": {"office": "LIX", "gridX": 68,  "gridY": 88},   # New Orleans (29.9511,-90.0715)
+    "KXHIGHTOKC": {"office": "OUN", "gridX": 97,  "gridY": 94},   # Oklahoma City (35.4676,-97.5164)
+    "KXHIGHTSFO": {"office": "MTR", "gridX": 85,  "gridY": 98},   # San Francisco (37.6213,-122.3790)
+    "KXHIGHTSEA": {"office": "SEW", "gridX": 124, "gridY": 61},   # Seattle (47.4502,-122.3088)
+    "KXHIGHTSATX":{"office": "EWX", "gridX": 126, "gridY": 54},   # San Antonio (29.4241,-98.4936)
+    "KXHIGHTATL": {"office": "FFC", "gridX": 51,  "gridY": 87},   # Atlanta (33.7490,-84.3880)
 }
 
 # Kalshi weather market cities with coordinates + NWS station
 CITIES = {
+    # Original cities
     "KXHIGHNY": {
         "name": "New York",
         "lat": 40.7128,
@@ -107,6 +141,105 @@ CITIES = {
         "lon": -112.0740,
         "nws_station": "KPHX",
         "timezone": "America/Phoenix",
+    },
+    # Expanded cities (added 2026-03-13)
+    "KXHIGHAUS": {
+        "name": "Austin",
+        "lat": 30.2672,
+        "lon": -97.7431,
+        "nws_station": "KAUS",
+        "timezone": "America/Chicago",
+    },
+    "KXHIGHDEN": {
+        "name": "Denver",
+        "lat": 39.7392,
+        "lon": -104.9903,
+        "nws_station": "KDEN",
+        "timezone": "America/Denver",
+    },
+    "KXHIGHLAX": {
+        "name": "Los Angeles (LAX)",
+        "lat": 33.9425,
+        "lon": -118.4081,
+        "nws_station": "KLAX",
+        "timezone": "America/Los_Angeles",
+    },
+    "KXHIGHPHIL": {
+        "name": "Philadelphia",
+        "lat": 39.9526,
+        "lon": -75.1652,
+        "nws_station": "KPHL",
+        "timezone": "America/New_York",
+    },
+    "KXHIGHTMIN": {
+        "name": "Minneapolis",
+        "lat": 44.9778,
+        "lon": -93.2650,
+        "nws_station": "KMSP",
+        "timezone": "America/Chicago",
+    },
+    "KXHIGHTDAL": {
+        "name": "Dallas",
+        "lat": 32.7767,
+        "lon": -96.7970,
+        "nws_station": "KDFW",
+        "timezone": "America/Chicago",
+    },
+    "KXHIGHTDC": {
+        "name": "Washington DC",
+        "lat": 38.9072,
+        "lon": -77.0369,
+        "nws_station": "KDCA",
+        "timezone": "America/New_York",
+    },
+    "KXHIGHTLV": {
+        "name": "Las Vegas",
+        "lat": 36.1699,
+        "lon": -115.1398,
+        "nws_station": "KLAS",
+        "timezone": "America/Los_Angeles",
+    },
+    "KXHIGHTNOU": {
+        "name": "New Orleans",
+        "lat": 29.9511,
+        "lon": -90.0715,
+        "nws_station": "KMSY",
+        "timezone": "America/Chicago",
+    },
+    "KXHIGHTOKC": {
+        "name": "Oklahoma City",
+        "lat": 35.4676,
+        "lon": -97.5164,
+        "nws_station": "KOKC",
+        "timezone": "America/Chicago",
+    },
+    "KXHIGHTSFO": {
+        "name": "San Francisco",
+        "lat": 37.6213,
+        "lon": -122.3790,
+        "nws_station": "KSFO",
+        "timezone": "America/Los_Angeles",
+    },
+    "KXHIGHTSEA": {
+        "name": "Seattle",
+        "lat": 47.4502,
+        "lon": -122.3088,
+        "nws_station": "KSEA",
+        "timezone": "America/Los_Angeles",
+    },
+    "KXHIGHTSATX": {
+        "name": "San Antonio",
+        "lat": 29.4241,
+        "lon": -98.4936,
+        "nws_station": "KSAT",
+        "timezone": "America/Chicago",
+    },
+    "KXHIGHTATL": {
+        "name": "Atlanta",
+        "lat": 33.7490,
+        "lon": -84.3880,
+        "nws_station": "KATL",
+        "timezone": "America/New_York",
     },
 }
 
@@ -550,6 +683,10 @@ def get_full_weather_signal(series_ticker: str, threshold_f: float, target_date:
         - If current_temp already exceeds threshold → prob approaches 1.0
         - If today_high forecast already below threshold by 3°F+ → prob approaches 0.0
     """
+    from datetime import date as _date
+    if isinstance(target_date, str):
+        target_date = _date.fromisoformat(target_date)
+
     # Bias: GHCND (dynamic) preferred, hardcoded fallback
     try:
         from ghcnd_client import get_bias as _ghcnd_bias, get_bias_source
@@ -607,9 +744,16 @@ def get_full_weather_signal(series_ticker: str, threshold_f: float, target_date:
                 prob       = 0.05
                 confidence = 0.90
             else:
-                det_prob   = 1.0 if today_high >= threshold_f else 0.0
-                prob       = 0.6 * prob + 0.4 * det_prob
-                confidence = ensemble["confidence"] * 0.8
+                # After 4pm (hours>=16): current_temp is better proxy than stale forecast high
+                # At 6pm the day's actual high is observed; declining temps won't recover
+                if hours >= 16 and current_temp is not None:
+                    det_prob = 1.0 if current_temp >= threshold_f else (
+                        0.3 if current_temp >= threshold_f - 3 else 0.0
+                    )
+                else:
+                    det_prob = 1.0 if today_high >= threshold_f else 0.0
+                prob = 0.6 * prob + 0.4 * det_prob
+                confidence = confidence * 0.8
 
         result["final_prob"]       = round(prob, 4)
         result["final_confidence"] = round(confidence, 4)

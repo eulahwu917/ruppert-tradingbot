@@ -554,25 +554,79 @@ def get_today_trades():
 @app.get("/api/positions/active")
 def get_active_positions():
     """
-    All open positions across all trade log files.
-    - Reads all dates (not just today)
-    - Deduplicates by ticker (first entry = opening entry)
-    - Skips tickers that have a corresponding action=exit entry
-    - Fast: no external API calls
+    All open positions.
+    - LIVE mode: fetches real positions from Kalshi API (real fills show up there)
+    - DEMO mode: reads from trade logs — dry_run trades are NOT real Kalshi positions
+      so the Kalshi API returns nothing; trade logs are the source of truth.
+    Deduplicates by ticker (first open/buy entry per ticker).
+    Skips tickers that have a corresponding action=exit entry.
     """
+    current_mode = get_mode()
+
+    if current_mode == 'live':
+        # LIVE mode: get real positions from Kalshi API
+        try:
+            sys.path.insert(0, str(Path(__file__).parent.parent))
+            from kalshi_client import KalshiClient
+            kalshi_positions = KalshiClient().get_positions()
+            positions = []
+            total_cost = 0.0
+            for kp in kalshi_positions:
+                ticker = getattr(kp, 'ticker', '') or ''
+                if not ticker or is_settled_ticker(ticker):
+                    continue
+                position = getattr(kp, 'position', 0) or 0  # net YES contracts
+                if position == 0:
+                    continue
+                side = 'yes' if position > 0 else 'no'
+                contracts = abs(position)
+                # market_exposure in cents → dollars cost basis
+                exposure_cents = abs(getattr(kp, 'market_exposure', 0) or 0)
+                cost = round(exposure_cents / 100, 2)
+                entry_p = round(exposure_cents / contracts) if contracts else 50
+                total_cost += cost
+                positions.append({
+                    "ticker":      ticker,
+                    "title":       ticker,
+                    "side":        side,
+                    "source":      'live',
+                    "module":      classify_module('live', ticker),
+                    "entry_price": entry_p,
+                    "cur_price":   entry_p,
+                    "pnl":         0.0,
+                    "pnl_pct":     0.0,
+                    "cost":        cost,
+                    "contracts":   contracts,
+                    "pos_ratio":   0,
+                    "edge":        None,
+                    "date":        '',
+                    "close_time":  '',
+                    "noaa_prob":   None,
+                    "market_prob": None,
+                })
+            # Recompute pos_ratio with total_cost
+            for p in positions:
+                p['pos_ratio'] = round(p['cost'] / total_cost * 100) if total_cost else 0
+            return positions
+        except Exception:
+            pass  # Fall through to log-based approach if Kalshi API fails
+
+    # DEMO mode (or LIVE fallback): read from trade logs
+    # dry_run trades are NOT real Kalshi positions — trade logs are the source of truth
     all_trades = read_all_trades()
 
     # Build set of exited tickers
     exited = {t.get('ticker') for t in all_trades if t.get('action') == 'exit'}
 
-    # Deduplicate: keep first (earliest) entry per ticker, skip exits + dupes + settled
+    # Deduplicate: keep first (earliest) open/buy entry per ticker
+    # Only collect entries where action is 'open' or 'buy' (not exit, add-on, update, etc.)
     seen = {}
     for t in all_trades:
         ticker = t.get('ticker','')
         if not ticker: continue
         if ticker in exited: continue
         if ticker in seen: continue  # already have opening entry
-        if t.get('action') == 'exit': continue
+        if t.get('action') not in ('open', 'buy'): continue  # only genuine open entries
         if is_settled_ticker(ticker): continue  # skip past-date markets
         seen[ticker] = t
 
@@ -640,20 +694,43 @@ def get_live_prices():
         if not ticker or ticker in prices:
             continue
         try:
-            resp = req.get(
-                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+            # Use orderbook endpoint — REST /markets/{ticker} returns null for bid/ask
+            ob_resp = req.get(
+                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook',
                 timeout=4
             )
-            if resp.status_code == 200:
-                m = resp.json().get('market',{})
+            if ob_resp.status_code == 200:
+                ob = ob_resp.json().get('orderbook_fp', {})
+                no_dollars  = ob.get('no_dollars', [])
+                yes_dollars = ob.get('yes_dollars', [])
+                no_bid  = int(round(max((float(p) for p, _ in no_dollars),  default=0) * 100)) if no_dollars  else None
+                yes_bid = int(round(max((float(p) for p, _ in yes_dollars), default=0) * 100)) if yes_dollars else None
+                yes_ask = (100 - no_bid)  if no_bid  is not None else None
+                no_ask  = (100 - yes_bid) if yes_bid is not None else None
                 prices[ticker] = {
-                    'yes_ask': m.get('yes_ask'),
-                    'yes_bid': m.get('yes_bid'),
-                    'no_ask':  m.get('no_ask'),
-                    'no_bid':  m.get('no_bid'),
+                    'yes_ask': yes_ask,
+                    'yes_bid': yes_bid,
+                    'no_ask':  no_ask,
+                    'no_bid':  no_bid,
                 }
+            else:
+                # Fallback: REST endpoint for settled markets
+                rest_resp = req.get(
+                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                    timeout=4
+                )
+                if rest_resp.status_code == 200:
+                    m = rest_resp.json().get('market', {})
+                    prices[ticker] = {
+                        'yes_ask': m.get('yes_ask'),
+                        'yes_bid': m.get('yes_bid'),
+                        'no_ask':  m.get('no_ask'),
+                        'no_bid':  m.get('no_bid'),
+                    }
         except Exception:
             pass
+        import time as _time
+        _time.sleep(0.05)  # rate-limit: 20 req/sec
 
     # Override prices for settled markets using last_price (YES settlement price)
     # e.g. last_price=99 means YES won → NO is worth 1¢

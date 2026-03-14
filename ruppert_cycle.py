@@ -342,16 +342,20 @@ new_crypto = []
 try:
     # Get live prices
     prices = {}
-    for sym, key in [('XBTUSD','btc'), ('ETHUSD','eth'), ('XRPUSD','xrp')]:
+    for sym, key in [('XBTUSD','btc'), ('ETHUSD','eth'), ('XRPUSD','xrp'),
+                     ('SOLUSD','sol'), ('DOGEUSD','doge')]:
         try:
             r = requests.get(f'https://api.kraken.com/0/public/Ticker?pair={sym}', timeout=5)
             prices[key] = float(list(r.json()['result'].values())[0]['c'][0])
-        except: pass
+        except:
+            pass
 
-    btc = prices.get('btc', 70000)
-    eth = prices.get('eth', 2000)
-    xrp = prices.get('xrp', 1.38)
-    print(f"  BTC=${btc:,.0f}  ETH=${eth:,.2f}  XRP=${xrp:.4f}")
+    btc  = prices.get('btc', 70000)
+    eth  = prices.get('eth', 2000)
+    xrp  = prices.get('xrp', 1.38)
+    sol  = prices.get('sol', 0)
+    doge = prices.get('doge', 0)
+    print(f"  BTC=${btc:,.0f}  ETH=${eth:,.2f}  XRP=${xrp:.4f}  SOL=${sol:.2f}  DOGE=${doge:.5f}")
 
     # Bearish block removed (approved 2026-03-12: CEO + David).
     # Direction signal is kept for logging/reporting below, but no longer
@@ -359,9 +363,11 @@ try:
     drift_sigma = 0.0
 
     SERIES_CFG = [
-        ('KXBTC', btc, 250, 0.025, 18),
-        ('KXETH', eth, 10, 0.030, 18),
-        ('KXXRP', xrp, 0.01, 0.045, 18),
+        ('KXBTC', btc,  250,   0.025, 18),
+        ('KXETH', eth,  10,    0.030, 18),
+        ('KXXRP', xrp,  0.01,  0.045, 18),
+        ('KXSOL',  sol,  5.0,   0.045, 18),   # SOL — ±$5 brackets, 4.5% daily vol
+        ('KXDOGE', doge, 0.005, 0.050, 18),   # DOGE — ±$0.005 brackets, 5% daily vol
     ]
 
     for series, spot, half_w, daily_vol, hours in SERIES_CFG:

@@ -39,12 +39,28 @@ logger = logging.getLogger(__name__)
 
 # Map Kalshi series tickers to their Open-Meteo city records
 TICKER_TO_SERIES = {
-    "KXHIGHNY":  "KXHIGHNY",
-    "KXHIGHLA":  "KXHIGHLA",
-    "KXHIGHCHI": "KXHIGHCHI",
-    "KXHIGHHOU": "KXHIGHHOU",
-    "KXHIGHMIA": "KXHIGHMIA",
-    "KXHIGHPHX": "KXHIGHPHX",
+    # Original cities
+    "KXHIGHNY":   "KXHIGHNY",
+    "KXHIGHLA":   "KXHIGHLA",
+    "KXHIGHCHI":  "KXHIGHCHI",
+    "KXHIGHHOU":  "KXHIGHHOU",
+    "KXHIGHMIA":  "KXHIGHMIA",
+    "KXHIGHPHX":  "KXHIGHPHX",
+    # Expanded cities (added 2026-03-13)
+    "KXHIGHAUS":  "KXHIGHAUS",
+    "KXHIGHDEN":  "KXHIGHDEN",
+    "KXHIGHLAX":  "KXHIGHLAX",
+    "KXHIGHPHIL": "KXHIGHPHIL",
+    "KXHIGHTMIN": "KXHIGHTMIN",
+    "KXHIGHTDAL": "KXHIGHTDAL",
+    "KXHIGHTDC":  "KXHIGHTDC",
+    "KXHIGHTLV":  "KXHIGHTLV",
+    "KXHIGHTNOU": "KXHIGHTNOU",
+    "KXHIGHTOKC": "KXHIGHTOKC",
+    "KXHIGHTSFO": "KXHIGHTSFO",
+    "KXHIGHTSEA": "KXHIGHTSEA",
+    "KXHIGHTSATX":"KXHIGHTSATX",
+    "KXHIGHTATL": "KXHIGHTATL",
 }
 
 # Minimum ensemble confidence to trade (0-1 scale)
@@ -53,12 +69,27 @@ MIN_ENSEMBLE_CONFIDENCE = 0.5
 
 # Title keyword → city name (for NOAA fallback)
 CITY_MAP = {
+    # Original cities
     'new york': 'NYC', 'nyc': 'NYC', 'ny ': 'NYC',
     'los angeles': 'LA', 'l.a.': 'LA',
     'chicago': 'Chicago',
     'houston': 'Houston',
     'miami': 'Miami',
     'phoenix': 'Phoenix',
+    # Expanded cities (added 2026-03-13)
+    'austin': 'Austin',
+    'denver': 'Denver',
+    'philadelphia': 'Philadelphia', 'philly': 'Philadelphia',
+    'minneapolis': 'Minneapolis',
+    'dallas': 'Dallas',
+    'washington': 'Washington DC', 'washington dc': 'Washington DC',
+    'las vegas': 'Las Vegas',
+    'new orleans': 'New Orleans',
+    'oklahoma city': 'Oklahoma City', 'okc': 'Oklahoma City',
+    'san francisco': 'San Francisco',
+    'seattle': 'Seattle',
+    'san antonio': 'San Antonio',
+    'atlanta': 'Atlanta',
 }
 
 
@@ -302,6 +333,13 @@ def analyze_market(market: dict) -> dict | None:
         result['models_used']      = ensemble_data.get("models_used", [])
         # Flag whether NWS was degraded (set in confidence block above)
         result['nws_degraded']     = ensemble_data.get("nws_current_f") is None
+
+    # Second line of defense: skip same-day markets after city's local 2pm
+    # (primary skip is in main.py; this catches any path that bypasses it)
+    if ensemble_data and ensemble_data.get('is_same_day'):
+        city_hours = (ensemble_data.get('conditions') or {}).get('hours_since_midnight', 0)
+        if city_hours >= 14:
+            return None  # day's high already observed — no valid signal
 
     return result
 

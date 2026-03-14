@@ -253,6 +253,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 <div class="header">
   <h1>&#x1F4CA; <span>Ruppert</span></h1>
   <div style="display:flex;align-items:center;gap:10px;">
+    <span class="pill pill-b" id="mode-label">DEMO</span>
     <span id="ts" style="color:#1e1e1e;font-size:10px;margin-left:6px;"></span>
   </div>
 </div>
@@ -744,6 +745,14 @@ async function loadPositions() {
     return;
   }
 
+  // Fix 2: DEMO mode — Open P&L = $0.00 immediately (dry_run has no real fill)
+  // Show $0.00 right away so the card never shows dashes when positions exist.
+  if (window._currentMode !== 'live') {
+    window._openPnl = 0;
+    updateAccountValue();
+    setPnl('opnl', 'opnl-pct', 0, 0);
+  }
+
   // If same tickers as before, skip rebuild — just refresh prices in-place
   const newKeys = positions.map(p=>p.ticker).sort().join(',');
   const oldKeys = window._cachedPositions ? window._cachedPositions.map(p=>p.ticker).sort().join(',') : null;
@@ -804,7 +813,13 @@ async function loadPositions() {
 
 async function loadLivePrices(positions) {
   const prices = await api('/api/positions/prices');
-  if (!prices) return;
+  if (!prices) {
+    // API failed — ensure Open P&L shows $0.00 rather than dashes
+    window._openPnl = 0;
+    updateAccountValue();
+    setPnl('opnl', 'opnl-pct', 0, 0);
+    return;
+  }
   let totOpen=0, totCost=0;
   for (const p of positions) {
     const lv = prices[p.ticker]; if(!lv) continue;
@@ -835,12 +850,19 @@ async function loadLivePrices(positions) {
       else                   stEl.innerHTML = '<span style="color:#555;font-size:10px;">EVEN</span>';
     }
     const oe=document.getElementById('opnl-'+p.ticker);
-    if(oe)oe.innerHTML=`<span class="${pcls(open)}">${sign(open)}${dollar(open)}</span><br><span style="font-size:9px;color:${open>=0?'#1a4a1a':'#4a1a1a'}">${sign(opc)}${opc.toFixed(1)}%</span>`;
+    if (oe) {
+      if (window._currentMode === 'live') {
+        // LIVE: show real mark-to-market P&L
+        oe.innerHTML=`<span class="${pcls(open)}">${sign(open)}${dollar(open)}</span><br><span style="font-size:9px;color:${open>=0?'#1a4a1a':'#4a1a1a'}">${sign(opc)}${opc.toFixed(1)}%</span>`;
+      } else {
+        // DEMO: dry_run has no real fill — row P&L = $0.00
+        oe.innerHTML='<span class="pnl-neu">+$0.00</span>';
+      }
+    }
   }
   // Push live P&L into account bar (mark-to-market, real-time)
-  // Always update even if totCost=0 (e.g. all positions settled, open P&L = $0)
-  if (true) {
-    // Classify by source
+  if (window._currentMode === 'live') {
+    // LIVE: classify by source and compute real open P&L
     let botPnl = 0, manPnl = 0;
     for (const p of positions) {
       const lv = prices[p.ticker]; if (!lv) continue;
@@ -853,18 +875,14 @@ async function loadLivePrices(positions) {
       else botPnl += pnl;
     }
     const totalPnl = botPnl + manPnl;
-
-    // Account Value = Buying Power + Open P&L
-    // DEMO: Account Value = Starting Capital ($400) + Open P&L + Closed P&L
-    // window._kalshiBalance is set to 400 in loadAccount(); totalPnl includes open + settled.
-    // LIVE MODE: swap to dollar(window._kalshiBalance) — Kalshi API already factors in P&L.
-    // Store open P&L globally — Account Value updated by updateAccountValue()
     window._openPnl = totalPnl;
     updateAccountValue();
-
-    // Open P&L in account bar
     setPnl('opnl', 'opnl-pct', totalPnl, totCost);
-
+  } else {
+    // DEMO: dry_run positions — Open P&L is always $0.00 (no real fill to mark-to-market)
+    window._openPnl = 0;
+    updateAccountValue();
+    setPnl('opnl', 'opnl-pct', 0, 0);
   }
 }
 

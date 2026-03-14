@@ -49,3 +49,4 @@ ECON_HIGH_CONVICTION_EDGE = 0.20  # 20%+ edge = auto-execute; below = still aler
 
 # Bot settings
 CHECK_INTERVAL_HOURS = 6       # How often to scan for opportunities
+SAME_DAY_SKIP_AFTER_HOUR = 14  # skip same-day weather markets after 2pm local

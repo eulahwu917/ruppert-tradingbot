@@ -269,10 +269,28 @@ def run_weather_scan(dry_run=True):
                 f"[Weather] Daily cap reached (${deployed_today:.2f} deployed, "
                 f"max ${total_capital * 0.70:.2f}). Skipping new entries this cycle."
             )
-            return
+            return []
 
         markets = client.search_markets('temperature')
         log_activity(f"[Weather] Fetched {len(markets)} markets")
+
+        # Filter: skip same-day markets after 14:00 UTC (daily high already set)
+        import datetime as _dt
+        _now_utc_hour = _dt.datetime.utcnow().hour
+        _today = _dt.date.today()
+        all_markets_before = markets
+        filtered_markets = []
+        for m in markets:
+            close_str = m.get('close_time', '')
+            try:
+                settle_date = _dt.datetime.fromisoformat(close_str.replace('Z', '+00:00')).date()
+                if settle_date == _today and _now_utc_hour >= 14:
+                    continue  # skip — daily high already observed, market near settlement
+            except Exception:
+                pass
+            filtered_markets.append(m)
+        markets = filtered_markets
+        log_activity(f"[Weather] Filtered to {len(markets)} markets (same-day skip: {len(all_markets_before) - len(markets)} removed)")
 
         opportunities = find_opportunities(markets)
         log_activity(f"[Weather] Found {len(opportunities)} opportunities above {config.MIN_EDGE_THRESHOLD:.0%} threshold")
@@ -302,10 +320,13 @@ def run_weather_scan(dry_run=True):
         else:
             log_activity("[Weather] No opportunities approved by strategy layer.")
 
+        return approved_opps
+
     except Exception as e:
         log_activity(f"[Weather] ERROR: {e}")
         import traceback
         traceback.print_exc()
+        return []
 
 
 # ─── ECONOMICS MODULE ─────────────────────────────────────────────────────────
