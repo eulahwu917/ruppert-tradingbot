@@ -42,18 +42,11 @@ CONFIDENCE_FILTER = ['medium', 'high']  # Only include these confidence levels
 
 
 def fetch_open_markets(series_ticker: str, limit: int = 50) -> list:
-    """Fetch open markets for a given series ticker."""
+    """Fetch open markets for a given series ticker with real orderbook prices."""
+    from kalshi_client import KalshiClient
     try:
-        r = requests.get(
-            f'{BASE}/markets',
-            params={'series_ticker': series_ticker, 'status': 'open', 'limit': limit},
-            headers=HEADERS,
-            timeout=15,
-        )
-        if r.status_code != 200:
-            print(f'[EconScanner] HTTP {r.status_code} for series {series_ticker}')
-            return []
-        return r.json().get('markets', [])
+        client = KalshiClient()
+        return client.get_markets(series_ticker, status='open', limit=limit)
     except Exception as e:
         print(f'[EconScanner] Error fetching {series_ticker}: {e}')
         return []

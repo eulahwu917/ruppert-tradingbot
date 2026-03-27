@@ -432,7 +432,6 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
     if traded_tickers is None:
         traded_tickers = set()
 
-    BASE = "https://api.elections.kalshi.com/trade-api/v2/markets"
     client = KalshiClient()
     executed = []
 
@@ -471,8 +470,10 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
             sigma = daily_vol * math.sqrt(hours / 24)
             drift = drift_sigma * sigma
 
-            r = requests.get(BASE, params={'series_ticker': series, 'status': 'open', 'limit': 50}, timeout=8)
-            markets = r.json().get('markets', [])
+            # Use KalshiClient to get real orderbook bid/ask prices.
+            # This makes one orderbook API call per market (~250 calls across all series).
+            # Intentional: the list endpoint returns null for yes_ask/no_ask.
+            markets = client.get_markets(series, status='open', limit=50)
 
             from datetime import timezone
             for m in markets:
