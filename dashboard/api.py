@@ -1083,12 +1083,18 @@ def get_pnl_history():
 
     for ticker, t in open_tickers.items():
         try:
-            r = req.get(
-                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+            # Use orderbook endpoint — REST /markets/{ticker} returns null for bid/ask
+            ob_resp = req.get(
+                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook',
                 timeout=4
             )
-            if r.status_code != 200: continue
-            m = r.json().get('market', {})
+            if ob_resp.status_code != 200: continue
+            ob = ob_resp.json().get('orderbook_fp', {})
+            no_dollars  = ob.get('no_dollars', [])
+            yes_dollars = ob.get('yes_dollars', [])
+            no_bid  = int(round(max((float(p) for p, _ in no_dollars),  default=0) * 100)) if no_dollars  else None
+            yes_bid = int(round(max((float(p) for p, _ in yes_dollars), default=0) * 100)) if yes_dollars else None
+            yes_ask = (100 - no_bid)  if no_bid  is not None else None
 
             side      = t.get('side', 'no')
             mp        = t.get('market_prob', 0.5) or 0.5
@@ -1100,23 +1106,14 @@ def get_pnl_history():
 
             # ── Fair value for existing position ─────────────────────────────
             # Use no_bid / yes_bid (what we'd SELL for) not ask (cost to buy more)
-            # Fallback: 100-yes_ask (implied NO value) > last_price > entry_p
+            # Fallback: yes_ask derived from no_bid > entry_p
             # CRITICAL: use 'is None' not 'not cur_p' — 0 is valid (full loss)
             if side == 'no':
-                cur_p = m.get('no_bid')
-                if cur_p is None:
-                    ya = m.get('yes_ask')
-                    if ya is not None: cur_p = 100 - ya
-                if cur_p is None:
-                    lp = m.get('last_price')
-                    if lp is not None: cur_p = 100 - lp
+                cur_p = no_bid
+                if cur_p is None and yes_ask is not None: cur_p = 100 - yes_ask
             else:
-                cur_p = m.get('yes_bid')
-                if cur_p is None:
-                    cur_p = m.get('yes_ask')
-                if cur_p is None:
-                    lp = m.get('last_price')
-                    if lp is not None: cur_p = lp
+                cur_p = yes_bid
+                if cur_p is None and yes_ask is not None: cur_p = yes_ask
             if cur_p is None: cur_p = entry_p  # truly no data — hold flat
             pnl = round((cur_p - entry_p) * contracts / 100, 2)
             open_pnl_total += pnl
@@ -1128,7 +1125,7 @@ def get_pnl_history():
                 open_by_source['manual'] += pnl
             else:
                 open_by_source['bot'] += pnl
-                # Accumulate per-module open P&L (uses live prices from Kalshi API above)
+                # Accumulate per-module open P&L (uses live prices from orderbook above)
                 mod_open = classify_module(src, ticker)
                 module_open_stats[mod_open]['open_pnl'] += pnl
         except Exception:
