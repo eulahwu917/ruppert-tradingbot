@@ -611,7 +611,7 @@ function renderModuleCard(mod) {
 // ── Utils ──────────────────────────────────────────────────────────────────────
 async function api(url, opts={}) { try { return await (await fetch(url, opts)).json(); } catch { return null; } }
 const $ = id => document.getElementById(id);
-const dollar = v => '$' + (v||0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
+const dollar = v => { v = v||0; if (Math.abs(v) < 0.005) v = 0; return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2}); };
 const pct    = v => v != null ? (v*100).toFixed(0)+'%' : '?';
 const sign   = v => v>=0 ? '+' : '';
 const pcls   = v => v>0 ? 'pnl-pos' : v<0 ? 'pnl-neg' : 'pnl-neu';
@@ -791,14 +791,6 @@ async function loadPositions() {
     return;
   }
 
-  // Fix 2: DEMO mode — Open P&L = $0.00 immediately (dry_run has no real fill)
-  // Show $0.00 right away so the card never shows dashes when positions exist.
-  if (window._currentMode !== 'live') {
-    window._openPnl = 0;
-    updateAccountValue();
-    setPnl('opnl', 'opnl-pct', 0, 0);
-  }
-
   // If same tickers as before, skip rebuild — just refresh prices in-place
   const newKeys = positions.map(p=>p.ticker).sort().join(',');
   const oldKeys = window._cachedPositions ? window._cachedPositions.map(p=>p.ticker).sort().join(',') : null;
@@ -889,26 +881,17 @@ async function loadLivePrices(positions) {
     // Populate Status column
     const stEl = document.getElementById('st-'+p.ticker);
     if (stEl) {
-      if (nearWin)  stEl.innerHTML = '<span style="color:#4ade80;font-size:10px;font-weight:700;">WINNING</span>';
-      else if (nearLoss) stEl.innerHTML = '<span style="color:#f87171;font-size:10px;font-weight:700;">LOSING</span>';
-      else if (open > 0.01)  stEl.innerHTML = '<span style="color:#4ade80;font-size:10px;font-weight:700;">WINNING</span>';
+      if (open > 0.01)       stEl.innerHTML = '<span style="color:#4ade80;font-size:10px;font-weight:700;">WINNING</span>';
       else if (open < -0.01) stEl.innerHTML = '<span style="color:#f87171;font-size:10px;font-weight:700;">LOSING</span>';
       else                   stEl.innerHTML = '<span style="color:#555;font-size:10px;">EVEN</span>';
     }
     const oe=document.getElementById('opnl-'+p.ticker);
     if (oe) {
-      if (window._currentMode === 'live') {
-        // LIVE: show real mark-to-market P&L
-        oe.innerHTML=`<span class="${pcls(open)}">${sign(open)}${dollar(open)}</span><br><span style="font-size:9px;color:${open>=0?'#1a4a1a':'#4a1a1a'}">${sign(opc)}${opc.toFixed(1)}%</span>`;
-      } else {
-        // DEMO: dry_run has no real fill — row P&L = $0.00
-        oe.innerHTML='<span class="pnl-neu">+$0.00</span>';
-      }
+      oe.innerHTML=`<span class="${pcls(open)}">${sign(open)}${dollar(open)}</span><br><span style="font-size:9px;color:${open>=0?'#1a4a1a':'#4a1a1a'}">${sign(opc)}${opc.toFixed(1)}%</span>`;
     }
   }
   // Push live P&L into account bar (mark-to-market, real-time)
-  if (window._currentMode === 'live') {
-    // LIVE: classify by source and compute real open P&L
+  {
     let botPnl = 0, manPnl = 0;
     for (const p of positions) {
       const lv = prices[p.ticker]; if (!lv) continue;
@@ -924,11 +907,6 @@ async function loadLivePrices(positions) {
     window._openPnl = totalPnl;
     updateAccountValue();
     setPnl('opnl', 'opnl-pct', totalPnl, totCost);
-  } else {
-    // DEMO: dry_run positions — Open P&L is always $0.00 (no real fill to mark-to-market)
-    window._openPnl = 0;
-    updateAccountValue();
-    setPnl('opnl', 'opnl-pct', 0, 0);
   }
 }
 
@@ -1243,6 +1221,126 @@ function moduleTag(module, ticker, source) {
   return '<span style="color:#666;padding:2px 7px;border-radius:3px;font-size:9px;flex-shrink:0;">Other</span>';
 }
 
+// ── renderState — single state response → full UI update ──────────────────────
+function renderState(state) {
+  const acct      = state.account   || {};
+  const positions = state.positions || [];
+  const modules   = state.modules   || {};
+
+  // Smart money signal for crypto signal column
+  if (state.smart_money) window._smartMoney = state.smart_money;
+
+  // ── Account bar ─────────────────────────────────────────────────────────────
+  if (acct.mode) applyMode(acct.mode);
+  window._kalshiBalance = acct.balance   || 10000;
+  window._openPnl       = acct.open_pnl  || 0;
+  window._closedPnl     = acct.closed_pnl || 0;
+
+  // Account Value = balance + open P&L + closed P&L
+  $('av').textContent = dollar((acct.balance||0) + (acct.open_pnl||0) + (acct.closed_pnl||0));
+
+  // Open P&L
+  setPnl('opnl', 'opnl-pct', acct.open_pnl || 0, acct.open_cost || 0);
+
+  // Closed P&L (period-aware)
+  window._cpnlData = {
+    all:   acct.closed_pnl       || 0,
+    day:   acct.closed_pnl_day   || 0,
+    month: acct.closed_pnl_month || 0,
+    year:  acct.closed_pnl_year  || 0,
+  };
+  const cpnlVal = window._cpnlData[window._cpnlFrame || 'month'];
+  setPnl('cpnl', 'cpnl-pct', cpnlVal, acct.balance || 10000);
+
+  // Win Rate
+  const wrEl = $('winrate');
+  if (wrEl) {
+    if (acct.win_rate != null) {
+      wrEl.textContent = acct.win_rate.toFixed(0) + '%';
+      wrEl.style.color = acct.win_rate >= 50 ? '#4ade80' : '#f87171';
+    } else {
+      wrEl.textContent = '--';
+      wrEl.style.color = '#888';
+    }
+  }
+
+  // Buying Power
+  $('bp').textContent = dollar(acct.buying_power || 0);
+
+  // Timestamp
+  $('ts').textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+  // ── Module cards ────────────────────────────────────────────────────────────
+  window._moduleData = modules;
+  ['weather', 'crypto', 'fed', 'geo'].forEach(m => {
+    if (modules[m]) renderModuleCard(m);
+  });
+
+  // ── Positions table ─────────────────────────────────────────────────────────
+  const tb = $('pos-b');
+  if (!positions.length) {
+    tb.innerHTML = '<tr><td colspan="10" class="loading" style="color:#555;padding:20px;">No open positions</td></tr>';
+    return;
+  }
+  tb.innerHTML = positions.map(p => {
+    const name = (p.title || p.ticker || '');
+    const side = p.side?.toLowerCase() === 'yes'
+      ? '<span class="b-yes">YES</span>'
+      : '<span class="b-no">NO</span>';
+    const _s  = (p.ticker || '').split('-')[0].toLowerCase();
+    const url = `https://kalshi.com/markets/${_s}`;
+
+    // Signal column
+    const sym = (p.ticker || '').split('-')[0];
+    let sigVal = '--';
+    if (p.noaa_prob != null && p.market_prob != null) {
+      sigVal = Math.round(p.noaa_prob * 100) + '% vs ' + Math.round(p.market_prob * 100) + '%';
+    } else if (sym.startsWith('KXBTC') || sym.startsWith('KXETH') || sym.startsWith('KXXRP') || sym.startsWith('KXDOGE')) {
+      const sm = window._smartMoney;
+      sigVal = sm ? (sm.direction === 'bearish' ? 'BEARISH' : sm.direction === 'bullish' ? 'BULLISH' : 'NEUTRAL') : '--';
+    }
+
+    const edgeV = (p.edge != null) ? (Math.abs(p.edge) * 100).toFixed(0) + '%' : '--';
+    const edgeC = (p.edge && Math.abs(p.edge) > .4) ? '#4ade80' : (p.edge && Math.abs(p.edge) > .2) ? '#fbbf24' : '#888';
+    const expiry = fmtExpiry(p.close_time);
+
+    const curHtml = p.cur_price != null
+      ? p.cur_price + 'c'
+      : '<span style="color:#555;font-size:10px;">--</span>';
+
+    let statusHtml;
+    if (p.status === 'WINNING')     statusHtml = '<span style="color:#4ade80;font-size:10px;font-weight:700;">WINNING</span>';
+    else if (p.status === 'LOSING') statusHtml = '<span style="color:#f87171;font-size:10px;font-weight:700;">LOSING</span>';
+    else if (p.status === 'EVEN')   statusHtml = '<span style="color:#555;font-size:10px;">EVEN</span>';
+    else                            statusHtml = '<span style="color:#555;font-size:10px;">--</span>';
+
+    const pnl    = p.pnl;
+    const pnlPct = p.pnl_pct || 0;
+    const pnlHtml = pnl != null
+      ? `<span class="${pcls(pnl)}">${sign(pnl)}${dollar(pnl)}</span><br><span style="font-size:9px;color:${pnl>=0?'#1a4a1a':'#4a1a1a'}">${sign(pnlPct)}${pnlPct.toFixed(1)}%</span>`
+      : '<span style="color:#333">--</span>';
+
+    return `<tr>
+      <td class="l col-title">
+        <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">
+          ${moduleTag(p.module, p.ticker, p.source)}
+          <a href="${url}" target="_blank" style="color:#aaa;text-decoration:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:380px;">${name}</a>
+          ${expiry}
+        </div>
+      </td>
+      <td class="ra shrink" data-col="signal" style="font-size:10px;color:#555;">${sigVal}</td>
+      <td class="ra shrink" data-col="edge" style="color:${edgeC};font-weight:700;">${edgeV}</td>
+      <td class="ra shrink" data-col="qty">${p.contracts}</td>
+      <td class="ca shrink" data-col="side">${side}</td>
+      <td class="ra shrink" data-col="ent">${p.entry_price ? p.entry_price + 'c' : '--'}</td>
+      <td class="ra shrink" data-col="cur">${curHtml}</td>
+      <td class="ca shrink" data-col="status">${statusHtml}</td>
+      <td class="ra shrink" data-col="cost">${dollar(p.cost)}</td>
+      <td class="ra shrink">${pnlHtml}</td>
+    </tr>`;
+  }).join('');
+}
+
 // ── Load All ───────────────────────────────────────────────────────────────────
 // P&L timeframe
 window._pnlFrame = 'day';
@@ -1336,17 +1434,13 @@ async function loadScouts(){
   await Promise.all([loadHighConviction(), loadCryptoSignal()]);
 }
 async function loadAll(){
-  // W1 fix: loadClosedPnl() must complete first so window._closedPnl is set
-  // before loadAccount() reads it to compute buying power.
-  await loadClosedPnl();
-  await Promise.all([loadAccount(), loadPositions(), loadTrades(), loadScouts()]);
+  const state = await api('/api/state');
+  if (state) renderState(state);
+  await Promise.all([loadTrades(), loadScouts()]);
 }
 loadMode();
 loadAll();
 setInterval(loadAll, 30000);
-
-// Stagger account bar refresh to 35s so Account Value doesn't jump with P&L
-setInterval(loadAccount, 35000);
 
 // ── Crypto Tab ───────────────────────────────────────────────────────────────
 async function loadCrypto() {

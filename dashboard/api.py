@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 import json
+import time
 from datetime import date, datetime
 from pathlib import Path
 from capital import get_capital, get_buying_power
@@ -1219,5 +1220,345 @@ def get_pnl_history():
     except Exception:
         pass
     return pnl_result
+
+
+# ─── /api/state — single snapshot endpoint ────────────────────────────────────
+
+_state_cache: dict = {"ts": 0.0, "data": None}
+
+
+def _build_state():
+    """Compute the full dashboard state in one pass.
+    Fetches Kalshi orderbook ONCE per open position and reuses across
+    positions list, module stats, and account P&L.
+    """
+    import requests as req
+    from datetime import date as _date
+
+    all_trades = read_all_trades()
+
+    try:
+        STARTING_CAPITAL = get_capital()
+    except Exception:
+        STARTING_CAPITAL = 10000.0
+
+    # Build exit records index
+    exit_records: dict = {}
+    for t in all_trades:
+        if t.get('action') == 'exit':
+            tk = t.get('ticker', '')
+            if tk:
+                exit_records[tk] = t
+
+    # ── Split: settled/exited vs open (for P&L calculation) ──────────────────
+    seen: set = set()
+    settled_tickers: dict = {}
+    open_tickers_all: dict = {}
+    for t in all_trades:
+        ticker = t.get('ticker', '')
+        if not ticker or ticker in seen:
+            continue
+        if t.get('action') == 'exit':
+            continue
+        seen.add(ticker)
+        if is_settled_ticker(ticker) or ticker in exit_records:
+            settled_tickers[ticker] = t
+        else:
+            open_tickers_all[ticker] = t
+
+    # ── Open positions list (action=open/buy, not settled/exited) ────────────
+    exited: set = set(exit_records.keys())
+    seen2: set = set()
+    open_pos_tickers: dict = {}
+    for t in all_trades:
+        ticker = t.get('ticker', '')
+        if not ticker or ticker in seen2 or ticker in exited:
+            continue
+        action = (t.get('action') or '').lower()
+        if action != 'open' and not action.startswith('buy'):
+            continue
+        if is_settled_ticker(ticker):
+            continue
+        seen2.add(ticker)
+        open_pos_tickers[ticker] = t
+
+    # ── Fetch orderbook prices ONCE per open position ─────────────────────────
+    prices: dict = {}
+    for ticker in open_pos_tickers:
+        try:
+            ob_resp = req.get(
+                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook',
+                timeout=4
+            )
+            if ob_resp.status_code == 200:
+                ob = ob_resp.json().get('orderbook_fp', {})
+                no_dollars  = ob.get('no_dollars', [])
+                yes_dollars = ob.get('yes_dollars', [])
+                no_bid  = int(round(max((float(p) for p, _ in no_dollars),  default=0) * 100)) if no_dollars  else None
+                yes_bid = int(round(max((float(p) for p, _ in yes_dollars), default=0) * 100)) if yes_dollars else None
+                yes_ask = (100 - no_bid)  if no_bid  is not None else None
+                no_ask  = (100 - yes_bid) if yes_bid is not None else None
+                prices[ticker] = {'yes_ask': yes_ask, 'yes_bid': yes_bid, 'no_ask': no_ask, 'no_bid': no_bid}
+            else:
+                rest_resp = req.get(
+                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                    timeout=4
+                )
+                if rest_resp.status_code == 200:
+                    m = rest_resp.json().get('market', {})
+                    prices[ticker] = {
+                        'yes_ask': m.get('yes_ask'),
+                        'yes_bid': m.get('yes_bid'),
+                        'no_ask':  m.get('no_ask'),
+                        'no_bid':  m.get('no_bid'),
+                    }
+        except Exception:
+            pass
+        time.sleep(0.05)
+
+    # ── Build positions list (reuses prices fetched above) ────────────────────
+    module_keys = ['weather', 'crypto', 'fed', 'geo', 'other']
+    module_open: dict = {m: {'open_deployed': 0.0, 'open_trades': 0, 'open_pnl': 0.0} for m in module_keys}
+
+    positions = []
+    open_pnl_total = 0.0
+    open_cost_total = 0.0
+
+    for ticker, t in open_pos_tickers.items():
+        side      = t.get('side', 'no')
+        source    = t.get('source', 'bot')
+        mp        = t.get('market_prob', 0.5) or 0.5
+        ep        = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+        cost      = float(t.get('size_dollars') or 0)
+        contracts = t.get('contracts', 0) or 0
+        mod       = classify_module(source, ticker)
+        if mod not in module_open:
+            mod = 'other'
+
+        lv = prices.get(ticker)
+        cur_p = None
+        if lv:
+            if side == 'no':
+                cur_p = lv.get('no_bid')
+                if cur_p is None and lv.get('yes_ask') is not None:
+                    cur_p = 100 - lv['yes_ask']
+            else:
+                cur_p = lv.get('yes_bid')
+                if cur_p is None and lv.get('yes_ask') is not None:
+                    cur_p = lv['yes_ask']
+
+        pnl     = None
+        pnl_pct = None
+        status  = 'open'
+        if cur_p is not None:
+            pnl = round((cur_p - ep) * contracts / 100, 2)
+            pnl_pct = round(pnl / cost * 100, 2) if cost else 0.0
+            if pnl > 0.01:    status = 'WINNING'
+            elif pnl < -0.01: status = 'LOSING'
+            else:             status = 'EVEN'
+            open_pnl_total += pnl
+            open_cost_total += cost
+
+        module_open[mod]['open_deployed'] += cost
+        module_open[mod]['open_trades']   += 1
+        if pnl is not None:
+            module_open[mod]['open_pnl'] += pnl
+
+        edge_val = t.get('edge')
+        positions.append({
+            'ticker':      ticker,
+            'title':       (t.get('title') or ticker).replace('**', ''),
+            'side':        side,
+            'source':      source,
+            'module':      mod,
+            'entry_price': ep,
+            'cur_price':   cur_p,
+            'pnl':         pnl,
+            'pnl_pct':     pnl_pct,
+            'cost':        round(cost, 2),
+            'contracts':   contracts,
+            'edge':        round(edge_val, 3) if edge_val else None,
+            'noaa_prob':   t.get('noaa_prob'),
+            'market_prob': t.get('market_prob'),
+            'status':      status,
+            'close_time':  t.get('close_time', ''),
+        })
+
+    # ── Closed P&L (settled/exited positions) ────────────────────────────────
+    _today = _date.today()
+    closed_pnl_total = 0.0
+    closed_pnl_month = 0.0
+    closed_pnl_year  = 0.0
+    closed_pnl_day   = 0.0
+    closed_wins      = 0
+    closed_count     = 0
+
+    module_closed: dict = {m: {
+        'closed_pnl': 0.0,
+        'closed_pnl_month': 0.0,
+        'closed_pnl_year': 0.0,
+        'trade_count': 0,
+        'wins': 0,
+    } for m in module_keys}
+
+    for ticker, t in settled_tickers.items():
+        try:
+            src = (exit_records[ticker].get('source', t.get('source', 'bot'))
+                   if ticker in exit_records else t.get('source', 'bot'))
+            is_manual = src in ('economics', 'geo', 'manual')
+
+            if ticker in exit_records:
+                ex      = exit_records[ticker]
+                pnl_val = ex.get('realized_pnl')
+                if pnl_val is None:
+                    ep2 = ex.get('entry_price', 50)
+                    xp  = ex.get('exit_price', 50)
+                    ct2 = ex.get('contracts', 0)
+                    pnl_val = round((xp - ep2) * ct2 / 100, 2)
+                pnl_val = round(float(pnl_val), 2)
+            else:
+                r = req.get(
+                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                    timeout=4
+                )
+                if r.status_code != 200:
+                    continue
+                m_data = r.json().get('market', {})
+                lp     = m_data.get('last_price')
+                result = m_data.get('result')
+                if lp is None and not result:
+                    continue
+                if result == 'yes':  lp = 100
+                elif result == 'no': lp = 0
+                side2      = t.get('side', 'no')
+                mp2        = t.get('market_prob', 0.5) or 0.5
+                entry_p2   = round((1 - mp2) * 100) if side2 == 'no' else round(mp2 * 100)
+                contracts2 = t.get('contracts', 0) or 0
+                cost2      = t.get('size_dollars', 25)
+                if contracts2 > 0 and cost2 > 0:
+                    contracts2 = min(contracts2, int(cost2 / max(entry_p2, 1) * 100) + 2)
+                cur_p2  = (100 - lp) if side2 == 'no' else lp
+                pnl_val = round((cur_p2 - entry_p2) * contracts2 / 100, 2)
+
+            closed_pnl_total += pnl_val
+            closed_count     += 1
+            if pnl_val > 0:
+                closed_wins += 1
+
+            if not is_manual:
+                mod_c = classify_module(src, ticker)
+                if mod_c not in module_closed:
+                    mod_c = 'other'
+                module_closed[mod_c]['closed_pnl']  += pnl_val
+                module_closed[mod_c]['trade_count'] += 1
+                if pnl_val > 0:
+                    module_closed[mod_c]['wins'] += 1
+
+            # Period bucketing
+            if ticker in exit_records and exit_records[ticker].get('timestamp'):
+                try:
+                    from datetime import datetime as _dt2
+                    sdate = _dt2.fromisoformat(exit_records[ticker]['timestamp']).date()
+                except Exception:
+                    sdate = settlement_date_from_ticker(ticker)
+            else:
+                sdate = settlement_date_from_ticker(ticker)
+
+            if sdate:
+                if sdate == _today:
+                    closed_pnl_day += pnl_val
+                if sdate.year == _today.year and sdate.month == _today.month:
+                    closed_pnl_month += pnl_val
+                    if not is_manual:
+                        mod_cm = classify_module(src, ticker)
+                        if mod_cm not in module_closed: mod_cm = 'other'
+                        module_closed[mod_cm]['closed_pnl_month'] += pnl_val
+                if sdate.year == _today.year:
+                    closed_pnl_year += pnl_val
+                    if not is_manual:
+                        mod_cy = classify_module(src, ticker)
+                        if mod_cy not in module_closed: mod_cy = 'other'
+                        module_closed[mod_cy]['closed_pnl_year'] += pnl_val
+        except Exception:
+            pass
+
+    # ── Finalize module stats ─────────────────────────────────────────────────
+    modules_out: dict = {}
+    for mod in ['weather', 'crypto', 'fed', 'geo']:
+        oc = module_open.get(mod, {})
+        cc = module_closed.get(mod, {})
+        tc = cc.get('trade_count', 0)
+        wr = round(cc['wins'] / tc * 100, 1) if tc > 0 else None
+        modules_out[mod] = {
+            'open_trades':      oc.get('open_trades', 0),
+            'open_deployed':    round(oc.get('open_deployed', 0.0), 2),
+            'open_pnl':         round(oc.get('open_pnl', 0.0), 2),
+            'closed_pnl':       round(cc.get('closed_pnl', 0.0), 2),
+            'closed_pnl_month': round(cc.get('closed_pnl_month', 0.0), 2),
+            'closed_pnl_year':  round(cc.get('closed_pnl_year', 0.0), 2),
+            'win_rate':         wr,
+            'trade_count':      tc,
+        }
+
+    # ── Account ───────────────────────────────────────────────────────────────
+    deployed     = round(sum(p['cost'] for p in positions), 2)
+    buying_power = round(max(STARTING_CAPITAL - deployed, 0), 2)
+
+    total_bot_trades = sum(m['trade_count'] for m in module_closed.values())
+    total_bot_wins   = sum(m['wins'] for m in module_closed.values())
+    win_rate = round(total_bot_wins / total_bot_trades * 100, 1) if total_bot_trades > 0 else None
+
+    # ── Smart money (from cache) ──────────────────────────────────────────────
+    smart_money = {'direction': 'neutral', 'bull_pct': 0.5, 'traders_sampled': 0}
+    sm_cache = LOGS_DIR / "crypto_smart_money.json"
+    if sm_cache.exists():
+        try:
+            smart_money = json.loads(sm_cache.read_text(encoding='utf-8'))
+        except Exception:
+            pass
+
+    # Write pnl_cache so bot can read correct closed capital
+    try:
+        pnl_cache_path = LOGS_DIR / "pnl_cache.json"
+        with open(pnl_cache_path, 'w', encoding='utf-8') as _f:
+            json.dump({"closed_pnl": round(closed_pnl_total, 2)}, _f)
+    except Exception:
+        pass
+
+    return {
+        'account': {
+            'balance':          round(STARTING_CAPITAL, 2),
+            'buying_power':     buying_power,
+            'deployed':         deployed,
+            'open_pnl':         round(open_pnl_total, 2),
+            'open_cost':        round(open_cost_total, 2),
+            'closed_pnl':       round(closed_pnl_total, 2),
+            'closed_pnl_month': round(closed_pnl_month, 2),
+            'closed_pnl_year':  round(closed_pnl_year, 2),
+            'closed_pnl_day':   round(closed_pnl_day, 2),
+            'total_pnl':        round(open_pnl_total + closed_pnl_total, 2),
+            'win_rate':         win_rate,
+            'total_trades':     total_bot_trades,
+            'mode':             get_mode(),
+        },
+        'positions':   positions,
+        'modules':     modules_out,
+        'smart_money': smart_money,
+    }
+
+
+@app.get("/api/state")
+def get_state():
+    """Single snapshot endpoint: account, positions, module stats, smart money.
+    Fetches Kalshi orderbook once per position — no duplicate network calls.
+    Results cached for 15 seconds.
+    """
+    global _state_cache
+    if _state_cache["data"] is not None and (time.time() - _state_cache["ts"]) < 15:
+        return _state_cache["data"]
+    result = _build_state()
+    _state_cache["ts"] = time.time()
+    _state_cache["data"] = result
+    return result
 
 
