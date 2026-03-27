@@ -156,6 +156,8 @@ def find_econ_opportunities(verbose: bool = True) -> list:
     Main scanner: finds economics market opportunities with edge > 15%.
     All results require human approval before trading.
     """
+    # Scans all ACTIVE_ECON_SERIES for opportunities. KXFED is skipped (requires CME FedWatch
+    # integration), and the strict MIN_EDGE threshold means results are rare but legitimate.
     print('[EconScanner] Starting economics market scan...')
 
     # Pre-fetch all economic data once (avoid multiple API calls)

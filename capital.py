@@ -95,8 +95,16 @@ def get_pnl() -> dict:
     try:
         if _PNL_CACHE_FILE.exists():
             data = json.loads(_PNL_CACHE_FILE.read_text(encoding='utf-8'))
-            result['closed'] = round(float(data.get('closed_pnl', 0.0)), 2)
-            result['open'] = round(float(data.get('open_pnl', 0.0)), 2)
+            # P3-2 fix: wrap individual float() casts in try/except to handle
+            # corrupted or non-numeric values in pnl_cache.json gracefully.
+            try:
+                result['closed'] = round(float(data.get('closed_pnl', 0.0)), 2)
+            except (TypeError, ValueError) as _e:
+                logger.warning(f"[Capital] get_pnl(): invalid closed_pnl value — {_e}")
+            try:
+                result['open'] = round(float(data.get('open_pnl', 0.0)), 2)
+            except (TypeError, ValueError) as _e:
+                logger.warning(f"[Capital] get_pnl(): invalid open_pnl value — {_e}")
             result['total'] = round(result['closed'] + result['open'], 2)
     except Exception as e:
         logger.warning(f"[Capital] get_pnl() failed: {e}")

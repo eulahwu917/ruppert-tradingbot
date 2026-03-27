@@ -264,7 +264,7 @@ def should_enter(signal: dict, capital: float, deployed_today: float) -> dict:
     # Key: use 'side' — matches edge_detector.py output ('yes'/'no')
     side = signal.get('side', '')
     if module == 'weather' and config.WEATHER_DIRECTION_FILTER:
-        if side.upper() != config.WEATHER_DIRECTION_FILTER.upper():
+        if side.lower() != config.WEATHER_DIRECTION_FILTER.lower():  # P3-1: normalize to lowercase for safety
             return {'enter': False, 'size': 0.0,
                     'reason': f'direction_filter: weather only bets {config.WEATHER_DIRECTION_FILTER}, got {side}'}
 

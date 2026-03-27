@@ -82,7 +82,12 @@ def build_trade_entry(opportunity, size, contracts, order_result):
         elif source == 'manual':
             module = 'manual'
         else:
-            module = source  # fallback: use source as module
+            # P2-3 fix: avoid setting module = 'bot' (not a valid module in MIN_CONFIDENCE).
+            # For 'bot' source, infer from ticker prefix; otherwise default to 'other'.
+            if source == 'bot':
+                module = 'weather' if ticker_upper.startswith('KXHIGH') else 'other'
+            else:
+                module = source  # fallback: use source as module (e.g. 'unknown')
 
     return {
         'trade_id':     str(uuid.uuid4()),

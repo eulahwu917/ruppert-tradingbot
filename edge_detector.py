@@ -188,14 +188,27 @@ def parse_date_from_ticker(ticker: str) -> date:
 
 
 def parse_threshold_from_ticker(ticker: str) -> float:
-    """Extract temperature threshold from ticker KXHIGHMIA-26MAR10-B84.5 → 84.5"""
+    """Extract temperature threshold from ticker.
+    Handles both B-band (KXHIGHMIA-26MAR10-B84.5 → 84.5)
+    and T-upper (KXHIGHCHI-26MAR11-T80 → 80.0) formats.
+    """
     try:
         parts = ticker.split('-')
         for part in parts:
-            if part.startswith('B') and '.' in part:
-                return float(part[1:])
-            elif part.startswith('B') and part[1:].isdigit():
-                return float(part[1:])
+            # B-band format: B84.5 or B84
+            if part.startswith('B') and len(part) > 1:
+                val = part[1:]
+                try:
+                    return float(val)
+                except ValueError:
+                    pass
+            # T-upper format: T80 or T84.5 (P1-4 fix: added T support)
+            elif part.startswith('T') and len(part) > 1 and not part.startswith('TM'):
+                val = part[1:]
+                try:
+                    return float(val)
+                except ValueError:
+                    pass
     except Exception:
         pass
     return None
@@ -229,6 +242,21 @@ def analyze_market(market: dict) -> dict | None:
     temp_range   = parse_temp_range_from_title(title)
     city_name    = parse_city_from_title(title)
     market_type  = classify_market_type(temp_range)
+
+    # P1-4 fix: classify_market_type falls back to B_band when temp_range is None.
+    # For T-markets (e.g. KXHIGHCHI-26MAR11-T80), title regex often fails to extract
+    # a range. Use the ticker band portion (3rd segment) to infer market type.
+    if market_type == "B_band" and temp_range is None and threshold_f is not None:
+        parts = ticker.split('-')
+        if len(parts) >= 3:
+            band_part = parts[2].upper()
+            if band_part.startswith('T') and not band_part.startswith('TM'):
+                # T-prefix band = T_upper market (above threshold)
+                market_type = "T_upper"
+                logger.debug(
+                    f"[Edge] {ticker}: T-market inferred from ticker band '{band_part}' "
+                    f"(title regex returned None)"
+                )
 
     # ── Get weather signal ────────────────────────────────────────────────────
     model_prob  = None

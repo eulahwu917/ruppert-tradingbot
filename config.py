@@ -44,6 +44,11 @@ ECON_DAILY_CAP_PCT    = 0.04   # 4% of capital/day
 # Per-trade position size cap — percentage of total capital
 MAX_POSITION_PCT = 0.01   # 1% of capital per trade (replaces fixed $25 caps)
 
+# Legacy fixed-dollar position caps — used by trader.py legacy fallback (risk.py inlined)
+# These are safety backstops; actual sizing is done by strategy.py MAX_POSITION_PCT.
+MAX_POSITION_SIZE   = 100.0   # P0-1 fix: was deleted; restored for trader.py legacy path
+MAX_DAILY_EXPOSURE  = 700.0   # P0-1 fix: was deleted; restored for trader.py legacy path
+
 # Risk settings - Weather / Economics
 MIN_EDGE_THRESHOLD = 0.12      # Min edge (12%) to trigger a trade
 MIN_MARKET_LIQUIDITY = 100.00  # Min $ volume in market to trade
@@ -53,11 +58,11 @@ CRYPTO_MIN_EDGE_THRESHOLD = 0.12   # 12% min edge (consistent with weather)
 CRYPTO_SIGNAL_THRESHOLD   = 3.5    # bull/bear score threshold to declare directional signal
 
 # Auto-trade settings
-# Weather + Crypto = fully autonomous (no notification, no approval)
-# Geo = OFF until Phase 4 is validated - David decides when to enable
+# Weather + Crypto + Geo = fully autonomous in DEMO (data collection)
+# Geo = ON in DEMO for data gathering — LLM pipeline (Haiku screen + Sonnet estimate)
 WEATHER_AUTO_TRADE  = True   # Bot executes without asking
 CRYPTO_AUTO_TRADE   = True   # Bot executes without asking
-GEO_AUTO_TRADE      = False  # Disabled: geopolitical scanner has no edge signal (news_volume only, not calibrated)
+GEO_AUTO_TRADE      = True   # DEMO: ON for data collection (LLM edge pipeline, not news_volume)
 ECON_AUTO_TRADE       = True    # DEMO: fully autonomous (Phase 5)
 ECON_MIN_EDGE         = 0.12   # 12% min edge to trigger a trade
 ECON_MIN_VOLUME       = 100    # minimum market volume (contracts) to consider

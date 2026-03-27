@@ -147,7 +147,7 @@ def classify_module(src: str, ticker: str) -> str:
         return 'weather'
     if src == 'crypto' or (src == 'bot' and (
         t.startswith('KXBTC') or t.startswith('KXETH') or
-        t.startswith('KXXRP') or t.startswith('KXDOGE')
+        t.startswith('KXXRP') or t.startswith('KXSOL') or t.startswith('KXDOGE')
     )):
         return 'crypto'
     if src == 'fed' or t.startswith('KXFED') or t.startswith('KXCPI'):

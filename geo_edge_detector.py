@@ -26,6 +26,12 @@ def _call_claude(prompt, model='haiku', timeout=30):
     """
     Call Claude CLI via subprocess. Returns parsed JSON or None on failure.
 
+    P1-5 note: This function uses the `claude --print` CLI, NOT the Anthropic
+    Python client (anthropic.Anthropic()). The CLI picks up credentials from the
+    environment (ANTHROPIC_API_KEY env var or ~/.config/claude/credentials).
+    No manual API key loading is needed here. If the CLI is not installed or
+    authenticated, _call_claude will return None (handled gracefully).
+
     Args:
         prompt: Text prompt to send
         model: 'haiku' or 'sonnet'

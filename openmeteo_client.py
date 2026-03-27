@@ -569,13 +569,28 @@ def get_current_conditions(series_ticker: str) -> dict:
         if current_f is not None:
             current_f = round(current_f + bias, 1)
 
-        # Hours since midnight in city timezone (approximate from UTC offset)
+        # P1-1 fix: hours since midnight in the CITY'S local timezone (not UTC).
+        # Open-Meteo returns `current.time` as a local time string when timezone param
+        # is set (e.g. "2026-03-26T15:00" in America/Chicago = 15:00 local, not UTC).
+        # We use zoneinfo to convert to local time so same-day logic fires correctly.
         current_time_str = data.get("current", {}).get("time", "")
         hours_into_day   = 12  # default mid-day
         if current_time_str:
             try:
-                dt             = datetime.fromisoformat(current_time_str.replace("Z", "+00:00"))
-                hours_into_day = dt.hour
+                # Open-Meteo returns naive local time when timezone is set in params.
+                # Parse it directly — the API already adjusts for the city timezone.
+                dt = datetime.fromisoformat(current_time_str)
+                if dt.tzinfo is None:
+                    # Naive string from Open-Meteo = already in city local time
+                    hours_into_day = dt.hour
+                else:
+                    # If somehow tz-aware, convert to city local time
+                    try:
+                        import zoneinfo
+                        city_tz = zoneinfo.ZoneInfo(city["timezone"])
+                        hours_into_day = dt.astimezone(city_tz).hour
+                    except Exception:
+                        hours_into_day = dt.hour
             except Exception:
                 pass
 

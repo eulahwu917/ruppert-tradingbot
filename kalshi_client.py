@@ -227,4 +227,4 @@ if __name__ == '__main__':
     markets = client.search_markets('temperature')
     print(f"Found {len(markets)} weather markets")
     for m in markets[:5]:
-        print(f"  - {m.ticker}: {m.title}")
+        print(f"  - {m.get('ticker')}: {m.get('title')}")

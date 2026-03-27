@@ -76,6 +76,9 @@ except Exception:
 
 # ΓöÇΓöÇ STEP 1: POSITION CHECK (every run) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 print("\n[1] Position check...")
+# P0-3 fix: initialize actions_taken BEFORE the try block so it's always in scope.
+# Was previously defined inside try, causing NameError if STEP 1 raised early.
+actions_taken = []
 try:
     from openmeteo_client import get_full_weather_signal
     from edge_detector import parse_date_from_ticker, parse_threshold_from_ticker
@@ -89,7 +92,6 @@ try:
     open_positions = [p for p in open_positions if p.get('action') != 'exit']
 
     print(f"  {len(open_positions)} open position(s)")
-    actions_taken = []
 
     for pos in open_positions:
         ticker = pos.get('ticker', '')

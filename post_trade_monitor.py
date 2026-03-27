@@ -58,8 +58,11 @@ def load_open_positions():
         LOGS / f"trades_{today}.jsonl",
     ]
 
-    entries_by_ticker = {}
-    exit_tickers = set()
+    # P1-2 fix: key by (ticker, side) tuple instead of ticker alone.
+    # Previously keyed by ticker only, so holding both YES and NO on the same
+    # market would cause the second entry to overwrite the first.
+    entries_by_key = {}
+    exit_keys = set()
 
     for trade_log in logs_to_check:
         if not trade_log.exists():
@@ -73,14 +76,16 @@ def load_open_positions():
             except Exception:
                 continue
             ticker = rec.get('ticker', '')
+            side = rec.get('side', '')
             action = rec.get('action', 'buy')
+            key = (ticker, side)
             if action == 'exit':
-                exit_tickers.add(ticker)
+                exit_keys.add(key)
             else:
-                entries_by_ticker[ticker] = rec
+                entries_by_key[key] = rec
 
     # Return only positions that haven't been exited
-    return [rec for ticker, rec in entries_by_ticker.items() if ticker not in exit_tickers]
+    return [rec for key, rec in entries_by_key.items() if key not in exit_keys]
 
 
 def get_market_data(ticker):
