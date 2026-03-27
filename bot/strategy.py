@@ -260,14 +260,6 @@ def should_enter(signal: dict, capital: float, deployed_today: float) -> dict:
         return {'enter': False, 'size': 0.0,
                 'reason': f'insufficient_edge ({edge:.3f} < {min_edge} for {module})'}
 
-    # --- Direction filter: only trade NO on weather (backtest validation 2026-03-13) ---
-    # Key: use 'side' — matches edge_detector.py output ('yes'/'no')
-    side = signal.get('side', '')
-    if module == 'weather' and config.WEATHER_DIRECTION_FILTER:
-        if side.lower() != config.WEATHER_DIRECTION_FILTER.lower():  # P3-1: normalize to lowercase for safety
-            return {'enter': False, 'size': 0.0,
-                    'reason': f'direction_filter: weather only bets {config.WEATHER_DIRECTION_FILTER}, got {side}'}
-
     # --- Global open exposure cap (real-time 70% check) ---
     open_position_value = signal.get('open_position_value', 0.0)
     if not check_open_exposure(capital, open_position_value):

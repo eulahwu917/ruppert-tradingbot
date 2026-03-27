@@ -91,10 +91,6 @@ GEO_MIN_DAYS_TO_EXPIRY   = 1       # No same-day expiry for geo markets
 CHECK_INTERVAL_HOURS = 6       # How often to scan for opportunities
 SAME_DAY_SKIP_AFTER_HOUR = 14  # skip same-day weather markets after 2pm local
 
-# Direction filter - only bet NO on weather markets
-# Backtest 2026-03-13: NO=90.4% win rate, YES=14.9%
-WEATHER_DIRECTION_FILTER = "NO"
-
 # Minimum confidence thresholds per module
 MIN_CONFIDENCE = {
     'weather': 0.25,

@@ -328,21 +328,6 @@ def run_weather_scan(dry_run=True):
             except Exception:
                 pass
 
-        # ── Direction filter: hard gate before strategy (backtest: NO=90% WR, YES=15%) ─
-        if config.WEATHER_DIRECTION_FILTER:
-            _dir = config.WEATHER_DIRECTION_FILTER.lower()
-            _before = len(opportunities)
-            _blocked_yes = [o for o in opportunities if o.get('side', '') != _dir]
-            opportunities = [o for o in opportunities if o.get('side', '') == _dir]
-            _skipped = _before - len(opportunities)
-            if _skipped:
-                log_activity(f"[Weather] Direction filter: {_skipped} {('YES' if _dir == 'no' else 'NO')} trades blocked (filter={config.WEATHER_DIRECTION_FILTER})")
-            # Shadow-log blocked YES signals that had edge above min threshold
-            from edge_detector import _shadow_log_yes_signal
-            for _blk in _blocked_yes:
-                if abs(_blk.get('edge', 0)) >= config.MIN_EDGE_THRESHOLD:
-                    _shadow_log_yes_signal(_blk)
-
         # ── Strategy gate: filter opportunities through should_enter() ────────
         # Compute weather daily cap and open exposure dynamically
         _weather_daily_cap = total_capital * getattr(config, 'WEATHER_DAILY_CAP_PCT', 0.07)
