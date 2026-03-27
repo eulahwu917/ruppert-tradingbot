@@ -1,11 +1,74 @@
 """
 Trade Executor
 Handles order placement with pre-trade checks.
+
+Note: risk.py was a v1 legacy module — deleted during cleanup (2026-03-26).
+contracts_from_size and check_pre_trade are inlined here so trader.py has
+no external dependency on deleted code.
 """
 from kalshi_client import KalshiClient
-from risk import check_pre_trade, contracts_from_size
-from logger import log_trade, log_activity
+from logger import log_trade, log_activity, get_daily_exposure
 import config
+
+
+# ── Inlined from deleted risk.py (v1 legacy) ─────────────────────────────────
+
+def contracts_from_size(size_dollars: float, price_cents: float) -> int:
+    """Convert a dollar size into a contract count at the given price in cents."""
+    if price_cents <= 0:
+        return 0
+    price_dollars = price_cents / 100
+    contracts = int(size_dollars / price_dollars)
+    return max(1, contracts)
+
+
+def _legacy_kelly_fraction(prob: float, bet_price_cents: float) -> float:
+    """Quarter-Kelly fraction (legacy, from risk.py). Used only by check_pre_trade fallback."""
+    if prob <= 0 or prob >= 1 or bet_price_cents <= 0:
+        return 0
+    q = 1 - prob
+    b = (100 - bet_price_cents) / bet_price_cents
+    if b <= 0:
+        return 0
+    kelly = (b * prob - q) / b
+    return max(0, kelly * 0.25)
+
+
+def _legacy_calculate_position_size(bankroll: float, opportunity: dict) -> float:
+    """Legacy position sizing (from risk.py). Falls back to MAX_POSITION_SIZE cap."""
+    win_prob = opportunity.get('win_prob', opportunity['noaa_prob'])
+    bet_price = opportunity.get('bet_price', opportunity['yes_price'])
+    fraction = _legacy_kelly_fraction(win_prob, bet_price)
+    ideal_size = bankroll * fraction
+    size = min(ideal_size, config.MAX_POSITION_SIZE)
+    daily_used = get_daily_exposure()
+    remaining_daily = config.MAX_DAILY_EXPOSURE - daily_used
+    if remaining_daily <= 0:
+        print(f'[Risk] Daily exposure limit reached (${config.MAX_DAILY_EXPOSURE}). No more trades today.')
+        return 0
+    size = min(size, remaining_daily)
+    if size < 1.0:
+        return 0
+    return round(size, 2)
+
+
+def check_pre_trade(opportunity: dict, bankroll: float):
+    """
+    Legacy pre-trade risk check (from risk.py). Used only when strategy_size is not provided.
+    Returns: (approved: bool, reason: str, size: float, contracts: int)
+    """
+    size = _legacy_calculate_position_size(bankroll, opportunity)
+    if size <= 0:
+        return False, 'Daily exposure limit reached or Kelly says skip', 0, 0
+    side = opportunity['side']
+    price_cents = opportunity['yes_price'] if side == 'yes' else (100 - opportunity['yes_price'])
+    contracts = contracts_from_size(size, price_cents)
+    if contracts <= 0:
+        return False, 'Position too small to be meaningful', 0, 0
+    return True, 'Trade approved', size, contracts
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 
 
 class Trader:
