@@ -24,7 +24,7 @@ import config
 DRY_RUN = getattr(config, 'DRY_RUN', True)
 
 from kalshi_client import KalshiClient
-from logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock
+from logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock, normalize_entry_price
 
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -102,12 +102,7 @@ def get_market_data(ticker):
 def check_weather_position(pos, market):
     """Check weather exit conditions. Returns (action, reason) or (None, None)."""
     side = pos.get('side', 'no')
-    entry_price = pos.get('entry_price') or pos.get('market_prob', 0.5) * 100
-    if side == 'no':
-        entry_price = entry_price if isinstance(entry_price, (int, float)) else 50
-        # Normalize: if entry_price looks like a probability (0-1), convert to cents
-        if 0 < entry_price < 1:
-            entry_price = round((1 - entry_price) * 100)
+    entry_price = normalize_entry_price(pos)
 
     no_ask = market.get('no_ask') or 50
     yes_ask = market.get('yes_ask') or 50
@@ -151,9 +146,7 @@ def check_weather_position(pos, market):
 def check_crypto_position(pos, market):
     """Check crypto exit conditions. Returns (action, reason) or (None, None)."""
     side = pos.get('side', 'no')
-    entry_price = pos.get('entry_price') or pos.get('market_prob', 0.5) * 100
-    if isinstance(entry_price, float) and 0 < entry_price < 1:
-        entry_price = round((1 - entry_price) * 100) if side == 'no' else round(entry_price * 100)
+    entry_price = normalize_entry_price(pos)
 
     no_ask = market.get('no_ask') or 50
     yes_ask = market.get('yes_ask') or 50

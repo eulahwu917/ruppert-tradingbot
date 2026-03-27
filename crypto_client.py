@@ -188,7 +188,7 @@ def get_funding_rates(symbol: str, limit: int = FUNDING_RATE_LIMIT) -> list | No
 
 def _compute_funding_z_scores() -> dict:
     """
-    Compute funding rate z-scores for BTC, ETH, XRP.
+    Compute funding rate z-scores for BTC, ETH, XRP, DOGE.
 
     z_score = (current_rate - rolling_mean) / rolling_std
     Contrarian:
@@ -200,6 +200,7 @@ def _compute_funding_z_scores() -> dict:
           'btc': float or None,
           'eth': float or None,
           'xrp': float or None,
+          'doge': float or None,   # DOGEUSDT perpetual
           'raw_rates': {symbol: latest_rate},
           'available': bool,
         }
