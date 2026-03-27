@@ -120,8 +120,11 @@ class KalshiClient:
                     data = resp.json()
                     markets = data.get('markets', [])
 
-                    # Enrich each market with real orderbook prices
-                    # (REST /markets endpoint returns null for bid/ask fields)
+                    # Enrich each market with real orderbook prices.
+                    # The REST /markets list endpoint returns null for yes_ask/yes_bid/
+                    # no_ask/no_bid; the orderbook endpoint (orderbook_fp) has the live
+                    # bid/ask via no_dollars and yes_dollars (float-dollar fractions, 0–1).
+                    # volume/open_interest come from the market list response directly.
                     for market in markets:
                         ticker = market.get('ticker', '')
                         if not ticker:
@@ -129,7 +132,9 @@ class KalshiClient:
                         try:
                             ob_url = f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook'
                             ob_resp = _get_with_retry(ob_url, timeout=5)
-                            if ob_resp is not None and ob_resp.status_code == 200:
+                            if ob_resp is None:
+                                print(f"  [Warning] Orderbook fetch exhausted retries for {ticker} — bid/ask will be null")
+                            elif ob_resp.status_code == 200:
                                 ob = ob_resp.json().get('orderbook_fp', {})
                                 no_bids  = ob.get('no_dollars', [])   # [[price_str, vol_str], ...]
                                 yes_bids = ob.get('yes_dollars', [])
@@ -145,7 +150,7 @@ class KalshiClient:
                                     market['no_ask']  = 100 - market['yes_bid']  # implied
                                 if not no_bids and not yes_bids:
                                     print(f"  [Warning] Empty orderbook for {ticker} — bid/ask will be null")
-                            elif ob_resp is not None:
+                            else:
                                 print(f"  [Warning] Orderbook fetch failed for {ticker}: HTTP {ob_resp.status_code} — bid/ask will be null")
                         except Exception as e:
                             print(f"  [Warning] Orderbook error for {ticker}: {e} — bid/ask will be null")
@@ -157,10 +162,77 @@ class KalshiClient:
 
         return all_markets
 
+    def get_markets(self, series_ticker, status='open', limit=30):
+        """
+        Fetch markets for a series ticker via raw HTTP — bypasses SDK Pydantic deserialization.
+        Returns a list of plain dicts enriched with live orderbook bid/ask prices.
+        """
+        url = f"{DEMO_HOST if self.environment == 'demo' else PROD_HOST}/markets"
+        params = {'series_ticker': series_ticker, 'status': status, 'limit': limit}
+        resp = _get_with_retry(url, params=params, timeout=10)
+        if resp is None or resp.status_code != 200:
+            return []
+        markets = resp.json().get('markets', [])
+
+        for market in markets:
+            ticker = market.get('ticker', '')
+            if not ticker:
+                continue
+            try:
+                ob_url = f"{DEMO_HOST if self.environment == 'demo' else PROD_HOST}/markets/{ticker}/orderbook"
+                ob_resp = _get_with_retry(ob_url, timeout=5)
+                if ob_resp is not None and ob_resp.status_code == 200:
+                    ob = ob_resp.json().get('orderbook_fp', {})
+                    no_bids  = ob.get('no_dollars', [])
+                    yes_bids = ob.get('yes_dollars', [])
+                    if no_bids:
+                        best_no_bid = max(float(p) for p, v in no_bids)
+                        market['no_bid']  = int(round(best_no_bid * 100))
+                        market['yes_ask'] = 100 - market['no_bid']
+                    if yes_bids:
+                        best_yes_bid = max(float(p) for p, v in yes_bids)
+                        market['yes_bid'] = int(round(best_yes_bid * 100))
+                        market['no_ask']  = 100 - market['yes_bid']
+                else:
+                    print(f"  [Warning] Orderbook fetch failed for {ticker}: HTTP {ob_resp.status_code if ob_resp else 'timeout'}")
+            except Exception as e:
+                print(f"  [Warning] Orderbook error for {ticker}: {e}")
+            time.sleep(0.05)
+
+        return markets
+
     def get_market(self, ticker):
-        """Get a specific market by ticker."""
-        result = self.client.get_market(ticker)
-        return result.market
+        """Get a specific market by ticker via raw HTTP — bypasses SDK Pydantic deserialization."""
+        return self._get_market_raw(ticker)
+
+    def _get_market_raw(self, ticker):
+        """Raw HTTP fetch for a single market, with orderbook enrichment."""
+        host = DEMO_HOST if self.environment == 'demo' else PROD_HOST
+        url = f"{host}/markets/{ticker}"
+        resp = _get_with_retry(url, timeout=10)
+        if resp is None or resp.status_code != 200:
+            return {}
+        market = resp.json().get('market', {}) or {}
+        if not market:
+            return {}
+        try:
+            ob_url = f"{host}/markets/{ticker}/orderbook"
+            ob_resp = _get_with_retry(ob_url, timeout=5)
+            if ob_resp is not None and ob_resp.status_code == 200:
+                ob = ob_resp.json().get('orderbook_fp', {})
+                no_bids  = ob.get('no_dollars', [])
+                yes_bids = ob.get('yes_dollars', [])
+                if no_bids:
+                    best_no_bid = max(float(p) for p, v in no_bids)
+                    market['no_bid']  = int(round(best_no_bid * 100))
+                    market['yes_ask'] = 100 - market['no_bid']
+                if yes_bids:
+                    best_yes_bid = max(float(p) for p, v in yes_bids)
+                    market['yes_bid'] = int(round(best_yes_bid * 100))
+                    market['no_ask']  = 100 - market['yes_bid']
+        except Exception as e:
+            print(f"  [Warning] Orderbook error for {ticker}: {e}")
+        return market
 
     def _demo_block(self, method_name):
         """Called by order-placing methods in demo mode. Logs and returns a safe stub."""
