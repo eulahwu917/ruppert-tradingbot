@@ -70,9 +70,18 @@ class KalshiClient:
             print("[Kalshi] DEMO mode — all order methods are BLOCKED. Read-only API calls are active.")
 
     def get_balance(self):
-        """Get account balance in dollars."""
-        result = self.client.get_balance()
-        return result.balance / 100  # Kalshi returns cents
+        """Get account balance in dollars. Retries up to 3 times on transient errors."""
+        delay = 1.0
+        for attempt in range(3):
+            try:
+                result = self.client.get_balance()
+                return result.balance / 100  # Kalshi returns cents
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                print(f"  [Balance] Error fetching balance: {e} — retrying in {delay:.1f}s (attempt {attempt+1}/3)")
+                time.sleep(delay)
+                delay *= 2
 
     def search_markets(self, keyword):
         """

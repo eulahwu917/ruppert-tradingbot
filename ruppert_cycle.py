@@ -74,6 +74,39 @@ try:
 except Exception:
     OPEN_POSITION_VALUE = 0.0  # safe default: won't block entry
 
+# ── STARTUP: ORPHAN POSITION RECONCILIATION ────────────────────────────────
+print("\n[0] Orphan position reconciliation...")
+try:
+    from post_trade_monitor import load_open_positions as _load_log_positions
+    _kalshi_positions = client.get_positions()
+    _logged_positions = _load_log_positions()
+    _logged_keys = {(p.get('ticker', ''), p.get('side', '')) for p in _logged_positions}
+
+    for _kpos in _kalshi_positions:
+        try:
+            _ticker = _kpos.ticker if hasattr(_kpos, 'ticker') else _kpos.get('ticker', '')
+            _raw_pos = getattr(_kpos, 'position', None)
+            if _raw_pos is None:
+                _raw_pos = _kpos.get('position', 0)
+            _side = 'yes' if _raw_pos > 0 else 'no'
+            _contracts = abs(_raw_pos)
+        except Exception as _e:
+            print(f"  [Orphan] Could not parse position record: {_e}")
+            continue
+
+        if not _ticker or _contracts == 0:
+            continue
+        if (_ticker, _side) not in _logged_keys:
+            _msg = (f"Orphan position detected: {_ticker} {_side} {_contracts} contracts"
+                    " — not in trade log. Manual review required.")
+            print(f"  [WARNING] {_msg}")
+            push_alert('warning', _msg, ticker=_ticker)
+
+    print(f"  Reconciliation complete — {len(_kalshi_positions)} Kalshi position(s),"
+          f" {len(_logged_positions)} log position(s)")
+except Exception as _recon_err:
+    print(f"  [Orphan] Reconciliation failed (non-blocking): {_recon_err}")
+
 # ΓöÇΓöÇ STEP 1: POSITION CHECK (every run) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 print("\n[1] Position check...")
 # P0-3 fix: initialize actions_taken BEFORE the try block so it's always in scope.
