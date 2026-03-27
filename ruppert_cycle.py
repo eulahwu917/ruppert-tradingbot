@@ -49,6 +49,27 @@ def log_cycle(event, data=None):
         f.write(json.dumps(entry) + '\n')
 
 
+def run_post_cycle_exposure_check():
+    """Monitoring-only: log a warning if total deployed capital exceeds 70% of portfolio."""
+    try:
+        total_deployed = get_daily_exposure()
+        total_capital  = get_capital()
+        if total_capital <= 0:
+            log_activity('[RiskCheck] Skipped — total_capital is zero or unavailable')
+            return
+        exposure_pct = total_deployed / total_capital
+        if exposure_pct > 0.70:
+            log_activity(f'[RiskCheck] ⚠️ Post-cycle exposure at {exposure_pct:.1%} — above 70% cap')
+            send_telegram(
+                f'⚠️ Ruppert exposure check: {exposure_pct:.1%} of capital deployed '
+                f'(above 70% soft cap). Review positions.'
+            )
+        else:
+            log_activity(f'[RiskCheck] Post-cycle exposure: {exposure_pct:.1%} — within cap')
+    except Exception as _e:
+        log_activity(f'[RiskCheck] Error during exposure check: {_e}')
+
+
 # ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 print(f"\n{'='*60}")
 print(f"  RUPPERT CYCLE  mode={MODE.upper()}  {ts()}")
@@ -446,6 +467,7 @@ summary = {
     'smart_money':    direction,
     'auto_exits':     len(actions_taken) if 'actions_taken' in dir() else 0,
 }
+run_post_cycle_exposure_check()
 log_cycle('done', summary)
 
 print(f"\n{'='*60}")

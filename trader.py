@@ -7,7 +7,7 @@ contracts_from_size and check_pre_trade are inlined here so trader.py has
 no external dependency on deleted code.
 """
 from kalshi_client import KalshiClient
-from logger import log_trade, log_activity, get_daily_exposure
+from logger import log_trade, log_activity, get_daily_exposure, send_telegram
 import config
 
 
@@ -109,6 +109,8 @@ class Trader:
             log_activity(f"  Using strategy size ${size:.2f} (skipping risk.py re-sizing)")
         else:
             # Pre-trade risk check via risk.py (legacy fallback)
+            log_activity(f'  [Trader] ⚠️ strategy_size missing for {ticker} — falling back to legacy sizing. Check scanner output.')
+            send_telegram(f'⚠️ Legacy fallback triggered for {ticker}. strategy_size was not set by scanner — investigate.')
             approved, reason, size, contracts = check_pre_trade(opportunity, self.bankroll)
             if not approved:
                 log_activity(f"  Skipped: {reason}")
