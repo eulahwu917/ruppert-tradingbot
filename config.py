@@ -9,15 +9,6 @@ import os
 SECRETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'secrets')
 CONFIG_FILE = os.path.join(SECRETS_DIR, 'kalshi_config.json')
 
-# Telegram chat ID — loaded from openclaw.json (same source as bot token)
-_OPENCLAW_JSON = os.path.normpath(os.path.join(os.path.dirname(__file__), '..', '..', 'openclaw.json'))
-try:
-    with open(_OPENCLAW_JSON, 'r', encoding='utf-8') as _f:
-        _openclaw = json.load(_f)
-    TELEGRAM_CHAT_ID = _openclaw.get('channels', {}).get('telegram', {}).get('chatId', '')
-except Exception:
-    TELEGRAM_CHAT_ID = ''
-
 # DRY_RUN: derived from mode.json — True = demo (no real orders), False = live
 _MODE_FILE = os.path.join(os.path.dirname(__file__), 'mode.json')
 try:

@@ -290,21 +290,20 @@ def get_computed_capital():
 
 
 def send_telegram(message: str) -> bool:
-    """Send a message directly to David via Telegram Bot API."""
-    import urllib.request, urllib.parse
-    import config as _config
+    """Send a message to David via the openclaw CLI (routes through gateway)."""
+    import subprocess
     try:
-        config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'openclaw.json')
-        config_path = os.path.normpath(config_path)
-        with open(config_path, 'r', encoding='utf-8') as f:
-            import json as _json
-            cfg = _json.load(f)
-        bot_token = cfg['channels']['telegram']['botToken']
-        chat_id = _config.TELEGRAM_CHAT_ID
-        url = f'https://api.telegram.org/bot{bot_token}/sendMessage'
-        data = urllib.parse.urlencode({'chat_id': chat_id, 'text': message}).encode()
-        req = urllib.request.Request(url, data=data)
-        urllib.request.urlopen(req, timeout=10)
+        result = subprocess.run(
+            ['openclaw', 'message', 'send',
+             '--channel', 'telegram',
+             '-t', '5003590611',
+             '-m', message],
+            capture_output=True, text=True, timeout=30,
+            shell=True,
+        )
+        if result.returncode != 0:
+            print(f"[WARN] send_telegram failed: {result.stderr.strip()}")
+            return False
         return True
     except Exception as e:
         print(f"[WARN] send_telegram failed: {e}")
