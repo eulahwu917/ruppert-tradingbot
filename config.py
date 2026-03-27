@@ -113,5 +113,3 @@ OPTIMIZER_BRIER_FLAG         = 0.25  # flag if Brier score above this (worse cal
 OPTIMIZER_HOLD_TIME_FLAG_HRS = 12    # flag if avg hold time above this
 OPTIMIZER_CAP_UTIL_FLAG      = 0.30  # flag if avg cap utilization below 30%
 OPTIMIZER_MAX_AVG_SIZE       = 40.0  # flag if avg position size above this
-
-# audit complete 2026-03-26
