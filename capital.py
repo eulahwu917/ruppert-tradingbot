@@ -30,7 +30,7 @@ def get_capital() -> float:
     try:
         # Try Kalshi API first (LIVE mode)
         import config
-        if getattr(config, 'DEMO_MODE', True) is False:
+        if getattr(config, 'DRY_RUN', True) is False:
             try:
                 from kalshi_client import KalshiClient
                 return KalshiClient().get_balance()
