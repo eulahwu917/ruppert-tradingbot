@@ -55,6 +55,7 @@ class Trader:
         if self.dry_run:
             log_activity(f"  [DRY RUN] Would have placed order — skipping actual execution")
             opportunity['scan_contracts'] = contracts
+            opportunity['fill_contracts'] = contracts
             opportunity['scan_price'] = price_cents
             opportunity['fill_price'] = price_cents
             log_trade(opportunity, size, contracts, {'dry_run': True, 'status': 'simulated'})
