@@ -546,7 +546,8 @@ def get_active_positions():
         if not ticker: continue
         if ticker in exited: continue
         if ticker in seen: continue  # already have opening entry
-        if t.get('action') not in ('open', 'buy'): continue  # only genuine open entries
+        action = (t.get('action') or '').lower()
+        if action != 'open' and not action.startswith('buy'): continue  # only genuine open entries
         if is_settled_ticker(ticker): continue  # skip past-date markets
         seen[ticker] = t
 
