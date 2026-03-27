@@ -2,13 +2,15 @@
 Economics Market Scanner
 Scans Kalshi economics markets and uses BLS/FRED data to identify edge.
 
-ALL opportunities flagged here are SEMI-AUTO — David must approve before any trade executes.
+Phase 5: FULLY AUTONOMOUS in DEMO — routes through bot/strategy.py for sizing.
+Live mode requires config.ECON_AUTO_TRADE = True.
 
 Author: Ruppert (AI Trading Analyst)
-Updated: 2026-03-10
+Updated: 2026-03-26
 """
 import requests
 import sys
+import config
 from datetime import datetime, date
 from economics_client import (
     get_cpi_data,
@@ -31,8 +33,8 @@ ACTIVE_ECON_SERIES = [
     'KXWRECSS',      # Country recession markets — MEDIUM VOLUME
 ]
 
-# Minimum edge threshold to flag an opportunity
-MIN_EDGE = 0.15  # 15% edge minimum
+# Minimum edge threshold — sourced from config.py (Phase 5)
+MIN_EDGE = config.ECON_MIN_EDGE         # 12% standard gate
 MIN_VOLUME = 100  # Minimum market volume (contracts) to consider
 
 # Confidence filters
@@ -144,8 +146,7 @@ def _build_opportunity(market: dict, signal: dict, market_prob: float) -> dict:
         'implied_return': implied_return,
         'reasoning': signal.get('reasoning', ''),
         'type': 'economics',
-        'auto_trade': False,            # ALWAYS semi-auto
-        'requires_human_review': True,  # David must approve
+        'auto_trade': config.ECON_AUTO_TRADE,
         'flagged_at': datetime.now().isoformat(),
     }
 
@@ -216,7 +217,7 @@ def find_econ_opportunities(verbose: bool = True) -> list:
     opportunities.sort(key=lambda x: x.get('abs_edge', 0), reverse=True)
 
     print(f'\n[EconScanner] Found {len(opportunities)} opportunities with edge > {MIN_EDGE:.0%}')
-    print('[EconScanner] *** ALL require David\'s approval before trading ***\n')
+    print(f'[EconScanner] Mode: {"AUTO" if config.ECON_AUTO_TRADE else "MANUAL"}\n')
 
     if verbose and opportunities:
         print(f'{"Ticker":<35} {"Direction":>9} {"Mkt%":>5} {"Model%":>7} {"Edge":>6} {"Conf":>7} {"Vol":>8}')
@@ -277,4 +278,4 @@ if __name__ == '__main__':
         print(f'  Implied return: {best["implied_return"]:.1%}' if best.get('implied_return') else '')
         print(f'  {best["reasoning"][:200]}')
 
-    print(f'\n*** SEMI-AUTO MODE: All trades require David approval ***')
+    print(f'\n*** Mode: {"FULLY AUTONOMOUS" if config.ECON_AUTO_TRADE else "SEMI-AUTO (David approval)"} ***')

@@ -1,6 +1,6 @@
 """
 Ruppert Kalshi Trading Bot — Full System
-Modules: Weather, Economics, Gaming Scout, Geopolitical
+Modules: Weather, Economics, Geopolitical
 
 Usage:
   python main.py --test         # Test API connection
@@ -9,28 +9,29 @@ Usage:
   python main.py --loop         # Run continuously every 6 hours
   python main.py --weather      # Weather module only
   python main.py --econ         # Economics module only
-  python main.py --scout        # Gaming/tech scout only
   python main.py --geo          # Geopolitical scanner only
 """
 import os
 import sys
 import json
+import math
 import time
+import requests
 import schedule
-from datetime import datetime
+from datetime import date, datetime
 
 from kalshi_client import KalshiClient
 from edge_detector import find_opportunities
 from trader import Trader
-from logger import log_activity, get_daily_summary, get_daily_exposure, get_computed_capital
+from logger import log_activity, log_trade, get_daily_summary, get_daily_exposure, get_computed_capital
+from capital import get_capital, get_buying_power
 from economics_scanner import find_econ_opportunities
-from gaming_scout import run_daily_scout, format_scout_brief
 from geopolitical_scanner import run_geo_scan, format_geo_brief
 from best_bets_scanner import find_best_bets
 import config
 from bot.strategy import (
     should_enter, should_add, should_exit,
-    check_daily_cap, calculate_position_size,
+    check_daily_cap, check_open_exposure, calculate_position_size,
     get_strategy_summary,
 )
 
@@ -87,6 +88,7 @@ def _opp_to_signal(opp: dict, module: str = 'weather') -> dict:
         'hours_to_settlement': round(hours_to_settlement, 2),
         'module':              module,
         'vol_ratio':           1.0,
+        'side':                opp.get('side', ''),
     }
 
 
@@ -248,16 +250,16 @@ def run_weather_scan(dry_run=True):
         # ── Daily cap check ───────────────────────────────────────────────────
         # Use computed capital (deposits + realized P&L) — NOT client.get_balance()
         # which returns a stale Kalshi API demo balance.
-        try:  # W3: guard against get_computed_capital() raising an exception
-            total_capital = get_computed_capital()
+        try:  # W3: guard against get_capital() raising an exception
+            total_capital = get_capital()
         except Exception as _cap_err:
             import sys as _sys
             print(
-                f"[WARNING] run_weather_scan: get_computed_capital() failed: {_cap_err} "
-                "— using $400.00 fallback.",
+                f"[WARNING] run_weather_scan: get_capital() failed: {_cap_err} "
+                "— using $10,000.00 fallback.",
                 file=_sys.stderr,
             )
-            total_capital = 400.0
+            total_capital = 10000.0  # Fresh start 2026-03-26 — was 400.0
         deployed_today = get_daily_exposure()
         cap_remaining  = check_daily_cap(total_capital, deployed_today)
         log_activity(
@@ -274,23 +276,36 @@ def run_weather_scan(dry_run=True):
         markets = client.search_markets('temperature')
         log_activity(f"[Weather] Fetched {len(markets)} markets")
 
-        # Filter: skip same-day markets after 14:00 UTC (daily high already set)
+        # Filter: skip same-day markets after SAME_DAY_SKIP_AFTER_HOUR (local time)
         import datetime as _dt
-        _now_utc_hour = _dt.datetime.utcnow().hour
+        from edge_detector import parse_date_from_ticker
+        _now_local_hour = _dt.datetime.now().hour
         _today = _dt.date.today()
+        _skip_hour = getattr(config, 'SAME_DAY_SKIP_AFTER_HOUR', 14)
         all_markets_before = markets
         filtered_markets = []
         for m in markets:
-            close_str = m.get('close_time', '')
+            ticker = m.get('ticker', '')
+            # Primary check: parse settlement date from ticker (always available)
             try:
-                settle_date = _dt.datetime.fromisoformat(close_str.replace('Z', '+00:00')).date()
-                if settle_date == _today and _now_utc_hour >= 14:
-                    continue  # skip — daily high already observed, market near settlement
+                settle_date = parse_date_from_ticker(ticker)
+                if settle_date == _today and _now_local_hour >= _skip_hour:
+                    continue  # skip — same-day market past local cutoff hour
             except Exception:
                 pass
+            # Secondary check: close_time from API (if available)
+            close_str = m.get('close_time', '')
+            if close_str:
+                try:
+                    settle_date_api = _dt.datetime.fromisoformat(close_str.replace('Z', '+00:00')).date()
+                    if settle_date_api == _today and _now_local_hour >= _skip_hour:
+                        continue
+                except Exception:
+                    pass
             filtered_markets.append(m)
         markets = filtered_markets
-        log_activity(f"[Weather] Filtered to {len(markets)} markets (same-day skip: {len(all_markets_before) - len(markets)} removed)")
+        _skipped_count = len(all_markets_before) - len(markets)
+        log_activity(f"[Weather] Filtered to {len(markets)} markets (same-day skip after {_skip_hour}:00: {_skipped_count} removed)")
 
         opportunities = find_opportunities(markets)
         log_activity(f"[Weather] Found {len(opportunities)} opportunities above {config.MIN_EDGE_THRESHOLD:.0%} threshold")
@@ -298,25 +313,113 @@ def run_weather_scan(dry_run=True):
         for opp in opportunities:
             log_activity(f"  >> {opp['ticker']}: {opp['action']} | NOAA: {opp['noaa_prob']:.1%} vs Market: {opp['market_prob']:.1%} | Edge: {opp['edge']:+.1%}")
 
-        # ── Strategy gate: filter opportunities through should_enter() ────────
-        approved_opps = []
+        # ── Baseline: log always-NO for every opportunity above edge gate ───
         for opp in opportunities:
-            signal   = _opp_to_signal(opp, module='weather')
+            try:
+                from baselines import log_always_no_weather
+                no_price = opp.get('no_ask', 100 - opp.get('yes_ask', 50)) / 100
+                actual_action = opp.get('side', 'no')
+                actual_price = opp.get('yes_ask', 50) / 100 if actual_action == 'yes' else no_price
+                log_always_no_weather(
+                    ticker=opp.get('ticker', ''),
+                    no_price=no_price,
+                    actual_action=actual_action,
+                    actual_price=actual_price,
+                )
+            except Exception:
+                pass
+
+        # ── Direction filter: hard gate before strategy (backtest: NO=90% WR, YES=15%) ─
+        if config.WEATHER_DIRECTION_FILTER:
+            _dir = config.WEATHER_DIRECTION_FILTER.lower()
+            _before = len(opportunities)
+            _blocked_yes = [o for o in opportunities if o.get('side', '') != _dir]
+            opportunities = [o for o in opportunities if o.get('side', '') == _dir]
+            _skipped = _before - len(opportunities)
+            if _skipped:
+                log_activity(f"[Weather] Direction filter: {_skipped} {('YES' if _dir == 'no' else 'NO')} trades blocked (filter={config.WEATHER_DIRECTION_FILTER})")
+            # Shadow-log blocked YES signals that had edge above min threshold
+            from edge_detector import _shadow_log_yes_signal
+            for _blk in _blocked_yes:
+                if abs(_blk.get('edge', 0)) >= config.MIN_EDGE_THRESHOLD:
+                    _shadow_log_yes_signal(_blk)
+
+        # ── Strategy gate: filter opportunities through should_enter() ────────
+        # Compute weather daily cap and open exposure dynamically
+        _weather_daily_cap = total_capital * getattr(config, 'WEATHER_DAILY_CAP_PCT', 0.07)
+        try:
+            _open_exposure = max(0.0, total_capital - get_buying_power())
+        except Exception:
+            _open_exposure = 0.0
+
+        approved_opps = []
+        _weather_deployed_this_cycle = 0.0
+        for opp in opportunities:
+            # ── Global 70% open exposure check ──
+            if not check_open_exposure(total_capital, _open_exposure):
+                log_activity(f"  [GlobalCap] STOP: open exposure ${_open_exposure:.2f} >= 70% of capital ${total_capital:.2f}")
+                break
+
+            # ── Per-module daily cap: weather budget scales with capital ──
+            if _weather_deployed_this_cycle >= _weather_daily_cap:
+                log_activity(
+                    f"  [DailyCap] STOP: weather budget ${_weather_daily_cap:.0f} "
+                    f"exhausted (${_weather_deployed_this_cycle:.2f} deployed this cycle)"
+                )
+                break
+
+            signal = _opp_to_signal(opp, module='weather')
+            signal['open_position_value'] = _open_exposure
             decision = should_enter(signal, total_capital, deployed_today)
             if decision['enter']:
+                # Check weather-specific budget before approving
+                if _weather_deployed_this_cycle + decision['size'] > _weather_daily_cap:
+                    log_activity(
+                        f"  [DailyCap] SKIP {opp['ticker']}: would exceed weather daily cap "
+                        f"(${_weather_deployed_this_cycle:.2f} + ${decision['size']:.2f} > "
+                        f"${_weather_daily_cap:.0f})"
+                    )
+                    continue
                 # Pass strategy-computed size so Trader skips redundant risk.py sizing
                 opp['strategy_size'] = decision['size']
                 approved_opps.append(opp)
                 # W14: refresh deployed_today so subsequent opportunities in this cycle
                 # see the updated cap (prevents over-deployment if multiple trades fire)
                 deployed_today += decision['size']
+                _weather_deployed_this_cycle += decision['size']
                 log_activity(f"  [Strategy] ENTER {opp['ticker']}: {decision['reason']}")
             else:
                 log_activity(f"  [Strategy] SKIP  {opp['ticker']}: {decision['reason']}")
 
         if approved_opps:
-            trader = Trader(dry_run=dry_run)
-            trader.execute_all(approved_opps)
+            try:
+                # Phase 7c: add signal provenance to weather trade logs
+                for opp in approved_opps:
+                    opp['data_sources'] = {
+                        'nws_temp': opp.get('nws_official_f'),
+                        'openmeteo_prob': opp.get('ensemble_prob'),
+                        'model': 'open_meteo_multi_model',
+                    }
+                trader = Trader(dry_run=dry_run)
+                trader.execute_all(approved_opps)
+                # Log Brier predictions for each executed weather trade
+                for opp in approved_opps:
+                    try:
+                        from brier_tracker import log_prediction
+                        log_prediction(
+                            domain='weather',
+                            ticker=opp.get('ticker', ''),
+                            predicted_prob=opp.get('win_prob', opp.get('prob', 0.5)),
+                            market_price=opp.get('market_price', opp.get('yes_ask', 50) / 100),
+                            edge=opp.get('edge', 0),
+                            side=opp.get('side', '')
+                        )
+                    except Exception:
+                        pass
+            except Exception as exec_err:
+                log_activity(f"[Weather] Execution error (trades may be partially logged): {exec_err}")
+                import traceback
+                traceback.print_exc()
         else:
             log_activity("[Weather] No opportunities approved by strategy layer.")
 
@@ -327,6 +430,371 @@ def run_weather_scan(dry_run=True):
         import traceback
         traceback.print_exc()
         return []
+
+
+# ─── CRYPTO / FED HELPERS ────────────────────────────────────────────────────
+
+def band_prob(spot, band_mid, half_w, sigma, drift=0.0):
+    """Log-normal probability that price ends inside [band_mid-half_w, band_mid+half_w]."""
+    import math
+    from scipy.stats import norm
+    lo = band_mid - half_w
+    hi = band_mid + half_w
+    if spot <= 0 or sigma <= 0:
+        return 0.5
+    mu = math.log(spot) + drift
+    s = sigma
+    p_hi = norm.cdf((math.log(hi) - mu) / s) if hi > 0 else 1.0
+    p_lo = norm.cdf((math.log(lo) - mu) / s) if lo > 0 else 0.0
+    return max(0.001, min(0.999, p_hi - p_lo))
+
+
+# ─── CRYPTO MODULE ────────────────────────────────────────────────────────────
+
+def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open_position_value=0.0):
+    """Run crypto market scan and execute trades. Returns list of executed opp dicts."""
+    if traded_tickers is None:
+        traded_tickers = set()
+
+    BASE = "https://api.elections.kalshi.com/trade-api/v2/markets"
+    client = KalshiClient()
+    executed = []
+
+    try:
+        # Get live prices
+        prices = {}
+        for sym, key in [('XBTUSD', 'btc'), ('ETHUSD', 'eth'), ('XRPUSD', 'xrp'),
+                         ('SOLUSD', 'sol'), ('DOGEUSD', 'doge')]:
+            try:
+                r = requests.get(f'https://api.kraken.com/0/public/Ticker?pair={sym}', timeout=5)
+                prices[key] = float(list(r.json()['result'].values())[0]['c'][0])
+            except Exception:
+                pass
+
+        btc  = prices.get('btc', 70000)
+        eth  = prices.get('eth', 2000)
+        xrp  = prices.get('xrp', 1.38)
+        sol  = prices.get('sol', 0)
+        doge = prices.get('doge', 0)
+        print(f"  BTC=${btc:,.0f}  ETH=${eth:,.2f}  XRP=${xrp:.4f}  SOL=${sol:.2f}  DOGE=${doge:.5f}")
+
+        drift_sigma = 0.0
+
+        SERIES_CFG = [
+            ('KXBTC',  btc,  250,   0.025, 18),
+            ('KXETH',  eth,  10,    0.030, 18),
+            ('KXXRP',  xrp,  0.01,  0.045, 18),
+            ('KXSOL',  sol,  5.0,   0.045, 18),
+            ('KXDOGE', doge, 0.005, 0.050, 18),
+        ]
+
+        new_crypto = []
+        for series, spot, half_w, daily_vol, hours in SERIES_CFG:
+            if spot == 0:
+                continue
+            sigma = daily_vol * math.sqrt(hours / 24)
+            drift = drift_sigma * sigma
+
+            r = requests.get(BASE, params={'series_ticker': series, 'status': 'open', 'limit': 50}, timeout=8)
+            markets = r.json().get('markets', [])
+
+            from datetime import timezone
+            for m in markets:
+                ticker = m.get('ticker', '')
+                if ticker in traded_tickers:
+                    continue
+                ya = m.get('yes_ask') or 0
+                na = m.get('no_ask') or 0
+                if ya < 5 or ya > 92 or na < 5:
+                    continue
+                close = m.get('close_time', '')
+                if close:
+                    try:
+                        ct = datetime.fromisoformat(close.replace('Z', '+00:00'))
+                        mins_left = (ct - datetime.now(timezone.utc)).total_seconds() / 60
+                        if mins_left < 120:
+                            continue
+                    except Exception:
+                        pass
+
+                try:
+                    band_mid = float(ticker.split('-B')[-1])
+                except Exception:
+                    continue
+
+                prob_model = band_prob(spot, band_mid, half_w, sigma, drift)
+                mkt_yes    = ya / 100
+                edge_no    = mkt_yes - prob_model
+                edge_yes   = prob_model - mkt_yes
+
+                best_edge   = max(edge_no, edge_yes)
+                best_action = 'no' if edge_no >= edge_yes else 'yes'
+                best_price  = na if best_action == 'no' else ya
+
+                if best_edge < config.CRYPTO_MIN_EDGE_THRESHOLD:
+                    continue
+                if best_price > 95:
+                    continue
+
+                _hours_left = 18.0
+                if close:
+                    try:
+                        _ct = datetime.fromisoformat(close.replace('Z', '+00:00'))
+                        _hours_left = max(1.0, (_ct - datetime.now(timezone.utc)).total_seconds() / 3600)
+                    except Exception:
+                        pass
+
+                _spread = ya - na
+                _spread_score = max(0.0, 1.0 - (_spread / 20.0))
+                _edge_score   = min(1.0, best_edge / 0.30)
+                _time_score   = min(1.0, _hours_left / 48.0)
+                _crypto_confidence = round((_edge_score * 0.5 + _spread_score * 0.3 + _time_score * 0.2), 3)
+
+                new_crypto.append({
+                    'ticker': ticker, 'title': m.get('title', ticker),
+                    'side': best_action, 'price': best_price,
+                    'yes_ask': ya, 'yes_bid': ya,
+                    'prob_model': prob_model,
+                    'confidence': _crypto_confidence,
+                    'hours_to_settlement': _hours_left,
+                    'edge': round(best_edge, 3), 'series': series,
+                    'note': f'{series} {direction} | model={prob_model*100:.0f}% mkt={mkt_yes*100:.0f}% edge={best_edge*100:.0f}%',
+                })
+
+        # Sort by edge, take top 3 per run max
+        new_crypto.sort(key=lambda x: x['edge'], reverse=True)
+
+        # Daily cap check before executing
+        try:
+            _total_capital  = get_computed_capital()
+            _deployed_today = get_daily_exposure()
+            _cap_remaining  = check_daily_cap(_total_capital, _deployed_today)
+            if _cap_remaining <= 0:
+                print(f"  [CapCheck] Daily cap reached (${_deployed_today:.2f} deployed, "
+                      f"max ${_total_capital * 0.70:.2f}). Skipping crypto trades this cycle.")
+                return []
+            else:
+                print(f"  [CapCheck] Cap OK — ${_cap_remaining:.2f} remaining (${_deployed_today:.2f} deployed)")
+        except Exception as e:
+            print(f"  [CapCheck] Cap check error: {e} — proceeding with caution")
+            _total_capital  = 10000.0
+            _deployed_today = 0.0
+
+        _crypto_daily_cap = _total_capital * getattr(config, 'CRYPTO_DAILY_CAP_PCT', 0.07)
+        _crypto_deployed_this_cycle = 0.0
+        try:
+            _open_exposure = max(0.0, _total_capital - get_buying_power())
+        except Exception:
+            _open_exposure = open_position_value
+
+        for t in new_crypto[:3]:
+            if not check_open_exposure(_total_capital, _open_exposure):
+                print(f"  [GlobalCap] STOP: open exposure ${_open_exposure:.2f} >= 70% of capital")
+                break
+
+            if _crypto_deployed_this_cycle >= _crypto_daily_cap:
+                print(f"  [DailyCap] STOP: crypto budget ${_crypto_daily_cap:.0f} exhausted")
+                break
+
+            signal = {
+                'edge': t['edge'],
+                'win_prob': t['prob_model'],
+                'confidence': t.get('confidence', t['edge']),
+                'hours_to_settlement': t.get('hours_to_settlement', 24.0),
+                'module': 'crypto',
+                'vol_ratio': 1.0,
+                'side': t['side'],
+                'yes_ask': t['yes_ask'],
+                'yes_bid': t.get('yes_bid', t['yes_ask']),
+                'open_position_value': _open_exposure,
+            }
+            decision = should_enter(signal, _total_capital, _deployed_today)
+            if not decision['enter']:
+                print(f"  [Strategy] SKIP {t['ticker']}: {decision['reason']}")
+                continue
+            if _crypto_deployed_this_cycle + decision['size'] > _crypto_daily_cap:
+                print(f"  [DailyCap] SKIP {t['ticker']}: would exceed crypto daily cap")
+                continue
+
+            size = decision['size']
+            best_price = t['price']
+            contracts  = max(1, int(size / best_price * 100))
+            actual_cost = round(contracts * best_price / 100, 2)
+
+            opp = {
+                'ticker': t['ticker'], 'title': t['title'], 'side': t['side'],
+                'action': 'buy', 'yes_price': t['price'] if t['side'] == 'yes' else 100 - t['price'],
+                'market_prob': t['price'] / 100, 'noaa_prob': None,
+                'edge': t['edge'], 'confidence': t.get('confidence', t['edge']),
+                'size_dollars': actual_cost,
+                'contracts': contracts, 'source': 'crypto',
+                'note': t['note'],
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'date': str(date.today()),
+            }
+            if dry_run:
+                log_trade(opp, actual_cost, contracts, {'dry_run': True})
+                log_activity(f"[AUTO-CRYPTO] BUY {t['side'].upper()} {t['ticker']} {contracts}@{best_price}c ${actual_cost:.2f} edge={t['edge']*100:.0f}%")
+                print(f"  [DEMO] BUY {t['side'].upper()} {t['ticker']:38} {contracts:3}@{best_price:3}c ${actual_cost:.2f} edge={t['edge']*100:.0f}%")
+            else:
+                try:
+                    result = client.place_order(t['ticker'], t['side'], best_price, contracts)
+                    log_trade(opp, actual_cost, contracts, result)
+                    print(f"  [LIVE] EXECUTED {t['ticker']}")
+                except Exception as e:
+                    print(f"  ERROR {t['ticker']}: {e}")
+
+            traded_tickers.add(t['ticker'])
+            _crypto_deployed_this_cycle += actual_cost
+            _open_exposure += actual_cost
+            executed.append(opp)
+
+    except Exception as e:
+        print(f"  Crypto scan error: {e}")
+        import traceback
+        traceback.print_exc()
+
+    return executed
+
+
+# ─── FED MODULE ───────────────────────────────────────────────────────────────
+
+def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
+    """Run Fed rate decision scan and execute trades. Returns list of executed opp dicts."""
+    if traded_tickers is None:
+        traded_tickers = set()
+
+    client = KalshiClient()
+    executed = []
+
+    try:
+        from fed_client import run_fed_scan as _run_fed_scan_inner, FOMC_DECISION_DATES_2026, is_in_signal_window
+
+        in_window, fed_meeting, fed_days = is_in_signal_window()
+        if not in_window:
+            print(f"  Fed signal window inactive — next FOMC {fed_meeting} ({fed_days}d away)")
+            return []
+
+        fed_signal = _run_fed_scan_inner()
+
+        if fed_signal and not fed_signal.get("skip_reason"):
+            ticker    = fed_signal.get("ticker", "KXFEDDECISION-?")
+            side      = fed_signal.get("direction", "yes")
+            edge_pct  = fed_signal.get("edge", 0) * 100
+            conf_pct  = fed_signal.get("confidence", 0) * 100
+            outcome   = fed_signal.get("outcome", "?")
+            mkt_price = int(fed_signal.get("yes_ask", 50))
+            bet_price = mkt_price if side == "yes" else 100 - mkt_price
+
+            try:
+                _fed_capital  = get_computed_capital()
+                _fed_deployed = get_daily_exposure()
+                _fed_cap_ok   = check_daily_cap(_fed_capital, _fed_deployed)
+            except Exception:
+                _fed_capital  = 10000.0
+                _fed_deployed = 0.0
+                _fed_cap_ok   = 25.0
+
+            _fed_daily_cap   = _fed_capital * getattr(config, 'ECON_DAILY_CAP_PCT', 0.04)
+            _days_to_meeting = fed_signal.get('days_to_meeting', 5)
+            _fed_hours       = max(1.0, _days_to_meeting * 24)
+
+            try:
+                _fed_open_exposure = max(0.0, _fed_capital - get_buying_power())
+            except Exception:
+                _fed_open_exposure = open_position_value
+
+            if _fed_cap_ok <= 0:
+                print(f"  [CapCheck] Daily cap reached — skipping Fed trade")
+            elif ticker in traded_tickers:
+                print(f"  Already traded {ticker} this cycle — skipping")
+            elif not check_open_exposure(_fed_capital, _fed_open_exposure):
+                print(f"  [GlobalCap] STOP: open exposure ${_fed_open_exposure:.2f} >= 70% of capital")
+            else:
+                _fed_signal_dict = {
+                    'edge': fed_signal.get('edge', 0),
+                    'win_prob': fed_signal.get('prob', 0.5),
+                    'confidence': fed_signal.get('confidence', 0),
+                    'hours_to_settlement': _fed_hours,
+                    'module': 'fed',
+                    'vol_ratio': 1.0,
+                    'side': side,
+                    'yes_ask': mkt_price,
+                    'yes_bid': mkt_price,
+                    'open_position_value': _fed_open_exposure,
+                }
+                _fed_decision = should_enter(_fed_signal_dict, _fed_capital, _fed_deployed)
+                if not _fed_decision['enter']:
+                    print(f"  [Strategy] SKIP {ticker}: {_fed_decision['reason']}")
+                elif _fed_decision['size'] > _fed_daily_cap:
+                    print(f"  [DailyCap] SKIP {ticker}: would exceed fed/econ daily cap")
+                else:
+                    size        = min(_fed_decision['size'], _fed_cap_ok)
+                    contracts   = max(1, int(size / bet_price * 100))
+                    actual_cost = round(contracts * bet_price / 100, 2)
+
+                    opp = {
+                        "ticker":      ticker,
+                        "title":       fed_signal.get("title", ticker),
+                        "side":        side,
+                        "action":      "buy",
+                        "yes_price":   mkt_price,
+                        "market_prob": fed_signal.get("market_price", 0.5),
+                        "noaa_prob":   None,
+                        "edge":        fed_signal.get("edge"),
+                        "confidence":  fed_signal.get("confidence"),
+                        "size_dollars": actual_cost,
+                        "contracts":   contracts,
+                        "source":      "fed",
+                        "outcome":     outcome,
+                        "meeting_date": fed_signal.get("meeting_date"),
+                        "days_to_meeting": fed_signal.get("days_to_meeting"),
+                        "polymarket_prob": fed_signal.get("prob"),
+                        "note": (f"FOMC {fed_signal.get('meeting_date')} {outcome.upper()} "
+                                 f"FedWatch={fed_signal.get('prob', 0):.0%} "
+                                 f"Kalshi={fed_signal.get('market_price', 0):.0%} "
+                                 f"edge={edge_pct:.0f}%"),
+                        "timestamp":   datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        "date":        str(date.today()),
+                    }
+
+                    if dry_run:
+                        log_trade(opp, actual_cost, contracts, {"dry_run": True})
+                        log_activity(
+                            f"[AUTO-FED] BUY {side.upper()} {ticker} {contracts}@{bet_price}c "
+                            f"${actual_cost:.2f} edge={edge_pct:.0f}% conf={conf_pct:.0f}%"
+                        )
+                        print(
+                            f"  [DEMO] BUY {side.upper()} {ticker:38} "
+                            f"{contracts:3}@{bet_price:3}c ${actual_cost:.2f} "
+                            f"edge={edge_pct:.0f}% conf={conf_pct:.0f}% [{outcome}]"
+                        )
+                    else:
+                        try:
+                            result = client.place_order(ticker, side, bet_price, contracts)
+                            log_trade(opp, actual_cost, contracts, result)
+                            log_activity(
+                                f"[AUTO-FED] EXECUTED {ticker} {side.upper()} "
+                                f"{contracts}@{bet_price}c edge={edge_pct:.0f}%"
+                            )
+                            print(f"  [LIVE] EXECUTED Fed trade: {ticker}")
+                        except Exception as e:
+                            print(f"  ERROR executing Fed trade {ticker}: {e}")
+
+                    traded_tickers.add(ticker)
+                    executed.append(opp)
+
+        elif fed_signal and fed_signal.get("skip_reason"):
+            print(f"  Fed signal skipped: {fed_signal['skip_reason']}")
+        else:
+            print(f"  No Fed edge in window ({fed_days}d to {fed_meeting} FOMC)")
+
+    except Exception as e:
+        print(f"  Fed scan error: {e}")
+        import traceback
+        traceback.print_exc()
+
+    return executed
 
 
 # ─── ECONOMICS MODULE ─────────────────────────────────────────────────────────
@@ -342,23 +810,6 @@ def run_econ_scan(dry_run=True):
             log_activity(f"  >> {opp['ticker']}: {opp['market_prob']:.0%} | {opp.get('note', '')}{flag}")
     except Exception as e:
         log_activity(f"[Econ] ERROR: {e}")
-
-
-# ─── GAMING SCOUT MODULE ──────────────────────────────────────────────────────
-
-def run_gaming_scout():
-    """Run gaming/tech market scout."""
-    log_activity("[Scout] Starting gaming/tech scout...")
-    try:
-        markets = run_daily_scout()
-        brief = format_scout_brief(markets)
-        log_activity(f"[Scout] Found {len(markets)} gaming/tech markets")
-        # Print brief to console / log
-        for line in brief.split('\n'):
-            if line.strip():
-                log_activity(f"  {line}")
-    except Exception as e:
-        log_activity(f"[Scout] ERROR: {e}")
 
 
 # ─── GEOPOLITICAL MODULE ──────────────────────────────────────────────────────
@@ -391,7 +842,6 @@ def run_full_scan(dry_run=True):
 
     run_weather_scan(dry_run=dry_run)
     run_econ_scan(dry_run=dry_run)
-    run_gaming_scout()
     run_geo_scan_module()
 
     summary = get_daily_summary()
@@ -427,8 +877,6 @@ if __name__ == '__main__':
         run_weather_scan(dry_run='--live' not in args)
     elif '--econ' in args:
         run_econ_scan(dry_run='--live' not in args)
-    elif '--scout' in args:
-        run_gaming_scout()
     elif '--geo' in args:
         run_geo_scan_module()
     elif '--loop' in args:

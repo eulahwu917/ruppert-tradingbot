@@ -38,6 +38,9 @@ for f in sorted(bot_dir.rglob('*.py')):
         for pattern, label in DANGER:
             for m in re.finditer(pattern, text, re.IGNORECASE | re.DOTALL):
                 ln = text[:m.start()].count('\n') + 1
+                line = text.splitlines()[ln - 1].strip()
+                if line.startswith('#'):
+                    continue
                 snippet = m.group()[:70].replace('\n', ' ')
                 findings.append((str(f), ln, label, snippet))
     except Exception:

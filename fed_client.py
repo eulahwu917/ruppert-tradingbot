@@ -47,21 +47,91 @@ logger = logging.getLogger(__name__)
 
 # ── FOMC Calendar 2026 ────────────────────────────────────────────────────────
 # Decision announced on the second day of each 2-day meeting.
-# Source: federalreserve.gov — verify/update annually.
+# Source: CME FedWatch /meetings/future API (authoritative) — last synced 2026-03-26.
+# Past meetings kept for historical reference; future dates verified against CME.
 FOMC_DECISION_DATES_2026 = [
-    date(2026, 1, 29),
-    date(2026, 3, 18),
-    date(2026, 5,  7),
-    date(2026, 6, 17),
-    date(2026, 7, 29),
-    date(2026, 9, 16),
-    date(2026, 10, 28),
-    date(2026, 12, 16),
+    date(2026, 1, 29),   # past
+    date(2026, 3, 18),   # past
+    date(2026, 4, 29),   # CME confirmed
+    date(2026, 6, 17),   # CME confirmed
+    date(2026, 7, 29),   # CME confirmed
+    date(2026, 9, 16),   # CME confirmed
+    date(2026, 10, 28),  # CME confirmed
+    date(2026, 12,  9),  # CME confirmed
 ]
+
+_FOMC_CACHE_FILE = Path(__file__).parent / "logs" / "fomc_meetings_cache.json"
+
+
+def refresh_fomc_calendar_from_cme() -> list[date] | None:
+    """
+    Fetch future FOMC meeting dates from CME /meetings/future endpoint and
+    cache them to logs/fomc_meetings_cache.json.
+
+    Returns list of future meeting dates (sorted), or None on failure.
+    Call this periodically (e.g. monthly) to keep the calendar current.
+    """
+    token = _get_cme_oauth_token()
+    if not token:
+        return None
+    import uuid
+    try:
+        r = requests.get(
+            f"{_CME_API_BASE}/meetings/future",
+            headers={
+                "Authorization":           f"Bearer {token}",
+                "CME-Application-Name":    _CME_APP_NAME,
+                "CME-Application-Vendor":  _CME_APP_VENDOR,
+                "CME-Application-Version": _CME_APP_VERSION,
+                "CME-Request-ID":          str(uuid.uuid4()),
+                "User-Agent":              f"{_CME_APP_NAME}/{_CME_APP_VERSION}",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        payload = r.json().get("payload", [])
+        dates = sorted([
+            date.fromisoformat(entry["meetingDt"][:10])
+            for entry in payload
+            if entry.get("meetingDt")
+        ])
+        if dates:
+            _FOMC_CACHE_FILE.parent.mkdir(exist_ok=True)
+            _FOMC_CACHE_FILE.write_text(
+                json.dumps({
+                    "fetched_at":    datetime.now(timezone.utc).isoformat(),
+                    "meeting_dates": [d.isoformat() for d in dates],
+                }),
+                encoding="utf-8",
+            )
+            logger.info(f"[FedClient] CME FOMC calendar refreshed: {[str(d) for d in dates]}")
+        return dates
+    except Exception as e:
+        logger.warning(f"[FedClient] CME meeting fetch failed: {e}")
+        return None
+
+
+def get_fomc_dates() -> list[date]:
+    """
+    Return upcoming FOMC decision dates. Uses CME cache if fresh (<7 days),
+    falls back to hardcoded FOMC_DECISION_DATES_2026.
+    """
+    try:
+        if _FOMC_CACHE_FILE.exists():
+            cached = json.loads(_FOMC_CACHE_FILE.read_text(encoding="utf-8"))
+            fetched_at = datetime.fromisoformat(cached["fetched_at"])
+            age_days   = (datetime.now(timezone.utc) - fetched_at).days
+            if age_days < 7:
+                dates = [date.fromisoformat(d) for d in cached.get("meeting_dates", [])]
+                if dates:
+                    return dates
+    except Exception:
+        pass
+    return FOMC_DECISION_DATES_2026
 
 # ── Strategy Parameters ───────────────────────────────────────────────────────
 FED_MIN_EDGE        = 0.12   # 12% minimum edge to consider entry
-FED_MIN_CONFIDENCE  = 0.55   # 55% minimum confidence
+FED_MIN_CONFIDENCE  = 0.25   # 25% minimum confidence — matches universal minimum
 FED_WINDOW_MIN_DAYS = 2      # skip if < 2 days (market efficient)
 FED_WINDOW_MAX_DAYS = 7      # skip if > 7 days (too early)
 FED_MIN_KALSHI_PRICE = 0.15  # never trade contracts below 15¢ (favorite-longshot bias)
@@ -79,10 +149,11 @@ KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
 def next_fomc_meeting() -> tuple[date | None, int]:
     """
     Return (next_decision_date, days_until_decision).
-    Returns (None, -1) if no upcoming meeting in 2026 calendar.
+    Uses CME-cached dates if fresh, falls back to hardcoded calendar.
+    Returns (None, -1) if no upcoming meeting found.
     """
     today = date.today()
-    for decision_date in sorted(FOMC_DECISION_DATES_2026):
+    for decision_date in sorted(get_fomc_dates()):
         if decision_date >= today:
             days_left = (decision_date - today).days
             return decision_date, days_left
@@ -132,25 +203,251 @@ def get_current_fed_rate() -> float | None:
 
 # ── CME FedWatch Data ────────────────────────────────────────────────────────
 
+# CME OAuth + API constants
+_CME_AUTH_URL    = "https://auth.cmegroup.com/as/token.oauth2"
+_CME_API_BASE    = "https://markets.api.cmegroup.com/fedwatch/v1"
+_CME_APP_NAME    = "ruppert-agent"
+_CME_APP_VENDOR  = "ruppert"
+_CME_APP_VERSION = "1.0.0"
+_SECRETS_DIR     = Path(__file__).parent.parent / "secrets"
+_CME_CONFIG_FILE = _SECRETS_DIR / "cme_config.json"
+_CME_TOKEN_CACHE = _SECRETS_DIR / "cme_token_cache.json"
+
+
+def _load_cme_config() -> dict | None:
+    """Load CME credentials from secrets/cme_config.json."""
+    try:
+        return json.loads(_CME_CONFIG_FILE.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.error(f"[FedClient] Could not load cme_config.json: {e}")
+        return None
+
+
+def _get_cme_oauth_token() -> str | None:
+    """
+    Obtain a valid CME OAuth 2.0 bearer token.
+
+    Checks token cache first (secrets/cme_token_cache.json).
+    If expired or missing, fetches a fresh token from CME OAuth endpoint.
+    Token TTL is ~1800 seconds; we refresh at 1700s to be safe.
+
+    Returns:
+        Bearer token string, or None on failure.
+    """
+    import base64
+    now = datetime.now(timezone.utc).timestamp()
+
+    # ── Check cache ──────────────────────────────────────────────────────────
+    try:
+        if _CME_TOKEN_CACHE.exists():
+            cached = json.loads(_CME_TOKEN_CACHE.read_text(encoding="utf-8"))
+            if cached.get("expires_at", 0) > now + 60:  # 60s buffer
+                logger.debug("[FedClient] Using cached CME OAuth token")
+                return cached["access_token"]
+    except Exception:
+        pass  # Cache read failure → just fetch fresh
+
+    # ── Fetch fresh token ────────────────────────────────────────────────────
+    cfg = _load_cme_config()
+    if not cfg:
+        return None
+
+    api_id  = cfg.get("api_id", "")
+    api_pwd = cfg.get("api_password", "")
+    if not api_id or not api_pwd:
+        logger.error("[FedClient] CME config missing api_id or api_password")
+        return None
+
+    credentials = base64.b64encode(f"{api_id}:{api_pwd}".encode()).decode()
+    try:
+        r = requests.post(
+            _CME_AUTH_URL,
+            headers={
+                "Content-Type":  "application/x-www-form-urlencoded",
+                "Authorization": f"Basic {credentials}",
+            },
+            data="grant_type=client_credentials",
+            timeout=15,
+        )
+        r.raise_for_status()
+        token_data   = r.json()
+        access_token = token_data.get("access_token")
+        expires_in   = int(token_data.get("expires_in", 1800))
+
+        if not access_token:
+            logger.error(f"[FedClient] CME OAuth response missing access_token: {token_data}")
+            return None
+
+        # Cache token
+        try:
+            _SECRETS_DIR.mkdir(exist_ok=True)
+            _CME_TOKEN_CACHE.write_text(
+                json.dumps({
+                    "access_token": access_token,
+                    "expires_at":   now + expires_in - 100,  # small buffer
+                    "fetched_at":   datetime.now(timezone.utc).isoformat(),
+                }),
+                encoding="utf-8",
+            )
+        except Exception as e:
+            logger.warning(f"[FedClient] Could not cache CME token: {e}")
+
+        logger.info(f"[FedClient] CME OAuth token obtained (expires_in={expires_in}s)")
+        return access_token
+
+    except Exception as e:
+        logger.error(f"[FedClient] CME OAuth token fetch failed: {e}")
+        return None
+
+
+def _map_rate_range_to_outcome(lower_rt: int, upper_rt: int, current_upper_bps: int) -> str | None:
+    """
+    Map a CME rate range (in basis points) to a standard outcome name.
+
+    Uses current FRED DFEDTARU upper bound as the anchor.
+    Rate ranges are target rate ranges: e.g. 425-450 = 4.25%-4.50%.
+
+    Args:
+        lower_rt:           Lower rate in basis points (e.g. 425).
+        upper_rt:           Upper rate in basis points (e.g. 450).
+        current_upper_bps:  Current DFEDTARU upper bound in bps (e.g. 450 for 4.50%).
+
+    Returns:
+        'maintain' | 'cut_25' | 'cut_50' | 'hike' | None
+    """
+    delta = upper_rt - current_upper_bps  # negative = cut, positive = hike, zero = hold
+    if delta == 0:
+        return "maintain"
+    elif delta == -25:
+        return "cut_25"
+    elif delta <= -50:
+        return "cut_50"
+    elif delta > 0:
+        return "hike"
+    return None  # e.g. -12.5bps — unusual, skip
+
+
 def get_cme_fedwatch_probabilities(meeting_date: date) -> dict | None:
     """
-    Fetch FOMC rate decision probabilities from CME FedWatch.
+    Fetch FOMC rate decision probabilities from CME FedWatch End-of-Day API.
 
-    CME AJAX endpoint not identified — stub until official API approved.
-    Developer note: all candidate endpoints (/CmeWS/mvc/MktData/getFedWatch.json,
-    /CmeWS/mvc/FedWatch/probabilities, /CmeWS/mvc/FutureContracts/FED/getFedWatchData)
-    returned 404 as of 2026-03-13. FedWatch HTML is a JS SPA with no visible AJAX URL.
-    To activate: identify the live endpoint via Chrome DevTools → Network → XHR/Fetch
-    on https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html.
+    Auth: OAuth 2.0 client_credentials (POST to auth.cmegroup.com).
+    Endpoint: GET https://markets.api.cmegroup.com/fedwatch/v1/forecasts
+    Query: meetingDt=YYYY-MM-DD (fetches latest forecast for that meeting).
+
+    Response rateRange[] entries have lowerRt/upperRt in basis points and
+    probability [0-1]. Maps to standard outcomes using current FRED rate as anchor.
 
     Args:
         meeting_date: The FOMC decision date to look up.
 
     Returns:
-        {outcome: float} or None.
+        {'maintain': float, 'cut_25': float, ...} — probabilities sum to ~1.0
+        None on auth/API failure.
     """
-    # CME AJAX endpoint not identified — stub until official API approved
-    return None
+    token = _get_cme_oauth_token()
+    if not token:
+        logger.warning("[FedClient] CME OAuth token unavailable — skipping CME data")
+        return None
+
+    # Current Fed rate needed to map bps ranges to outcomes
+    fed_rate = get_current_fed_rate()
+    if fed_rate is None:
+        logger.warning("[FedClient] FRED rate unavailable — cannot map CME rate ranges")
+        return None
+
+    current_upper_bps = round(fed_rate * 100)  # e.g. 4.50 → 450
+
+    import uuid
+    try:
+        r = requests.get(
+            f"{_CME_API_BASE}/forecasts",
+            params={"meetingDt": meeting_date.isoformat()},
+            headers={
+                "Authorization":          f"Bearer {token}",
+                "CME-Application-Name":   _CME_APP_NAME,
+                "CME-Application-Vendor": _CME_APP_VENDOR,
+                "CME-Application-Version": _CME_APP_VERSION,
+                "CME-Request-ID":         str(uuid.uuid4()),
+                "User-Agent":             f"{_CME_APP_NAME}/{_CME_APP_VERSION}",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+
+        # Response structure: {"payload": [...], "metadata": {...}}
+        # Each payload entry: {"meetingDt": "...", "reportingDt": "...", "rateRange": [...]}
+        entries = data.get("payload", [])
+        if not entries:
+            logger.warning(f"[FedClient] CME FedWatch: empty payload for {meeting_date}")
+            return None
+
+        # Find the entry for our target meeting date
+        target_key = meeting_date.isoformat()
+        forecast   = None
+        for entry in entries:
+            if str(entry.get("meetingDt", "")).startswith(target_key):
+                forecast = entry
+                break
+        if forecast is None:
+            forecast = entries[0]  # fallback: take first (upcoming) result
+            logger.info(
+                f"[FedClient] CME: exact date {meeting_date} not found — "
+                f"using {forecast.get('meetingDt')} instead"
+            )
+
+        rate_ranges = forecast.get("rateRange", [])
+        if not rate_ranges:
+            logger.warning(f"[FedClient] CME FedWatch: empty rateRange for {meeting_date}")
+            return None
+
+        probs: dict[str, float] = {}
+        for rr in rate_ranges:
+            lower_rt = rr.get("lowerRt")
+            upper_rt = rr.get("upperRt")
+            prob     = rr.get("probability")
+            # Skip null probabilities (CME uses null for out-of-range buckets)
+            # Skip zero probabilities (no meaningful signal)
+            if lower_rt is None or upper_rt is None or prob is None or prob == 0.0:
+                continue
+            outcome = _map_rate_range_to_outcome(int(lower_rt), int(upper_rt), current_upper_bps)
+            if outcome is None:
+                logger.debug(
+                    f"[FedClient] CME: unmapped range {lower_rt}-{upper_rt}bps "
+                    f"(current={current_upper_bps}bps)"
+                )
+                continue
+            # Accumulate (e.g. multiple cut ranges → cut_50 bucket)
+            probs[outcome] = round(probs.get(outcome, 0.0) + float(prob), 4)
+
+        if not probs:
+            logger.warning(
+                f"[FedClient] CME FedWatch: no outcomes could be mapped for {meeting_date} "
+                f"(current_upper={current_upper_bps}bps, ranges={rate_ranges})"
+            )
+            return None
+
+        logger.info(
+            f"[FedClient] CME FedWatch probs for {meeting_date} "
+            f"(anchor={current_upper_bps}bps): "
+            + " ".join(f"{k}={v:.1%}" for k, v in probs.items())
+        )
+        return probs
+
+    except requests.HTTPError as e:
+        status = e.response.status_code if e.response is not None else "?"
+        logger.error(f"[FedClient] CME FedWatch HTTP {status}: {e}")
+        if status == 401:
+            # Invalidate cached token on auth failure
+            try:
+                _CME_TOKEN_CACHE.unlink(missing_ok=True)
+            except Exception:
+                pass
+        return None
+    except Exception as e:
+        logger.error(f"[FedClient] CME FedWatch fetch failed: {e}")
+        return None
 
 
 def _fred_sanity_check(fed_rate: float, outcome: str, ensemble_p: float) -> bool:
@@ -355,6 +652,15 @@ def get_polymarket_fomc_probabilities(meeting_date: date) -> dict | None:
             outcome_prices = m.get("outcomePrices", [])
             if not outcome_prices:
                 continue
+
+            # outcomePrices may be a JSON-encoded string OR already a list
+            # Handle both: '["0.95", "0.05"]' and ["0.95", "0.05"]
+            if isinstance(outcome_prices, str):
+                try:
+                    outcome_prices = json.loads(outcome_prices)
+                except Exception:
+                    logger.debug(f"[FedClient] outcomePrices JSON parse failed for '{question}'")
+                    continue
 
             # Prefer explicit "no change" check before general classifier
             if "no change" in question.lower():

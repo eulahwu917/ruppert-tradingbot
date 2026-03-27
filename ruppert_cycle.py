@@ -2,9 +2,9 @@
 Ruppert Autonomous Trading Cycle
 Runs on schedule via Windows Task Scheduler.
 Modes:
-  full   — scan + positions + smart money + execute (7am, 3pm)
-  check  — positions only (12pm, 10pm)
-  smart  — smart money refresh only (lightweight)
+  full   ΓÇö scan + positions + smart money + execute (7am, 3pm)
+  check  ΓÇö positions only (12pm, 10pm)
+  smart  ΓÇö smart money refresh only (lightweight)
 """
 import sys, json, time, math, requests
 from pathlib import Path
@@ -21,9 +21,10 @@ ALERT_LOG   = LOGS / 'cycle_log.jsonl'
 import config
 from kalshi_client import KalshiClient
 from logger import log_trade, log_activity, get_daily_exposure, get_computed_capital, send_telegram
-from bot.strategy import check_daily_cap
+from bot.strategy import check_daily_cap, check_open_exposure, should_enter
+from capital import get_capital, get_buying_power
 
-DRY_RUN = True  # Flip to False when going live
+DRY_RUN = config.DRY_RUN  # Derived from mode.json: demo=True, live=False
 
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -47,19 +48,8 @@ def log_cycle(event, data=None):
     with open(ALERT_LOG, 'a', encoding='utf-8') as f:
         f.write(json.dumps(entry) + '\n')
 
-def norm_cdf(x):
-    t = 1 / (1 + 0.2316419 * abs(x))
-    p = 1 - (0.31938153*t - 0.356563782*t**2 + 1.781477937*t**3
-             - 1.821255978*t**4 + 1.330274429*t**5) * math.exp(-x*x/2) / math.sqrt(2*math.pi)
-    return p if x >= 0 else 1 - p
 
-def band_prob(spot, band_mid, half_w, sigma, drift=0.0):
-    mu = math.log(spot) + drift
-    lo, hi = band_mid - half_w, band_mid + half_w
-    if lo <= 0: return 0.0
-    return max(0, min(1, norm_cdf((math.log(hi)-mu)/sigma) - norm_cdf((math.log(lo)-mu)/sigma)))
-
-# ─────────────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 print(f"\n{'='*60}")
 print(f"  RUPPERT CYCLE  mode={MODE.upper()}  {ts()}")
 print(f"{'='*60}")
@@ -70,7 +60,15 @@ BASE   = "https://api.elections.kalshi.com/trade-api/v2/markets"
 HDR    = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 traded_tickers = set()
 
-# ── STEP 1: POSITION CHECK (every run) ───────────────────────────────────────
+# Compute open exposure once per cycle — used by global 70% cap check in should_enter()
+try:
+    _cycle_capital      = get_capital()
+    _cycle_buying_power = get_buying_power()
+    OPEN_POSITION_VALUE = max(0.0, _cycle_capital - _cycle_buying_power)
+except Exception:
+    OPEN_POSITION_VALUE = 0.0  # safe default: won't block entry
+
+# ΓöÇΓöÇ STEP 1: POSITION CHECK (every run) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 print("\n[1] Position check...")
 try:
     from openmeteo_client import get_full_weather_signal
@@ -129,7 +127,7 @@ try:
                         ens_prob = sig.get('final_prob', 0.5) or 0.5
 
                         if side == 'no':
-                            # NO wins if forecast OUTSIDE band — check if forecast moved inside
+                            # NO wins if forecast OUTSIDE band ΓÇö check if forecast moved inside
                             if margin < 1.0:
                                 alert_msg = f'WARNING: {ticker} forecast {forecast:.1f}F only {margin:.1f}F from band edge {threshold_f}F | P&L ${pnl:+.2f}'
                                 push_alert('warning', alert_msg, ticker=ticker, pnl=pnl)
@@ -179,7 +177,7 @@ if MODE == 'check':
     print(f"\nCheck-only cycle done. {ts()}")
     sys.exit(0)
 
-# ── REPORT MODE: 7am P&L summary + loss detection ────────────────────────────
+# ΓöÇΓöÇ REPORT MODE: 7am P&L summary + loss detection ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 if MODE == 'report':
     print("\n[7AM REPORT] P&L Summary + Loss Detection...")
     from datetime import timedelta
@@ -187,7 +185,7 @@ if MODE == 'report':
     today_str     = date.today().isoformat()
     yesterday_str = (date.today() - timedelta(days=1)).isoformat()
 
-    # ── Load all trades: today + yesterday ───────────────────────────────────
+    # ΓöÇΓöÇ Load all trades: today + yesterday ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     all_records: list = []
     for day_str in [yesterday_str, today_str]:
         log_path = LOGS / f'trades_{day_str}.jsonl'
@@ -203,7 +201,7 @@ if MODE == 'report':
 
     print(f"  Loaded {len(all_records)} record(s) from today + yesterday")
 
-    # ── Group records: latest entry per ticker, all exits ────────────────────
+    # ΓöÇΓöÇ Group records: latest entry per ticker, all exits ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     entries_by_ticker: dict = {}
     exit_records: list = []
 
@@ -217,7 +215,7 @@ if MODE == 'report':
         elif action == 'exit':
             exit_records.append(rec)
 
-    # ── Compute high-level P&L summary ───────────────────────────────────────
+    # ΓöÇΓöÇ Compute high-level P&L summary ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     total_deployed = sum(
         r.get('size_dollars', 0.0)
         for r in all_records
@@ -230,7 +228,7 @@ if MODE == 'report':
           f"Exited: ${total_exited:.2f}  "
           f"Net approx: ${net_pnl_approx:+.2f}")
 
-    # ── Scan for losses: explicit exits with negative realized_pnl ───────────
+    # ΓöÇΓöÇ Scan for losses: explicit exits with negative realized_pnl ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     # A loss = action=="exit" AND realized_pnl < 0.
     # If realized_pnl is not stored in the record, compute it from
     # size_dollars: exit_value - entry_cost (cost basis from the open record).
@@ -261,7 +259,7 @@ if MODE == 'report':
 
     print(f"  Losses found: {len(losses)}")
 
-    # ── Write optimizer review file if losses exist ──────────────────────────
+    # ΓöÇΓöÇ Write optimizer review file if losses exist ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     if losses:
         total_loss = round(sum(l['realized_pnl'] for l in losses), 2)
 
@@ -272,10 +270,10 @@ if MODE == 'report':
             'total_loss': total_loss,
         }
         review_file.write_text(json.dumps(review_data, indent=2), encoding='utf-8')
-        print(f"  Wrote pending_optimizer_review.json — "
+        print(f"  Wrote pending_optimizer_review.json ΓÇö "
               f"{len(losses)} loss(es) totaling ${total_loss:.2f}")
 
-        # ── Append optimizer alert ────────────────────────────────────────────
+        # ΓöÇΓöÇ Append optimizer alert ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
         alert_msg = (
             f"Loss review ready: {len(losses)} losing trade(s) totaling "
             f"${abs(total_loss):.2f}. Optimizer review needed."
@@ -283,23 +281,23 @@ if MODE == 'report':
         push_alert('optimizer', alert_msg)
         print(f"  Alert queued: {alert_msg}")
     else:
-        print("  No losses detected — skipping optimizer review file")
+        print("  No losses detected ΓÇö skipping optimizer review file")
 
     log_cycle('done', {'mode': 'report', 'exit_count': len(exit_records), 'losses': len(losses)})
     print(f"\n7am report complete. {ts()}")
     sys.exit(0)
 
-# ── STEP 1b: WALLET LIST REFRESH (full mode — once daily before scans) ───────
+# ΓöÇΓöÇ STEP 1b: WALLET LIST REFRESH (full mode ΓÇö once daily before scans) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 print("\n[1b] Refreshing smart money wallet list from Polymarket leaderboard...")
 try:
     from bot.wallet_updater import update_wallet_list as _update_wallets
     _wallets_updated = _update_wallets()
     if not _wallets_updated:
-        print("  Wallet refresh skipped — API unavailable, using existing list")
+        print("  Wallet refresh skipped ΓÇö API unavailable, using existing list")
 except Exception as e:
     print(f"  Wallet refresh error (non-fatal): {e}")
 
-# ── STEP 2: SMART MONEY REFRESH (full mode only) ─────────────────────────────
+# ΓöÇΓöÇ STEP 2: SMART MONEY REFRESH (full mode only) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 print("\n[2] Refreshing smart money signal...")
 try:
     import subprocess, sys as _sys
@@ -316,12 +314,12 @@ try:
         print(f"  Smart money: {direction.upper()} ({bull_pct:.0%} bull)")
     else:
         direction = 'neutral'
-        print(f"  Smart money fetch failed — using neutral")
+        print(f"  Smart money fetch failed ΓÇö using neutral")
 except Exception as e:
     direction = 'neutral'
     print(f"  Smart money error: {e}")
 
-# ── STEP 3: WEATHER OPPORTUNITY SCAN (full mode only) ────────────────────────
+# ΓöÇΓöÇ STEP 3: WEATHER OPPORTUNITY SCAN (full mode only) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 print("\n[3] Scanning for new weather opportunities...")
 new_weather = []
 try:
@@ -340,235 +338,33 @@ except Exception as e:
 print("\n[4] Scanning for new crypto opportunities...")
 new_crypto = []
 try:
-    # Get live prices
-    prices = {}
-    for sym, key in [('XBTUSD','btc'), ('ETHUSD','eth'), ('XRPUSD','xrp'),
-                     ('SOLUSD','sol'), ('DOGEUSD','doge')]:
-        try:
-            r = requests.get(f'https://api.kraken.com/0/public/Ticker?pair={sym}', timeout=5)
-            prices[key] = float(list(r.json()['result'].values())[0]['c'][0])
-        except:
-            pass
-
-    btc  = prices.get('btc', 70000)
-    eth  = prices.get('eth', 2000)
-    xrp  = prices.get('xrp', 1.38)
-    sol  = prices.get('sol', 0)
-    doge = prices.get('doge', 0)
-    print(f"  BTC=${btc:,.0f}  ETH=${eth:,.2f}  XRP=${xrp:.4f}  SOL=${sol:.2f}  DOGE=${doge:.5f}")
-
-    # Bearish block removed (approved 2026-03-12: CEO + David).
-    # Direction signal is kept for logging/reporting below, but no longer
-    # used to bias the edge model — the NO/high-strike logic runs regardless.
-    drift_sigma = 0.0
-
-    SERIES_CFG = [
-        ('KXBTC', btc,  250,   0.025, 18),
-        ('KXETH', eth,  10,    0.030, 18),
-        ('KXXRP', xrp,  0.01,  0.045, 18),
-        ('KXSOL',  sol,  5.0,   0.045, 18),   # SOL — ±$5 brackets, 4.5% daily vol
-        ('KXDOGE', doge, 0.005, 0.050, 18),   # DOGE — ±$0.005 brackets, 5% daily vol
-    ]
-
-    for series, spot, half_w, daily_vol, hours in SERIES_CFG:
-        if spot == 0: continue
-        sigma = daily_vol * math.sqrt(hours / 24)
-        drift = drift_sigma * sigma
-
-        r = requests.get(BASE, params={'series_ticker': series, 'status': 'open', 'limit': 50}, timeout=8)
-        markets = r.json().get('markets', [])
-
-        for m in markets:
-            ticker = m.get('ticker','')
-            if ticker in traded_tickers: continue
-            ya = m.get('yes_ask') or 0
-            na = m.get('no_ask') or 0
-            if ya < 5 or ya > 92 or na < 5: continue
-            close = m.get('close_time','')
-            # Skip markets closing in less than 2 hours
-            if close:
-                try:
-                    ct = datetime.fromisoformat(close.replace('Z','+00:00'))
-                    mins_left = (ct - datetime.now(timezone.utc)).total_seconds() / 60
-                    if mins_left < 120: continue
-                except: pass
-
-            try: band_mid = float(ticker.split('-B')[-1])
-            except: continue
-
-            prob_model = band_prob(spot, band_mid, half_w, sigma, drift)
-            mkt_yes    = ya / 100
-            edge_no    = mkt_yes - prob_model
-            edge_yes   = prob_model - mkt_yes
-
-            best_edge  = max(edge_no, edge_yes)
-            best_action = 'no' if edge_no >= edge_yes else 'yes'
-            best_price  = na if best_action == 'no' else ya
-
-            if best_edge < config.CRYPTO_MIN_EDGE_THRESHOLD: continue
-            if best_price > 95: continue  # near-limit orders are risky
-
-            size = min(config.CRYPTO_MAX_POSITION_SIZE, 25)
-            contracts = max(1, int(size / best_price * 100))
-            actual_cost = round(contracts * best_price / 100, 2)
-
-            new_crypto.append({
-                'ticker': ticker, 'title': m.get('title', ticker),
-                'side': best_action, 'price': best_price,
-                'contracts': contracts, 'cost': actual_cost,
-                'edge': round(best_edge, 3), 'series': series,
-                'note': f'{series} {direction} | model={prob_model*100:.0f}% mkt={mkt_yes*100:.0f}% edge={best_edge*100:.0f}%',
-            })
-
-    # Sort by edge, take top 3 per run max
-    new_crypto.sort(key=lambda x: x['edge'], reverse=True)
-
-    # ── Issue 5: Daily cap check before executing crypto trades ───────────────
-    try:
-        # Use computed capital (deposits + realized P&L) — NOT client.get_balance()
-        # which returns a stale Kalshi API demo balance.
-        _total_capital  = get_computed_capital()
-        _deployed_today = get_daily_exposure()
-        _cap_remaining  = check_daily_cap(_total_capital, _deployed_today)
-        if _cap_remaining <= 0:
-            print(f"  [CapCheck] Daily cap reached (${_deployed_today:.2f} deployed, "
-                  f"max ${_total_capital * 0.70:.2f}). Skipping crypto trades this cycle.")
-            new_crypto = []
-        else:
-            print(f"  [CapCheck] Cap OK — ${_cap_remaining:.2f} remaining (${_deployed_today:.2f} deployed)")
-    except Exception as e:
-        print(f"  [CapCheck] Cap check error: {e} — proceeding with caution")
-
-    for t in new_crypto[:3]:
-        opp = {
-            'ticker': t['ticker'], 'title': t['title'], 'side': t['side'],
-            'action': 'buy', 'yes_price': t['price'] if t['side']=='yes' else 100-t['price'],
-            'market_prob': t['price']/100, 'noaa_prob': None,
-            'edge': t['edge'], 'size_dollars': t['cost'],
-            'contracts': t['contracts'], 'source': 'crypto',
-            'note': t['note'], 'timestamp': ts(), 'date': str(date.today()),
-        }
-        if DRY_RUN:
-            log_trade(opp, t['cost'], t['contracts'], {'dry_run': True})
-            log_activity(f"[AUTO-CRYPTO] BUY {t['side'].upper()} {t['ticker']} {t['contracts']}@{t['price']}c ${t['cost']:.2f} edge={t['edge']*100:.0f}%")
-            print(f"  [DEMO] BUY {t['side'].upper()} {t['ticker']:38} {t['contracts']:3}@{t['price']:3}c ${t['cost']:.2f} edge={t['edge']*100:.0f}%")
-        else:
-            try:
-                result = client.place_order(t['ticker'], t['side'], t['price'], t['contracts'])
-                log_trade(opp, t['cost'], t['contracts'], result)
-                print(f"  [LIVE] EXECUTED {t['ticker']}")
-            except Exception as e:
-                print(f"  ERROR {t['ticker']}: {e}")
-        traded_tickers.add(t['ticker'])
-
-    print(f"  {min(len(new_crypto),3)} crypto trade(s) executed")
-
+    from main import run_crypto_scan
+    new_crypto = run_crypto_scan(dry_run=DRY_RUN, direction=direction, traded_tickers=traded_tickers, open_position_value=OPEN_POSITION_VALUE)
+    if new_crypto:
+        print(f"  {len(new_crypto)} crypto trade(s) executed")
+        for t in new_crypto:
+            print(f"    {t.get('ticker')} {t.get('side','').upper()} edge={t.get('edge',0)*100:.0f}%")
+    else:
+        print("  No new crypto opportunities above threshold")
 except Exception as e:
     print(f"  Crypto scan error: {e}")
     import traceback; traceback.print_exc()
 
-# ── STEP 4b: FED RATE DECISION SCAN (full mode only) ─────────────────────────
-# v1: secondary window (2-7 days before FOMC). Captures structural mispricing.
-# Requires: edge > 12% AND confidence > 55% (harder gate than crypto/weather).
-# Favorite-longshot bias filter: never trades contracts below 15¢.
+# ── STEP 4b: FED RATE DECISION SCAN (full mode only) ─────────────────────
 print("\n[4b] Scanning for Fed rate decision opportunities...")
 new_fed = []
 try:
-    from fed_client import run_fed_scan, FOMC_DECISION_DATES_2026, is_in_signal_window
-
-    in_window, fed_meeting, fed_days = is_in_signal_window()
-    if not in_window:
-        print(f"  Fed signal window inactive — next FOMC {fed_meeting} ({fed_days}d away)")
+    from main import run_fed_scan as _run_fed_scan_cycle
+    new_fed = _run_fed_scan_cycle(dry_run=DRY_RUN, traded_tickers=traded_tickers, open_position_value=OPEN_POSITION_VALUE)
+    if new_fed:
+        print(f"  {len(new_fed)} Fed trade(s) executed")
     else:
-        fed_signal = run_fed_scan()
-
-        if fed_signal and not fed_signal.get("skip_reason"):
-            ticker     = fed_signal.get("ticker", "KXFEDDECISION-?")
-            side       = fed_signal.get("direction", "yes")
-            edge_pct   = fed_signal.get("edge", 0) * 100
-            conf_pct   = fed_signal.get("confidence", 0) * 100
-            outcome    = fed_signal.get("outcome", "?")
-            mkt_price  = int(fed_signal.get("yes_ask", 50))
-            bet_price  = mkt_price if side == "yes" else 100 - mkt_price
-
-            # Size: same formula as other modules — min($25, 2.5% of capital)
-            try:
-                _fed_capital  = get_computed_capital()
-                _fed_deployed = get_daily_exposure()
-                _fed_cap_ok   = check_daily_cap(_fed_capital, _fed_deployed)
-            except Exception:
-                _fed_cap_ok   = 25.0  # conservative fallback
-
-            if _fed_cap_ok <= 0:
-                print(f"  [CapCheck] Daily cap reached — skipping Fed trade")
-            elif ticker in traded_tickers:
-                print(f"  Already traded {ticker} this cycle — skipping")
-            else:
-                size       = min(25.0, _fed_cap_ok)
-                contracts  = max(1, int(size / bet_price * 100))
-                actual_cost = round(contracts * bet_price / 100, 2)
-
-                opp = {
-                    "ticker":     ticker,
-                    "title":      fed_signal.get("title", ticker),
-                    "side":       side,
-                    "action":     "buy",
-                    "yes_price":  mkt_price,
-                    "market_prob": fed_signal.get("market_price", 0.5),
-                    "noaa_prob":  None,
-                    "edge":       fed_signal.get("edge"),
-                    "confidence": fed_signal.get("confidence"),
-                    "size_dollars": actual_cost,
-                    "contracts":  contracts,
-                    "source":     "fed",
-                    "outcome":    outcome,
-                    "meeting_date": fed_signal.get("meeting_date"),
-                    "days_to_meeting": fed_signal.get("days_to_meeting"),
-                    "polymarket_prob": fed_signal.get("prob"),
-                    "note": (f"FOMC {fed_signal.get('meeting_date')} {outcome.upper()} "
-                             f"FedWatch={fed_signal.get('prob', 0):.0%} "
-                             f"Kalshi={fed_signal.get('market_price', 0):.0%} "
-                             f"edge={edge_pct:.0f}%"),
-                    "timestamp":  ts(),
-                    "date":       str(date.today()),
-                }
-
-                if DRY_RUN:
-                    log_trade(opp, actual_cost, contracts, {"dry_run": True})
-                    log_activity(
-                        f"[AUTO-FED] BUY {side.upper()} {ticker} {contracts}@{bet_price}c "
-                        f"${actual_cost:.2f} edge={edge_pct:.0f}% conf={conf_pct:.0f}%"
-                    )
-                    print(
-                        f"  [DEMO] BUY {side.upper()} {ticker:38} "
-                        f"{contracts:3}@{bet_price:3}c ${actual_cost:.2f} "
-                        f"edge={edge_pct:.0f}% conf={conf_pct:.0f}% [{outcome}]"
-                    )
-                else:
-                    try:
-                        result = client.place_order(ticker, side, bet_price, contracts)
-                        log_trade(opp, actual_cost, contracts, result)
-                        log_activity(
-                            f"[AUTO-FED] EXECUTED {ticker} {side.upper()} "
-                            f"{contracts}@{bet_price}c edge={edge_pct:.0f}%"
-                        )
-                        print(f"  [LIVE] EXECUTED Fed trade: {ticker}")
-                    except Exception as e:
-                        print(f"  ERROR executing Fed trade {ticker}: {e}")
-
-                traded_tickers.add(ticker)
-                new_fed.append(opp)
-
-        elif fed_signal and fed_signal.get("skip_reason"):
-            print(f"  Fed signal skipped: {fed_signal['skip_reason']}")
-        else:
-            print(f"  No Fed edge in window ({fed_days}d to {fed_meeting} FOMC)")
-
+        print("  No Fed opportunities this cycle")
 except Exception as e:
     print(f"  Fed scan error: {e}")
     import traceback; traceback.print_exc()
 
-# ── STEP 5: SECURITY AUDIT (weekly — Sunday only) ───────────────────────────
+# ΓöÇΓöÇ STEP 5: SECURITY AUDIT (weekly ΓÇö Sunday only) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 if datetime.now().weekday() == 6:  # Sunday
     print("\n[5] Weekly security audit...")
     try:
@@ -577,17 +373,17 @@ if datetime.now().weekday() == 6:  # Sunday
                           capture_output=True, text=True, timeout=30,
                           cwd=str(Path(__file__).parent))
         if 'WARNING' in r.stdout:
-            push_alert('security', 'Security audit found issues — review security_audit output')
-            print("  ALERT: issues found — check logs")
+            push_alert('security', 'Security audit found issues ΓÇö review security_audit output')
+            print("  ALERT: issues found ΓÇö check logs")
         else:
-            print("  Clean — no issues found")
+            print("  Clean ΓÇö no issues found")
     except Exception as e:
         print(f"  Audit error: {e}")
 
-# ── DONE ─────────────────────────────────────────────────────────────────────
+# ΓöÇΓöÇ DONE ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 summary = {
     'weather_trades': len(new_weather) if new_weather else 0,
-    'crypto_trades':  min(len(new_crypto), 3),
+    'crypto_trades':  len(new_crypto) if new_crypto else 0,
     'fed_trades':     len(new_fed) if new_fed else 0,
     'smart_money':    direction,
     'auto_exits':     len(actions_taken) if 'actions_taken' in dir() else 0,
@@ -600,7 +396,7 @@ print(f"  Weather: {summary['weather_trades']} new | Crypto: {summary['crypto_tr
 print(f"  Auto-exits: {summary['auto_exits']} | Signal: {direction.upper()}")
 print(f"{'='*60}\n")
 
-# ── SCAN SUMMARY NOTIFICATION ─────────────────────────────────────────────────
+# ΓöÇΓöÇ SCAN SUMMARY NOTIFICATION ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 # Sends a Telegram message to David via pending_alerts.json (heartbeat forwards it).
 # Level 'warning' is used so it always forwards without additional filtering.
 try:
@@ -610,7 +406,7 @@ try:
     tz_pdt = timezone(timedelta(hours=offset))
     _time_str = datetime.now(tz_pdt).strftime('%I:%M %p')
 
-    # ── Fed status ────────────────────────────────────────────────────────────
+    # ΓöÇΓöÇ Fed status ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     _fed_status = 'no signal (outside window)'
     try:
         _fed_latest_path = LOGS / 'fed_scan_latest.json'
@@ -629,7 +425,7 @@ try:
     except Exception:
         _fed_status = 'error reading fed data'
 
-    # ── Capital ───────────────────────────────────────────────────────────────
+    # ΓöÇΓöÇ Capital ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     try:
         _capital  = get_computed_capital()
         _deployed = get_daily_exposure()
@@ -638,7 +434,7 @@ try:
     except Exception:
         _cap_line = 'N/A'
 
-    # ── Build message ─────────────────────────────────────────────────────────
+    # ΓöÇΓöÇ Build message ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
     _w_opps   = len(new_weather) if isinstance(new_weather, list) else 0
     _w_trades = summary['weather_trades']
     _c_opps   = len(new_crypto) if isinstance(new_crypto, list) else 0

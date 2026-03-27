@@ -7,7 +7,7 @@ results to logs/smart_money_wallets.json for use by crypto_client.py.
 Used by ruppert_cycle.py: called once in the 7am full cycle before crypto scan.
 
 Author: Ruppert (AI Trading Analyst)
-Updated: 2026-03-12
+Updated: 2026-03-26
 """
 
 import json

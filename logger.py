@@ -4,6 +4,7 @@ Logs all bot activity, trades, and outcomes to files.
 """
 import json
 import os
+import uuid
 from datetime import datetime, date
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs')
@@ -17,26 +18,62 @@ def _activity_log_path():
     return os.path.join(LOG_DIR, f"activity_{date.today().isoformat()}.log")
 
 
-def log_trade(opportunity, size, contracts, order_result):
-    """Log a placed trade to today's trade log."""
-    entry = {
-        'timestamp':    datetime.now().isoformat(),
-        'date':         date.today().isoformat(),
+def build_trade_entry(opportunity, size, contracts, order_result):
+    """Build a standardized trade entry dict with all required fields.
+
+    Enforces schema consistency for every trade written to JSONL logs.
+    Adds a unique trade_id (uuid4) and ensures source, module, action,
+    timestamp, and date are always present.
+    """
+    # Infer module from source and ticker if not explicitly set
+    source = opportunity.get('source', 'bot')
+    module = opportunity.get('module', '')
+    if not module:
+        ticker_upper = (opportunity.get('ticker') or '').upper()
+        if source in ('weather',) or (source == 'bot' and ticker_upper.startswith('KXHIGH')):
+            module = 'weather'
+        elif source == 'crypto' or (source == 'bot' and any(
+            ticker_upper.startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXSOL', 'KXDOGE')
+        )):
+            module = 'crypto'
+        elif source == 'fed' or ticker_upper.startswith('KXFED'):
+            module = 'fed'
+        elif source == 'econ' or ticker_upper.startswith('KXCPI'):
+            module = 'econ'
+        elif source == 'geo':
+            module = 'geo'
+        elif source == 'manual':
+            module = 'manual'
+        else:
+            module = source  # fallback: use source as module
+
+    return {
+        'trade_id':     str(uuid.uuid4()),
+        'timestamp':    opportunity.get('timestamp') or datetime.now().isoformat(),
+        'date':         opportunity.get('date') or date.today().isoformat(),
         'ticker':       opportunity['ticker'],
-        'title':        opportunity['title'],
+        'title':        opportunity.get('title', opportunity['ticker']),
         'side':         opportunity['side'],
         'action':       opportunity.get('action', 'buy'),
-        'source':       opportunity.get('source', 'bot'),
+        'source':       source,
+        'module':       module,
         'noaa_prob':    opportunity.get('noaa_prob'),
         'market_prob':  opportunity.get('market_prob'),
         'edge':         opportunity.get('edge'),
+        'confidence':   opportunity.get('confidence') if opportunity.get('confidence') is not None
+                        else abs(opportunity.get('edge') or 0),
         'size_dollars': size,
         'contracts':    contracts,
         'order_result': order_result,
     }
+
+
+def log_trade(opportunity, size, contracts, order_result):
+    """Log a placed trade to today's trade log."""
+    entry = build_trade_entry(opportunity, size, contracts, order_result)
     with open(_today_log_path(), 'a', encoding='utf-8') as f:
         f.write(json.dumps(entry) + '\n')
-    print(f"[Log] Trade logged: {opportunity['ticker']} {opportunity['side'].upper()} ${size:.2f}")
+    print(f"[Log] Trade logged: {entry['trade_id'][:8]}.. {entry['ticker']} {entry['side'].upper()} ${size:.2f}")
 
 
 def log_opportunity(opportunity):
@@ -79,82 +116,13 @@ def get_daily_exposure():
 
 def get_computed_capital():
     """
-    Compute true available capital from first principles:
-      deposits (logs/demo_deposits.jsonl) + realized closed P&L (all logs/trades_*.jsonl exit records).
+    Backward-compatible wrapper — delegates to capital.get_capital().
 
-    This is the source-of-truth capital figure for demo mode.
-    Do NOT use client.get_balance() for capital sizing — it returns a stale Kalshi API value.
+    Kept so existing code that imports get_computed_capital() still works.
+    New code should import from capital.py directly.
     """
-    import glob
-
-    # ── Sum all deposits ──────────────────────────────────────────────────────
-    deposits_path = os.path.join(LOG_DIR, 'demo_deposits.jsonl')
-    total_deposits = 0.0
-    if os.path.exists(deposits_path):
-        try:  # W2: wrap file open in try/except
-            with open(deposits_path, 'r', encoding='utf-8') as f:
-                for line in f:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        record = json.loads(line)
-                        total_deposits += float(record.get('amount', 0.0))
-                    except Exception:
-                        pass
-        except Exception as _e:
-            import sys as _sys
-            print(f"[WARNING] get_computed_capital: failed to read deposits file: {_e}", file=_sys.stderr)
-
-    # W1: Floor — if no deposits found (file missing or empty/unreadable), fall back
-    # to $400 baseline to prevent zero-capital lockout of check_daily_cap().
-    if total_deposits == 0.0:
-        import sys as _sys
-        print(
-            "[WARNING] get_computed_capital: deposits file missing or empty — "
-            "using $400.00 floor to prevent zero-capital lockout.",
-            file=_sys.stderr,
-        )
-        total_deposits = 400.0
-
-    # ── Closed P&L: prefer dashboard cache (includes naturally settled losses) ──
-    # Dashboard /api/pnl calls Kalshi API for settled positions and writes pnl_cache.json.
-    # This is more accurate than summing exit records, which miss naturally settled losses.
-    pnl_cache_path = os.path.join(LOG_DIR, 'pnl_cache.json')
-    total_realized_pnl = None
-    if os.path.exists(pnl_cache_path):
-        try:
-            with open(pnl_cache_path, 'r', encoding='utf-8') as f:
-                cache = json.load(f)
-                total_realized_pnl = float(cache.get('closed_pnl', 0.0))
-        except Exception as _e:
-            import sys as _sys
-            print(f"[WARNING] get_computed_capital: pnl_cache.json unreadable, falling back to exit records: {_e}", file=_sys.stderr)
-
-    # Fallback: sum exit records if cache not available
-    if total_realized_pnl is None:
-        total_realized_pnl = 0.0
-        trade_log_pattern = os.path.join(LOG_DIR, 'trades_*.jsonl')
-        for log_path in sorted(glob.glob(trade_log_pattern)):
-            try:
-                with open(log_path, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            record = json.loads(line)
-                            if record.get('action') == 'exit':
-                                pnl = record.get('realized_pnl')
-                                if pnl is not None:
-                                    total_realized_pnl += float(pnl)
-                        except Exception:
-                            pass
-            except Exception as _e:
-                import sys as _sys
-                print(f"[WARNING] get_computed_capital: failed to read trade log {log_path}: {_e}", file=_sys.stderr)
-
-    return round(total_deposits + total_realized_pnl, 2)
+    from capital import get_capital
+    return get_capital()
 
 
 def send_telegram(message: str) -> bool:

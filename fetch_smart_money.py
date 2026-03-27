@@ -1,18 +1,66 @@
 """Fetch Polymarket smart money signal — reads title/outcome directly from positions API."""
-import sys, requests, json, time
+import sys, requests, json, time, os
 from pathlib import Path
+from datetime import datetime, timezone
 sys.stdout.reconfigure(encoding='utf-8')
 
 HEADERS = {'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'}
 
-WALLETS = {
-    '0x8dxd':   '0x63ce342161250d705dc0b16df89036c8e5f9ba9a',
-    '0xdE17f7': '0xdE17f7144fbD0eddb2679132C10ff5e74B120988',
-    'ScroogeX': '0x95d470e8d82d3dd6a899e91e36d7cee4b2c7c38c',
-    '0x1f0ebc': '0x1f0ebc543B2d411f66947041625c0Aa1ce61CF86',
-}
+WALLETS_FILE = Path(__file__).parent / 'logs' / 'smart_money_wallets.json'
+STALE_THRESHOLD_HOURS = 25
 
 CRYPTO_KW = ['bitcoin', 'btc', 'ethereum', 'eth', 'solana', 'sol', 'xrp', 'ripple', 'doge']
+
+
+def _load_wallets() -> dict:
+    """Load wallets from logs/smart_money_wallets.json written by wallet_updater."""
+    if not WALLETS_FILE.exists():
+        print('WARNING: smart_money_wallets.json not found — run wallet_updater first')
+        return {}
+    try:
+        data = json.loads(WALLETS_FILE.read_text(encoding='utf-8'))
+        raw = data.get('wallets', [])
+        if not raw or not isinstance(raw, list):
+            print('WARNING: smart_money_wallets.json has no wallets list')
+            return {}
+
+        # Staleness check
+        updated_at = data.get('updated_at', '')
+        if updated_at:
+            try:
+                updated_dt = datetime.fromisoformat(updated_at)
+                age_hours = (datetime.now(timezone.utc) - updated_dt).total_seconds() / 3600
+                if age_hours > STALE_THRESHOLD_HOURS:
+                    print(f'WARNING: smart_money: wallet list is stale (>{STALE_THRESHOLD_HOURS}h), consider re-running wallet_updater')
+            except Exception:
+                pass
+
+        return {addr[:8]: addr for addr in raw}
+    except Exception as e:
+        print(f'WARNING: failed to read smart_money_wallets.json: {e}')
+        return {}
+
+
+WALLETS = _load_wallets()
+
+if not WALLETS:
+    print('smart_money: no wallets available — returning neutral signal')
+    result = {
+        'direction':        'neutral',
+        'bull_pct':         0.5,
+        'up_value':         0.0,
+        'down_value':       0.0,
+        'traders_sampled':  0,
+        'active_positions': 0,
+        'positions':        [],
+        'timestamp':        int(time.time()),
+        'note':             'Neutral — no wallet list available',
+    }
+    out = Path('logs/crypto_smart_money.json')
+    out.parent.mkdir(exist_ok=True)
+    out.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
+    print(f'Saved neutral to {out}')
+    sys.exit(0)
 
 up_value   = 0.0
 down_value = 0.0

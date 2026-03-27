@@ -37,6 +37,29 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+def _shadow_log_yes_signal(signal: dict):
+    """Log YES weather signals as counterfactuals -- never executed, observation only."""
+    import json
+    from pathlib import Path
+    from datetime import datetime, timezone
+    shadow_file = Path(__file__).parent / 'logs' / 'weather_yes_shadow.jsonl'
+    try:
+        shadow_file.parent.mkdir(exist_ok=True)
+        entry = {
+            'ts': datetime.now(timezone.utc).isoformat(),
+            'ticker': signal.get('ticker', ''),
+            'predicted_prob': signal.get('win_prob', signal.get('prob')),
+            'market_price': signal.get('market_price', signal.get('yes_ask')),
+            'edge': signal.get('edge'),
+            'direction': 'yes',
+            'note': 'counterfactual -- direction filter blocked execution'
+        }
+        with open(shadow_file, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry) + '\n')
+    except Exception:
+        pass  # Never crash on shadow logging
+
 # Map Kalshi series tickers to their Open-Meteo city records
 TICKER_TO_SERIES = {
     # Original cities
@@ -265,6 +288,15 @@ def analyze_market(market: dict) -> dict | None:
         logger.info(f"[Edge] {ticker}: skipping — low ensemble confidence ({confidence:.2f})")
         return None
 
+    # ── Config confidence gate (MIN_CONFIDENCE from config) ──────────────────
+    min_conf = getattr(config, 'MIN_CONFIDENCE', {}).get('weather', 0.50)
+    if confidence < min_conf:
+        logger.info(
+            f"[Edge] {ticker}: skipping — confidence {confidence:.2f} < "
+            f"MIN_CONFIDENCE['weather'] {min_conf:.3f}"
+        )
+        return None
+
     # ── Edge calculation ──────────────────────────────────────────────────────
     edge = model_prob - market_prob
 
@@ -338,7 +370,7 @@ def analyze_market(market: dict) -> dict | None:
     # (primary skip is in main.py; this catches any path that bypasses it)
     if ensemble_data and ensemble_data.get('is_same_day'):
         city_hours = (ensemble_data.get('conditions') or {}).get('hours_since_midnight', 0)
-        if city_hours >= 14:
+        if city_hours >= config.SAME_DAY_SKIP_AFTER_HOUR:
             return None  # day's high already observed — no valid signal
 
     return result
@@ -346,14 +378,30 @@ def analyze_market(market: dict) -> dict | None:
 
 def find_opportunities(markets: list) -> list:
     """Scan all markets and return edge opportunities sorted by edge size."""
+    import time as _time
+    from openmeteo_client import clear_signal_cache as _clear_cache
+    _clear_cache()  # fresh cache for this scan batch
+
+    total = len(markets)
     opportunities = []
-    for market in markets:
+    _errors = 0
+    _start = _time.monotonic()
+    for idx, market in enumerate(markets):
         try:
             opp = analyze_market(market)
             if opp:
                 opportunities.append(opp)
         except Exception as e:
+            _errors += 1
             logger.error(f"[Edge] Error analyzing {market.get('ticker', '?')}: {e}")
+        # Progress logging every 20 markets (print, not logger — no handler when imported)
+        if (idx + 1) % 20 == 0 or (idx + 1) == total:
+            elapsed = _time.monotonic() - _start
+            print(
+                f"  [Edge] Progress: {idx+1}/{total} markets analyzed "
+                f"({len(opportunities)} hits, {_errors} errors, {elapsed:.0f}s elapsed)",
+                flush=True,
+            )
 
     opportunities.sort(key=lambda x: abs(x['edge']), reverse=True)
     return opportunities

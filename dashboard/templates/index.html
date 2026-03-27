@@ -205,7 +205,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
   /* Main grid — single column */
   .main-grid { grid-template-columns: 1fr; gap: 10px; }
 
-  /* Module cards — stack vertically */
+  /* Module cards — stack vertically on mobile */
   #module-cards-row { grid-template-columns: 1fr !important; }
 
   /* Tabs — scroll horizontally */
@@ -286,8 +286,8 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 
 
 
-  <!-- Module Performance Cards: Weather / Crypto / Fed -->
-  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;" id="module-cards-row">
+  <!-- Module Performance Cards: Weather / Crypto / Geo / Fed -->
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px;" id="module-cards-row">
 
     <!-- 🌤 Weather -->
     <div class="card" style="border-left:3px solid #4ade80;">
@@ -380,6 +380,51 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
           <div style="flex:1;padding-left:12px;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
             <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-total-trades">--</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🌍 Geo -->
+    <div class="card" style="border-left:3px solid #c4b5fd;">
+      <div style="padding:16px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
+          <span style="font-size:18px;">&#x1F30D;</span>
+          <span style="font-size:13px;font-weight:700;color:#fff;">Geo</span>
+        </div>
+        <div style="display:flex;margin-bottom:14px;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
+            <div class="pnl-neu" id="geo-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+          </div>
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
+              Closed P&amp;L
+              <select id="geo-period" onchange="setModulePeriod('geo',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
+                <option value="month" selected>This Month</option>
+                <option value="year">This Year</option>
+                <option value="all">All Time</option>
+              </select>
+            </div>
+            <div class="pnl-neu" id="geo-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+          </div>
+          <div style="flex:1;padding-left:12px;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
+            <div style="font-size:22px;font-weight:700;color:#888;" id="geo-winrate">--</div>
+          </div>
+        </div>
+        <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="geo-open-dep">--</div>
+          </div>
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="geo-open-cnt">--</div>
+          </div>
+          <div style="flex:1;padding-left:12px;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="geo-total-trades">--</div>
           </div>
         </div>
       </div>
@@ -504,10 +549,10 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 
 // ── Module Cards ──────────────────────────────────────────────────────────────
 // id prefix map: 'weather' → 'weather', 'crypto' → 'crypto-module', 'fed' → 'fed'
-const MODULE_ID = { weather: 'weather', crypto: 'crypto-module', fed: 'fed' };
+const MODULE_ID = { weather: 'weather', crypto: 'crypto-module', fed: 'fed', geo: 'geo' };
 
 window._moduleData   = {};
-window._modulePeriod = { weather: 'month', crypto: 'month', fed: 'month' };
+window._modulePeriod = { weather: 'month', crypto: 'month', fed: 'month', geo: 'month' };
 
 function setModulePeriod(mod, period) {
   window._modulePeriod[mod] = period;
@@ -566,7 +611,7 @@ function renderModuleCard(mod) {
 // ── Utils ──────────────────────────────────────────────────────────────────────
 async function api(url, opts={}) { try { return await (await fetch(url, opts)).json(); } catch { return null; } }
 const $ = id => document.getElementById(id);
-const dollar = v => '$' + (v||0).toFixed(2);
+const dollar = v => '$' + (v||0).toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:2});
 const pct    = v => v != null ? (v*100).toFixed(0)+'%' : '?';
 const sign   = v => v>=0 ? '+' : '';
 const pcls   = v => v>0 ? 'pnl-pos' : v<0 ? 'pnl-neg' : 'pnl-neu';
@@ -703,7 +748,8 @@ async function loadAccount() {
   // LIVE MODE: replace with raw acct.kalshi_balance (Kalshi API reflects real positions).
   // Starting capital = sum of deposits (no longer hardcoded $400)
   window._kalshiBalance = acct.starting_capital || 400;
-  // #av is managed by updateAccountValue() only — never reset here
+  // Trigger account value render now that balance is known
+  updateAccountValue();
   // Win Rate set by loadPnlChart (closed/settled trades only)
 
   $('ts').textContent = 'Updated ' + new Date().toLocaleTimeString();
@@ -740,7 +786,7 @@ async function loadPositions() {
   const positions = await api('/api/positions/active');
   const tb = $('pos-b');
   if (!positions || !positions.length) {
-    tb.innerHTML='<tr><td colspan="10" class="loading">No open positions</td></tr>';
+    tb.innerHTML='<tr><td colspan="10" class="loading" style="color:#555;padding:20px;">No open positions</td></tr>';
     window._cachedPositions = [];
     return;
   }
@@ -1154,24 +1200,24 @@ async function doAct(uid, action, ticker, priceCents) {
     setTimeout(()=>{closeSB(); loadHighConviction();}, 800);
     return;
   }
-  // BET YES or BET NO — execute trade
+  // BET YES or BET NO — approve for bot cycle (no manual execution)
   const side = action==='BET YES' ? 'yes' : 'no';
-  const confirmed = confirm(`Execute ${action} on\n${ticker}\nat ${priceCents}¢?\n\nThis will log to Open Positions (Demo).`);
+  const confirmed = confirm(`Approve ${action} on\n${ticker}\nat ${priceCents}¢?\n\nBot will execute on next cycle.`);
   if(!confirmed) return;
 
   document.getElementById(uid+'-r').querySelectorAll('.btn').forEach(b=>{b.disabled=true;b.style.opacity='.3';});
   const done=document.getElementById(uid+'-d'); done.style.display='block';
-  done.style.color='#888'; done.textContent='Executing...';
+  done.style.color='#888'; done.textContent='Approving...';
 
   try {
-    const res = await api('/api/highconviction/execute', {
+    const res = await api('/api/highconviction/approve', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ticker, side, price_cents: priceCents, title: window._hcBetTitle||''})
+      body: JSON.stringify({ticker, side})
     });
-    if(res && res.status==='executed'){
-      done.style.color= side==='yes' ? '#4ade80' : '#f87171';
-      done.textContent=`✓ ${action} executed — ${res.contracts} contracts @ ${priceCents}¢ ($${res.cost})`;
-      setTimeout(()=>{ closeSB(); loadHighConviction(); loadPositions(); }, 1200);
+    if(res && res.status==='approved'){
+      done.style.color= '#4ade80';
+      done.textContent=`✓ ${action} approved — bot will execute next cycle`;
+      setTimeout(()=>{ closeSB(); loadHighConviction(); }, 1200);
     } else {
       done.style.color='#f87171'; done.textContent='Error: '+(res?.error||'Unknown');
     }
@@ -1236,15 +1282,17 @@ async function loadClosedPnl() {
       wrEl.style.color = pnl.closed_win_rate >= 50 ? '#4ade80' : '#f87171';
     }
 
-    // Module cards — weather / crypto / fed
+    // Module cards — all four modules
     if (pnl.modules) {
       window._moduleData = pnl.modules;
-      ['weather', 'crypto', 'fed'].forEach(m => {
+      ['weather', 'crypto', 'fed', 'geo'].forEach(m => {
         if (window._moduleData[m]) renderModuleCard(m);
       });
     }
 
-    updateAccountValue();
+    // Note: updateAccountValue() is intentionally NOT called here.
+    // loadAccount() sets window._kalshiBalance first, then calls updateAccountValue().
+    // Calling it here causes a $400 flash (fallback value fires before balance is known).
   } catch(e) { console.error('loadClosedPnl', e); }
 }
 

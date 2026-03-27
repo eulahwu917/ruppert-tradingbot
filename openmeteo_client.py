@@ -32,6 +32,20 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+# ── Per-scan cache: avoid redundant HTTP calls for same city+date ────────────
+# Keyed on (series_ticker, target_date_str) — cleared at start of each scan.
+_conditions_cache: dict = {}     # {(series, date): conditions_dict}
+_nws_official_cache: dict = {}   # {(series, date): float|None}
+_nws_current_cache: dict = {}    # {(series, date): float|None}
+_ensemble_raw_cache: dict = {}   # {(series, model, date): list[float] | None}
+
+def clear_signal_cache():
+    """Clear per-scan caches. Call at the start of each find_opportunities run."""
+    _conditions_cache.clear()
+    _nws_official_cache.clear()
+    _nws_current_cache.clear()
+    _ensemble_raw_cache.clear()
+
 # ── Multi-Model Ensemble Configuration ───────────────────────────────────────
 # Weights must sum to 1.0. If a model fails, remaining weights are renormalized.
 ENSEMBLE_MODEL_WEIGHTS = {
@@ -74,9 +88,9 @@ DEFAULT_BIAS_F = 0.0  # fallback for unknown series tickers (was 3.0; reset pend
 # ── NWS Official Grid Points ──────────────────────────────────────────────────
 NWS_GRID_POINTS = {
     # Original cities
-    "KXHIGHNY":   {"office": "OKX", "gridX": 33,  "gridY": 37},
-    "KXHIGHCHI":  {"office": "LOT", "gridX": 75,  "gridY": 73},
-    "KXHIGHMIA":  {"office": "MFL", "gridX": 110, "gridY": 50},
+    "KXHIGHNY":   {"office": "OKX", "gridX": 37,  "gridY": 39},
+    "KXHIGHCHI":  {"office": "LOT", "gridX": 66,  "gridY": 77},
+    "KXHIGHMIA":  {"office": "MFL", "gridX": 106, "gridY": 51},
     "KXHIGHPHX":  {"office": "PSR", "gridX": 157, "gridY": 57},
     "KXHIGHHOU":  {"office": "HGX", "gridX": 66,  "gridY": 99},
     "KXHIGHLA":   {"office": "LOX", "gridX": 155, "gridY": 45},
@@ -86,7 +100,7 @@ NWS_GRID_POINTS = {
     "KXHIGHLAX":  {"office": "LOX", "gridX": 148, "gridY": 41},   # Los Angeles LAX (33.9425,-118.4081)
     "KXHIGHPHIL": {"office": "PHI", "gridX": 50,  "gridY": 76},   # Philadelphia (39.9526,-75.1652)
     "KXHIGHTMIN": {"office": "MPX", "gridX": 108, "gridY": 72},   # Minneapolis (44.9778,-93.2650)
-    "KXHIGHTDAL": {"office": "FWD", "gridX": 89,  "gridY": 104},  # Dallas (32.7767,-96.7970)
+    "KXHIGHTDAL": {"office": "FWD", "gridX": 87,  "gridY": 107},  # Dallas/KDAL (32.7767,-96.7970)
     "KXHIGHTDC":  {"office": "LWX", "gridX": 96,  "gridY": 72},   # Washington DC (38.9072,-77.0369)
     "KXHIGHTLV":  {"office": "VEF", "gridX": 123, "gridY": 98},   # Las Vegas (36.1699,-115.1398)
     "KXHIGHTNOU": {"office": "LIX", "gridX": 68,  "gridY": 88},   # New Orleans (29.9511,-90.0715)
@@ -94,150 +108,152 @@ NWS_GRID_POINTS = {
     "KXHIGHTSFO": {"office": "MTR", "gridX": 85,  "gridY": 98},   # San Francisco (37.6213,-122.3790)
     "KXHIGHTSEA": {"office": "SEW", "gridX": 124, "gridY": 61},   # Seattle (47.4502,-122.3088)
     "KXHIGHTSATX":{"office": "EWX", "gridX": 126, "gridY": 54},   # San Antonio (29.4241,-98.4936)
-    "KXHIGHTATL": {"office": "FFC", "gridX": 51,  "gridY": 87},   # Atlanta (33.7490,-84.3880)
+    "KXHIGHTATL": {"office": "FFC", "gridX": 50,  "gridY": 82},   # Atlanta/KATL (33.7490,-84.3880)
 }
 
 # Kalshi weather market cities with coordinates + NWS station
+# ⚠️ All lat/lon use exact airport station coordinates — Kalshi resolves on these stations.
+# Updated 2026-03-26: previously used city center coords (wrong forecast anchor).
 CITIES = {
     # Original cities
     "KXHIGHNY": {
         "name": "New York",
-        "lat": 40.7128,
-        "lon": -74.0060,
+        "lat": 40.7794,   # KNYC (Central Park) — Kalshi resolves on KNYC, not JFK
+        "lon": -73.9691,
         "nws_station": "KNYC",
         "timezone": "America/New_York",
     },
     "KXHIGHLA": {
         "name": "Los Angeles",
-        "lat": 34.0522,
-        "lon": -118.2437,
+        "lat": 33.9425,   # KLAX airport
+        "lon": -118.4081,
         "nws_station": "KLAX",
         "timezone": "America/Los_Angeles",
     },
     "KXHIGHCHI": {
         "name": "Chicago",
-        "lat": 41.8781,
-        "lon": -87.6298,
+        "lat": 41.9742,   # KORD (O'Hare) airport
+        "lon": -87.9073,
         "nws_station": "KORD",
         "timezone": "America/Chicago",
     },
     "KXHIGHHOU": {
         "name": "Houston",
-        "lat": 29.7604,
-        "lon": -95.3698,
+        "lat": 29.6454,   # KHOU (Hobby) airport
+        "lon": -95.2789,
         "nws_station": "KHOU",
         "timezone": "America/Chicago",
     },
     "KXHIGHMIA": {
         "name": "Miami",
-        "lat": 25.7617,
-        "lon": -80.1918,
+        "lat": 25.7959,   # KMIA airport
+        "lon": -80.2870,
         "nws_station": "KMIA",
         "timezone": "America/New_York",
     },
     "KXHIGHPHX": {
         "name": "Phoenix",
-        "lat": 33.4484,
-        "lon": -112.0740,
+        "lat": 33.4373,   # KPHX airport
+        "lon": -112.0078,
         "nws_station": "KPHX",
         "timezone": "America/Phoenix",
     },
     # Expanded cities (added 2026-03-13)
     "KXHIGHAUS": {
         "name": "Austin",
-        "lat": 30.2672,
-        "lon": -97.7431,
+        "lat": 30.1945,   # KAUS airport
+        "lon": -97.6699,
         "nws_station": "KAUS",
         "timezone": "America/Chicago",
     },
     "KXHIGHDEN": {
         "name": "Denver",
-        "lat": 39.7392,
-        "lon": -104.9903,
+        "lat": 39.8561,   # KDEN airport
+        "lon": -104.6737,
         "nws_station": "KDEN",
         "timezone": "America/Denver",
     },
     "KXHIGHLAX": {
         "name": "Los Angeles (LAX)",
-        "lat": 33.9425,
+        "lat": 33.9425,   # KLAX airport
         "lon": -118.4081,
         "nws_station": "KLAX",
         "timezone": "America/Los_Angeles",
     },
     "KXHIGHPHIL": {
         "name": "Philadelphia",
-        "lat": 39.9526,
-        "lon": -75.1652,
+        "lat": 39.8721,   # KPHL airport
+        "lon": -75.2411,
         "nws_station": "KPHL",
         "timezone": "America/New_York",
     },
     "KXHIGHTMIN": {
         "name": "Minneapolis",
-        "lat": 44.9778,
-        "lon": -93.2650,
+        "lat": 44.8848,   # KMSP airport
+        "lon": -93.2223,
         "nws_station": "KMSP",
         "timezone": "America/Chicago",
     },
     "KXHIGHTDAL": {
         "name": "Dallas",
-        "lat": 32.7767,
-        "lon": -96.7970,
+        "lat": 32.8998,   # KDFW airport
+        "lon": -97.0403,
         "nws_station": "KDFW",
         "timezone": "America/Chicago",
     },
     "KXHIGHTDC": {
         "name": "Washington DC",
-        "lat": 38.9072,
-        "lon": -77.0369,
+        "lat": 38.8512,   # KDCA (Reagan National) airport
+        "lon": -77.0402,
         "nws_station": "KDCA",
         "timezone": "America/New_York",
     },
     "KXHIGHTLV": {
         "name": "Las Vegas",
-        "lat": 36.1699,
-        "lon": -115.1398,
+        "lat": 36.0840,   # KLAS airport
+        "lon": -115.1537,
         "nws_station": "KLAS",
         "timezone": "America/Los_Angeles",
     },
     "KXHIGHTNOU": {
         "name": "New Orleans",
-        "lat": 29.9511,
-        "lon": -90.0715,
+        "lat": 29.9934,   # KMSY airport
+        "lon": -90.2580,
         "nws_station": "KMSY",
         "timezone": "America/Chicago",
     },
     "KXHIGHTOKC": {
         "name": "Oklahoma City",
-        "lat": 35.4676,
-        "lon": -97.5164,
+        "lat": 35.3931,   # KOKC airport
+        "lon": -97.6007,
         "nws_station": "KOKC",
         "timezone": "America/Chicago",
     },
     "KXHIGHTSFO": {
         "name": "San Francisco",
-        "lat": 37.6213,
+        "lat": 37.6213,   # KSFO airport
         "lon": -122.3790,
         "nws_station": "KSFO",
         "timezone": "America/Los_Angeles",
     },
     "KXHIGHTSEA": {
         "name": "Seattle",
-        "lat": 47.4502,
+        "lat": 47.4502,   # KSEA airport
         "lon": -122.3088,
         "nws_station": "KSEA",
         "timezone": "America/Los_Angeles",
     },
     "KXHIGHTSATX": {
         "name": "San Antonio",
-        "lat": 29.4241,
-        "lon": -98.4936,
+        "lat": 29.5337,   # KSAT airport
+        "lon": -98.4698,
         "nws_station": "KSAT",
         "timezone": "America/Chicago",
     },
     "KXHIGHTATL": {
         "name": "Atlanta",
-        "lat": 33.7490,
-        "lon": -84.3880,
+        "lat": 33.6407,   # KATL airport
+        "lon": -84.4277,
         "nws_station": "KATL",
         "timezone": "America/New_York",
     },
@@ -261,116 +277,132 @@ def _get_bias(series_ticker: str) -> float:
 
 # ── Single-Model Ensemble Fetch ───────────────────────────────────────────────
 
+def _fetch_raw_ensemble(series_ticker: str, target_date: date, model: str) -> list | None:
+    """
+    Fetch raw ensemble member highs for a city+date+model.
+    Uses per-scan cache to avoid redundant API calls for the same city+date
+    (different thresholds share the same raw data).
+
+    Returns list of member highs (floats), or None on failure.
+    """
+    import time as _time
+    _cache_key = (series_ticker, model, target_date.isoformat())
+    if _cache_key in _ensemble_raw_cache:
+        return _ensemble_raw_cache[_cache_key]
+
+    city = CITIES.get(series_ticker)
+    if not city:
+        _ensemble_raw_cache[_cache_key] = None
+        return None
+
+    days_ahead = (target_date - date.today()).days
+    if days_ahead < 0:
+        _ensemble_raw_cache[_cache_key] = None
+        return None
+
+    forecast_days = max(days_ahead + 2, 3)
+
+    # Retry with exponential backoff on 429 (rate limit)
+    for attempt in range(3):
+        try:
+            url = "https://ensemble-api.open-meteo.com/v1/ensemble"
+            params = {
+                "latitude":         city["lat"],
+                "longitude":        city["lon"],
+                "daily":            "temperature_2m_max",
+                "models":           model,
+                "temperature_unit": "fahrenheit",
+                "forecast_days":    min(forecast_days, 16),
+                "timezone":         city["timezone"],
+            }
+            r = requests.get(url, params=params, timeout=15)
+            if r.status_code == 429:
+                wait = 2 ** attempt  # 1s, 2s, 4s
+                logger.warning(f"[OpenMeteo/{model}] 429 rate limited — waiting {wait}s (attempt {attempt+1}/3)")
+                _time.sleep(wait)
+                continue
+            r.raise_for_status()
+            data = r.json()
+
+            member_keys = [
+                k for k in data.get("daily", {})
+                if "temperature_2m_max" in k and "member" in k
+            ]
+            if not member_keys:
+                _ensemble_raw_cache[_cache_key] = None
+                return None
+
+            dates      = data["daily"].get("time", [])
+            target_str = target_date.isoformat()
+            if target_str not in dates:
+                _ensemble_raw_cache[_cache_key] = None
+                return None
+            date_idx = dates.index(target_str)
+
+            member_highs = []
+            for key in member_keys:
+                vals = data["daily"][key]
+                if date_idx < len(vals) and vals[date_idx] is not None:
+                    member_highs.append(vals[date_idx])
+
+            result = member_highs if member_highs else None
+            _ensemble_raw_cache[_cache_key] = result
+            return result
+
+        except Exception as e:
+            logger.error(f"[OpenMeteo/{model}] Ensemble fetch failed for {series_ticker}: {e}")
+            _ensemble_raw_cache[_cache_key] = None
+            return None
+
+    # All retries exhausted (429 persisted)
+    logger.error(f"[OpenMeteo/{model}] Rate limit persisted after 3 retries for {series_ticker}")
+    _ensemble_raw_cache[_cache_key] = None
+    return None
+
+
 def _fetch_model_ensemble(series_ticker: str, threshold_f: float,
                           target_date: date, model: str) -> dict:
     """
     Fetch one model's ensemble members from Open-Meteo and compute probability
     that daily max temperature meets or exceeds `threshold_f` on `target_date`.
 
-    Args:
-        series_ticker: e.g. "KXHIGHMIA"
-        threshold_f:   already bias-adjusted threshold in °F
-        target_date:   date to evaluate
-        model:         Open-Meteo model name (e.g. "ecmwf_ifs025")
-
-    Returns:
-        {
-          "model": str,
-          "prob": float or None,
-          "confidence": float,
-          "members_above": int,
-          "total_members": int,
-          "forecast_highs": list[float],
-          "ensemble_median": float,
-          "ensemble_mean": float,
-          "ensemble_min": float,
-          "ensemble_max": float,
-          "error": None or str,
-        }
+    Uses cached raw ensemble data when available (same city+date, different threshold).
     """
     city = CITIES.get(series_ticker)
     if not city:
         return {"model": model, "error": f"Unknown series ticker: {series_ticker}", "prob": None}
 
-    days_ahead = (target_date - date.today()).days
-    if days_ahead < 0:
-        return {"model": model, "error": "Target date is in the past", "prob": None}
+    member_highs = _fetch_raw_ensemble(series_ticker, target_date, model)
+    if member_highs is None:
+        return {"model": model, "error": f"No ensemble data for {series_ticker}/{model}", "prob": None}
 
-    forecast_days = max(days_ahead + 2, 3)
+    total      = len(member_highs)
+    above      = sum(1 for h in member_highs if h >= threshold_f)
+    prob       = above / total
+    confidence = abs(prob - 0.5) * 2
 
-    try:
-        url = "https://ensemble-api.open-meteo.com/v1/ensemble"
-        params = {
-            "latitude":         city["lat"],
-            "longitude":        city["lon"],
-            "daily":            "temperature_2m_max",
-            "models":           model,
-            "temperature_unit": "fahrenheit",
-            "forecast_days":    min(forecast_days, 16),
-            "timezone":         city["timezone"],
-        }
-        r = requests.get(url, params=params, timeout=15)
-        r.raise_for_status()
-        data = r.json()
+    sorted_highs = sorted(member_highs)
+    median = sorted_highs[total // 2]
+    mean   = sum(member_highs) / total
 
-        member_keys = [
-            k for k in data.get("daily", {})
-            if "temperature_2m_max" in k and "member" in k
-        ]
+    logger.info(
+        f"[OpenMeteo/{model}] {city['name']} threshold={threshold_f:.1f}°F "
+        f"date={target_date.isoformat()}: {above}/{total} above → prob={prob:.2f}"
+    )
 
-        if not member_keys:
-            return {"model": model, "error": f"No ensemble members in response for {model}", "prob": None}
-
-        dates      = data["daily"].get("time", [])
-        target_str = target_date.isoformat()
-        if target_str not in dates:
-            return {
-                "model": model,
-                "error": f"Target date {target_str} not in forecast range for {model}",
-                "prob": None,
-            }
-        date_idx = dates.index(target_str)
-
-        member_highs = []
-        for key in member_keys:
-            vals = data["daily"][key]
-            if date_idx < len(vals) and vals[date_idx] is not None:
-                member_highs.append(vals[date_idx])
-
-        if not member_highs:
-            return {"model": model, "error": f"No valid member values for {model} on {target_str}", "prob": None}
-
-        total      = len(member_highs)
-        above      = sum(1 for h in member_highs if h >= threshold_f)
-        prob       = above / total
-        confidence = abs(prob - 0.5) * 2
-
-        sorted_highs = sorted(member_highs)
-        median = sorted_highs[total // 2]
-        mean   = sum(member_highs) / total
-
-        logger.info(
-            f"[OpenMeteo/{model}] {city['name']} threshold={threshold_f:.1f}°F "
-            f"date={target_str}: {above}/{total} above → prob={prob:.2f}"
-        )
-
-        return {
-            "model":           model,
-            "prob":            round(prob, 4),
-            "confidence":      round(confidence, 4),
-            "members_above":   above,
-            "total_members":   total,
-            "forecast_highs":  member_highs,
-            "ensemble_median": round(median, 1),
-            "ensemble_mean":   round(mean, 1),
-            "ensemble_min":    round(sorted_highs[0], 1),
-            "ensemble_max":    round(sorted_highs[-1], 1),
-            "error":           None,
-        }
-
-    except Exception as e:
-        logger.error(f"[OpenMeteo/{model}] Ensemble fetch failed for {series_ticker}: {e}")
-        return {"model": model, "error": str(e), "prob": None}
+    return {
+        "model":           model,
+        "prob":            round(prob, 4),
+        "confidence":      round(confidence, 4),
+        "members_above":   above,
+        "total_members":   total,
+        "forecast_highs":  member_highs,
+        "ensemble_median": round(median, 1),
+        "ensemble_mean":   round(mean, 1),
+        "ensemble_min":    round(sorted_highs[0], 1),
+        "ensemble_max":    round(sorted_highs[-1], 1),
+        "error":           None,
+    }
 
 
 # ── Multi-Model Ensemble (public API) ────────────────────────────────────────
@@ -700,11 +732,28 @@ def get_full_weather_signal(series_ticker: str, threshold_f: float, target_date:
     effective_threshold = threshold_f - bias
 
     ensemble   = get_ensemble_probability(series_ticker, effective_threshold, target_date)
-    conditions = get_current_conditions(series_ticker)
 
-    # NWS official → legacy observation fallback
-    nws_official = get_nws_forecast_high_official(series_ticker, target_date)
-    nws_current  = nws_official if nws_official is not None else get_nws_forecast_high(series_ticker, target_date)
+    # Conditions + NWS: cache per (city, date) — same data regardless of threshold
+    _cache_key = (series_ticker, target_date.isoformat())
+
+    if _cache_key in _conditions_cache:
+        conditions = _conditions_cache[_cache_key]
+    else:
+        conditions = get_current_conditions(series_ticker)
+        _conditions_cache[_cache_key] = conditions
+
+    # NWS official → legacy observation fallback (cached per city+date)
+    if _cache_key in _nws_official_cache:
+        nws_official = _nws_official_cache[_cache_key]
+    else:
+        nws_official = get_nws_forecast_high_official(series_ticker, target_date)
+        _nws_official_cache[_cache_key] = nws_official
+
+    if _cache_key in _nws_current_cache:
+        nws_current = _nws_current_cache[_cache_key]
+    else:
+        nws_current = nws_official if nws_official is not None else get_nws_forecast_high(series_ticker, target_date)
+        _nws_current_cache[_cache_key] = nws_current
 
     is_same_day = (target_date == date.today())
     result = {

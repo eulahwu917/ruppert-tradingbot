@@ -17,20 +17,25 @@ Signal dict contract (produced by each module):
 """
 
 import sys
+import config as _cfg
+import config
 
 # ---------------------------------------------------------------------------
 # Module-specific thresholds (mirrors config.py constants)
 # ---------------------------------------------------------------------------
 MIN_EDGE = {
-    'weather': 0.15,
+    'weather': 0.12,   # lowered from 0.30 (Post-Brier review: recalibrated)
     'crypto':  0.12,
+    'geo':     0.15,   # Phase 4: higher than crypto — geo harder to model (LLM-estimated)
+    'econ':    0.12,   # Phase 5: economics/CPI — matches config.ECON_MIN_EDGE
+    'fed':     0.12,   # Phase 5: Fed rate — matches fed_client.FED_MIN_EDGE
 }
-MIN_CONFIDENCE   = 0.50          # universal minimum confidence to enter
+MIN_CONFIDENCE   = 0.25          # universal minimum confidence to enter (Post-Brier review)
 MIN_HOURS_ENTRY  = 0.5           # must be ≥ 30 min from settlement to open
 MIN_HOURS_ADD    = 2.0           # must be ≥ 2 h from settlement to add
 DAILY_CAP_RATIO  = 0.70          # max fraction of total capital deployable per day
-MAX_POSITION_CAP = 50.0          # hard dollar cap per single position entry
-PCT_CAPITAL_CAP  = 0.025         # max 2.5% of total capital per entry
+# MAX_POSITION_CAP = 50.0        # removed: replaced by MAX_POSITION_PCT in config.py
+# PCT_CAPITAL_CAP  = 0.025       # removed: replaced by MAX_POSITION_PCT in config.py
 KELLY_FRACTION   = 0.25          # max fractional Kelly multiplier (80%+ confidence tier)
 
 
@@ -42,28 +47,31 @@ def kelly_fraction_for_confidence(confidence: float) -> float:
     """
     Return the fractional Kelly multiplier appropriate for a given confidence level.
 
-    Higher confidence → larger fraction of the Kelly-optimal bet.
-    This prevents oversizing on borderline signals where the model is less certain.
+    Higher confidence -> larger fraction of the Kelly-optimal bet.
+    6-tier structure for DEMO data accumulation phase (2026-03-26).
+    Low confidence tiers (25-50%) added to maximize trade volume in DEMO.
 
     Tiers:
-        80%+    → 0.25  (full conservative Kelly)
-        70–80%  → 0.20
-        60–70%  → 0.15
-        50–60%  → 0.10  (minimum — just above entry threshold)
+        80%+    -> 0.16  (compressed from 0.25 -- unvalidated calibration)
+        70-80%  -> 0.14
+        60-70%  -> 0.12
+        50-60%  -> 0.10
+        40-50%  -> 0.07
+        25-40%  -> 0.05  (minimum -- data accumulation only)
 
-    Args:
-        confidence: Model confidence score (0–1).
-
-    Returns:
-        Kelly multiplier as a float.
+    Post-Brier review: recalibrate all tiers against actual calibration data.
     """
     if confidence >= 0.80:
-        return 0.25
+        return 0.16
     if confidence >= 0.70:
-        return 0.20
+        return 0.14
     if confidence >= 0.60:
-        return 0.15
-    return 0.10  # 50–60% confidence band
+        return 0.12
+    if confidence >= 0.50:
+        return 0.10
+    if confidence >= 0.40:
+        return 0.07
+    return 0.05  # 25-40% confidence band
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +169,9 @@ def calculate_position_size(edge: float, win_prob: float, capital: float,
     if vol_ratio > 0:
         kelly_size *= (1.0 / vol_ratio)
 
-    # Hard caps
-    size = min(kelly_size, MAX_POSITION_CAP, capital * PCT_CAPITAL_CAP)
+    # Hard cap: 1% of capital per trade (reads from config.MAX_POSITION_PCT)
+    position_cap = capital * getattr(_cfg, 'MAX_POSITION_PCT', 0.01)
+    size = min(kelly_size, position_cap)
     return round(max(0.0, size), 2)
 
 
@@ -186,6 +195,26 @@ def check_daily_cap(total_capital: float, deployed_today: float) -> float:
     max_daily = total_capital * DAILY_CAP_RATIO
     remaining = max_daily - deployed_today
     return round(max(0.0, remaining), 2)
+
+
+# ---------------------------------------------------------------------------
+# 2b. Open Exposure Check (real-time 70% global cap)
+# ---------------------------------------------------------------------------
+
+def check_open_exposure(total_capital: float, open_position_value: float) -> bool:
+    """
+    Return True if it's safe to enter (open exposure < 70% of capital).
+    Return False if adding any position would exceed the global cap.
+
+    Args:
+        total_capital:       Total portfolio capital in dollars.
+        open_position_value: Current total value of all open positions.
+
+    Returns:
+        True = safe to enter, False = global cap reached.
+    """
+    max_exposure = total_capital * DAILY_CAP_RATIO  # reuses the 0.70 constant
+    return open_position_value < max_exposure
 
 
 # ---------------------------------------------------------------------------
@@ -230,6 +259,20 @@ def should_enter(signal: dict, capital: float, deployed_today: float) -> dict:
     if edge < min_edge:
         return {'enter': False, 'size': 0.0,
                 'reason': f'insufficient_edge ({edge:.3f} < {min_edge} for {module})'}
+
+    # --- Direction filter: only trade NO on weather (backtest validation 2026-03-13) ---
+    # Key: use 'side' — matches edge_detector.py output ('yes'/'no')
+    side = signal.get('side', '')
+    if module == 'weather' and config.WEATHER_DIRECTION_FILTER:
+        if side.upper() != config.WEATHER_DIRECTION_FILTER.upper():
+            return {'enter': False, 'size': 0.0,
+                    'reason': f'direction_filter: weather only bets {config.WEATHER_DIRECTION_FILTER}, got {side}'}
+
+    # --- Global open exposure cap (real-time 70% check) ---
+    open_position_value = signal.get('open_position_value', 0.0)
+    if not check_open_exposure(capital, open_position_value):
+        return {'enter': False, 'size': 0.0,
+                'reason': 'global_exposure_cap_reached (70% of capital)'}
 
     # --- Daily cap gate ---
     room = check_daily_cap(capital, deployed_today)
@@ -424,11 +467,14 @@ def get_strategy_summary() -> dict:
         'kelly_fraction_tier_70_80':    0.20,
         'kelly_fraction_tier_60_70':    0.15,
         'kelly_fraction_tier_50_60':    0.10,
-        'max_position_cap_dollars': MAX_POSITION_CAP,
-        'pct_capital_cap':          PCT_CAPITAL_CAP,
+        'max_position_pct':         getattr(_cfg, 'MAX_POSITION_PCT', 0.01),
+        'pct_capital_cap':          getattr(_cfg, 'MAX_POSITION_PCT', 0.01),
         'daily_cap_ratio':          DAILY_CAP_RATIO,
         'min_edge_weather':         MIN_EDGE['weather'],
         'min_edge_crypto':          MIN_EDGE['crypto'],
+        'min_edge_geo':             MIN_EDGE['geo'],
+        'min_edge_econ':            MIN_EDGE['econ'],
+        'min_edge_fed':             MIN_EDGE['fed'],
         'min_confidence':           MIN_CONFIDENCE,
         'min_hours_to_entry':       MIN_HOURS_ENTRY,
         'min_hours_to_add':         MIN_HOURS_ADD,

@@ -94,6 +94,19 @@ def _load_wallets() -> dict:
                     '_load_wallets: loaded %d wallets from %s (updated %s)',
                     len(raw), _WALLETS_FILE.name, data.get('updated_at', 'unknown')
                 )
+                # Staleness check
+                updated_at = data.get('updated_at', '')
+                if updated_at:
+                    try:
+                        from datetime import datetime, timezone
+                        updated_dt = datetime.fromisoformat(updated_at)
+                        age_hours = (datetime.now(timezone.utc) - updated_dt).total_seconds() / 3600
+                        if age_hours > 25:
+                            logger.warning(
+                                'smart_money: wallet list is stale (>25h), consider re-running wallet_updater'
+                            )
+                    except Exception:
+                        pass
                 return {addr: addr[:8] + '...' for addr in raw}
         except Exception as e:
             logger.warning('_load_wallets: failed to read smart_money_wallets.json: %s', e)

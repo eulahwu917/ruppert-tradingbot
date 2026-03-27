@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 import json
 from datetime import date, datetime
 from pathlib import Path
+from capital import get_capital, get_buying_power
 
 app = FastAPI(title="Ruppert Trading Dashboard")
 LOGS_DIR = Path(__file__).parent.parent / "logs"
@@ -151,6 +152,11 @@ def classify_module(src: str, ticker: str) -> str:
         return 'crypto'
     if src == 'fed' or t.startswith('KXFED') or t.startswith('KXCPI'):
         return 'fed'
+    if src == 'geo' or t.startswith('KXUKRAINE') or t.startswith('KXRUSSIA') or \
+       t.startswith('KXISRAEL') or t.startswith('KXIRAN') or t.startswith('KXTAIWAN') or \
+       t.startswith('KXNATO') or t.startswith('KXCHINA') or t.startswith('KXNKOREA') or \
+       t.startswith('KXCEASEFIRE'):
+        return 'geo'
     return 'other'
 
 
@@ -219,11 +225,25 @@ def is_settled_ticker(ticker: str) -> bool:
 def get_summary():
     trades = read_all_trades()
     today  = read_today_trades()
+    # Deduplicate to unique positions (excluding exit records and duplicate entries)
+    exited_tickers = {t.get('ticker') for t in trades if t.get('action') == 'exit'}
+    seen = set()
+    unique_positions = 0
+    for t in trades:
+        ticker = t.get('ticker', '')
+        if not ticker or ticker in seen or t.get('action') == 'exit':
+            continue
+        seen.add(ticker)
+        unique_positions += 1
     return {
-        "total_trades":    len(trades),
-        "today_trades":    len(today),
-        "total_exposure":  round(sum(t.get('size_dollars',0) for t in trades), 2),
-        "today_exposure":  round(sum(t.get('size_dollars',0) for t in today), 2),
+        # raw_entries = total JSONL lines (includes duplicates and exit records)
+        # unique_positions = deduplicated open+closed positions (correct count)
+        "raw_entries":       len(trades),
+        "unique_positions":  unique_positions,
+        "total_trades":      unique_positions,   # alias: matches /api/pnl definition
+        "today_trades":      len(today),
+        "total_exposure":    round(sum(t.get('size_dollars',0) for t in trades), 2),
+        "today_exposure":    round(sum(t.get('size_dollars',0) for t in today), 2),
         "mode": get_mode().upper(), "status": "RUNNING",
     }
 
@@ -236,7 +256,7 @@ def get_account():
     Starting capital is tracked locally — no Kalshi API call needed.
       Account Value  = STARTING_CAPITAL + Open P&L + Closed P&L   (frontend computes)
       Buying Power   = STARTING_CAPITAL − Deployed Capital in open trades
-      Starting Capital = $200 initial + $200 crypto allocation = $400
+      Starting Capital = $10,000 fresh start 2026-03-26
 
     ── LIVE MODE (switch when David approves going live) ────────────────────
     Replace the STARTING_CAPITAL line below with a real Kalshi API call:
@@ -275,45 +295,12 @@ def get_account():
     manual_cost  = sum(t.get('size_dollars',0) for t in open_trades if t.get('source','bot') in MANUAL_SOURCES)
     total_deployed = bot_cost + manual_cost
 
-    # Capital source: Live = Kalshi API balance; Demo = sum of demo deposits
-    if current_mode == 'live':
-        try:
-            sys.path.insert(0, str(Path(__file__).parent.parent))
-            from kalshi_client import KalshiClient
-            STARTING_CAPITAL = KalshiClient().get_balance()
-        except Exception as e:
-            STARTING_CAPITAL = 400.0  # fallback if API fails
-        # In live mode, Kalshi balance already reflects settled P&L
-        # Buying power = balance minus currently deployed (open positions)
-        buying_power = max(STARTING_CAPITAL - total_deployed, 0)
-    else:
-        # Demo: computed capital = deposits + realized P&L from all exit records.
-        # Mirrors get_computed_capital() in logger.py — inlined here to avoid circular imports.
-        # W4: replaces stale get_balance() display (~$172) with true computed capital (~$510).
-        deposits_path = LOGS_DIR / "demo_deposits.jsonl"
-        STARTING_CAPITAL = 0.0
-        if deposits_path.exists():
-            try:
-                with open(deposits_path, encoding='utf-8') as f:
-                    for line in f:
-                        try: STARTING_CAPITAL += json.loads(line).get('amount', 0)
-                        except: pass
-            except Exception:
-                pass
-        if STARTING_CAPITAL == 0:
-            STARTING_CAPITAL = 400.0  # fallback if deposits file missing or empty
-        STARTING_CAPITAL = round(STARTING_CAPITAL, 2)
-        # Read bot-only closed P&L from cache (written by /api/pnl, manual trades excluded).
-        # buying_power = starting_capital + bot_closed_pnl - open_deployed
-        # Frontend JS also computes this using window._closedPnl (bot-only after Fix 1).
-        _bot_closed_cached = 0.0
-        try:
-            _pnl_cache_path = LOGS_DIR / "pnl_cache.json"
-            if _pnl_cache_path.exists():
-                _bot_closed_cached = json.loads(_pnl_cache_path.read_text(encoding='utf-8')).get('closed_pnl', 0.0)
-        except Exception:
-            pass
-        buying_power = max(STARTING_CAPITAL + _bot_closed_cached - total_deployed, 0)
+    # Capital source: single source of truth via capital.py
+    try:
+        STARTING_CAPITAL = get_capital()
+    except Exception:
+        STARTING_CAPITAL = 10000.0  # Fresh start 2026-03-26
+    buying_power = max(STARTING_CAPITAL - total_deployed, 0)
 
     return {
         "kalshi_balance":     STARTING_CAPITAL,  # alias kept so frontend formula is unchanged
@@ -427,7 +414,7 @@ def get_trades():
                         if lp is not None or result:
                             side      = t.get('side', 'no')
                             mp        = t.get('market_prob', 0.5) or 0.5
-                            entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+                            entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
                             contracts = t.get('contracts', 0) or 0
                             if result == 'yes':   settle_yes = 100
                             elif result == 'no':  settle_yes = 0
@@ -452,7 +439,7 @@ def get_trades():
                     if lp is not None or result:
                         side      = t.get('side', 'no')
                         mp        = t.get('market_prob', 0.5) or 0.5
-                        entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+                        entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
                         contracts = t.get('contracts', 0) or 0
                         if result == 'yes':   settle_yes = 100
                         elif result == 'no':  settle_yes = 0
@@ -470,57 +457,6 @@ def get_trades():
     closed = [t for t in closed if t.get('source', 'bot') not in _MANUAL_EXCL]
     return closed
 
-
-@app.post("/api/highconviction/execute")
-async def execute_highconviction(req: Request):
-    """Execute a High Conviction bet — logs trade (demo) or places live order."""
-    import json as _json
-    from datetime import datetime as _dt
-    body    = await req.json()
-    ticker  = body.get('ticker', '')
-    side    = body.get('side', '').lower()   # 'yes' or 'no'
-    price_c = int(body.get('price_cents', 50))
-    max_pos = 25.0  # $25 max per trade
-
-    contracts = max(1, int((max_pos / price_c) * 100))  # how many contracts fit in $25
-    # market_prob = YES probability (what the positions table uses for entry price calc)
-    market_prob = (100 - price_c) / 100.0 if side == 'no' else price_c / 100.0
-    title   = body.get('title', '')
-
-    # Always log to trades file
-    today = _dt.now().strftime('%Y-%m-%d')
-    log_path = LOGS_DIR / f'trades_{today}.jsonl'
-    trade = {
-        'ticker':       ticker,
-        'title':        title,
-        'side':         side,
-        'contracts':    contracts,
-        'size_dollars': round(contracts * price_c / 100, 2),
-        'market_prob':  market_prob,
-        'source':       'manual',
-        'timestamp':    _dt.utcnow().isoformat(),
-        'date':         today,
-        'action':       'buy',
-    }
-    with open(log_path, 'a', encoding='utf-8') as f:
-        f.write(_json.dumps(trade) + '\n')
-
-    # Also mark as approved so it leaves the HC queue
-    ap_path = LOGS_DIR / 'highconviction_approved.jsonl'
-    with open(ap_path, 'a', encoding='utf-8') as f:
-        f.write(_json.dumps({'ticker': ticker, 'approved_at': _dt.utcnow().isoformat(), 'status': 'executed'}) + '\n')
-
-    # In live mode: actually place the order via KalshiClient
-    is_live = False  # TODO: read from config when going live
-    if is_live:
-        try:
-            from kalshi_client import KalshiClient
-            KalshiClient().place_order(ticker, side, price_c, contracts)
-        except Exception as e:
-            return {'status': 'error', 'error': str(e)}
-
-    return {'status': 'executed', 'ticker': ticker, 'side': side,
-            'contracts': contracts, 'cost': trade['size_dollars'], 'demo': not is_live}
 
 @app.post("/api/highconviction/approve")
 async def approve_highconviction(req: Request):
@@ -1032,12 +968,11 @@ def get_pnl_history():
     _today = _date.today()
 
     # ── Settled / manually exited positions ─────────────────────────────────
+    # Module P&L is accumulated in the SAME loop as account-level P&L to
+    # eliminate the $1.96 rounding discrepancy from dual code paths.
     for ticker, t in settled_tickers.items():
         try:
             # Determine source and cost basis BEFORE any API call or `continue`.
-            # Bug fix: original code placed these after the if/else block, so API-path
-            # failures (status!=200, no price yet) would skip via `continue` and leave
-            # both bot_cost_basis and manual_cost_basis unupdated for those positions.
             src = exit_records[ticker].get('source', t.get('source', 'bot')) if ticker in exit_records else t.get('source', 'bot')
             is_manual = src in ('economics', 'geo', 'manual')
             # Accumulate cost basis for ALL closed positions — always, regardless of
@@ -1057,7 +992,7 @@ def get_pnl_history():
                     xp = ex.get('exit_price', 50)
                     ct = ex.get('contracts', 0)
                     side = ex.get('side', t.get('side', 'no'))
-                    pnl = round((xp - ep) * ct / 100, 2) if side == 'no' else round((xp - ep) * ct / 100, 2)
+                    pnl = round((xp - ep) * ct / 100, 2)
                 pnl = round(float(pnl), 2)
                 side = ex.get('side', t.get('side', 'no'))
             else:
@@ -1076,7 +1011,7 @@ def get_pnl_history():
 
                 side      = t.get('side', 'no')
                 mp        = t.get('market_prob', 0.5) or 0.5
-                entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+                entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
                 cost      = t.get('size_dollars', 25)
                 contracts = t.get('contracts', 0) or 0
                 if contracts > 0 and cost > 0:
@@ -1098,8 +1033,17 @@ def get_pnl_history():
                 if pnl > 0:
                     bot_wins += 1
 
+                # ── Per-module P&L (bot trades only) ─────────────────────────
+                # Accumulated in the same loop to guarantee module sum == bot total
+                _mod = classify_module(src, ticker)
+                if _mod not in module_stats:
+                    _mod = 'other'
+                module_stats[_mod]['closed_pnl'] += pnl
+                module_stats[_mod]['trade_count'] += 1
+                if pnl > 0:
+                    module_stats[_mod]['wins'] += 1
+
             # Bucket by exit date (for manual exits) or settlement date
-            # Using exit date ensures P&L is counted in the month it was realized
             if ticker in exit_records and exit_records[ticker].get('timestamp'):
                 try:
                     from datetime import datetime as _dt2
@@ -1115,54 +1059,25 @@ def get_pnl_history():
                     closed_by_period['month'] += pnl
                     if is_manual: closed_by_src_period['manual']['month'] += pnl
                     else:         closed_by_src_period['bot']['month']    += pnl
+                    # Module period stats (bot only)
+                    if not is_manual:
+                        _mod2 = classify_module(src, ticker)
+                        if _mod2 not in module_stats: _mod2 = 'other'
+                        module_stats[_mod2]['closed_pnl_month'] += pnl
+                        module_stats[_mod2]['trade_count_month'] += 1
                 if sdate.year == _today.year:
                     closed_by_period['year']  += pnl
                     if is_manual: closed_by_src_period['manual']['year']  += pnl
                     else:         closed_by_src_period['bot']['year']     += pnl
+                    if not is_manual:
+                        _mod3 = classify_module(src, ticker)
+                        if _mod3 not in module_stats: _mod3 = 'other'
+                        module_stats[_mod3]['closed_pnl_year'] += pnl
+                        module_stats[_mod3]['trade_count_year'] += 1
                 if is_manual: closed_by_src_period['manual']['all'] += pnl
                 else:         closed_by_src_period['bot']['all']    += pnl
         except Exception:
             pass
-
-    # ── Per-module closed P&L — sourced from get_trades() for exact parity with table ──
-    # Calling get_trades() ensures module card numbers are computed identically to
-    # the closed positions table: BUY records from trade logs + Kalshi API settlement
-    # result for each ticker. This covers both actively-exited positions (95¢ wins)
-    # AND naturally settled losses that have no exit record in the logs.
-    # get_trades() already excludes manual trades (source in manual/economics/geo).
-    # Note: account-level closed_pnl (top of response) still comes from pnl_cache /
-    # Kalshi settled positions above. A small gap between the two is expected and
-    # acceptable (Kalshi P&L not captured in trade logs).
-    try:
-        _closed_trades = get_trades()
-        from datetime import date as _date_cls2
-        for _ct in _closed_trades:
-            _mod = _ct.get('module', 'other')
-            if _mod not in module_stats:
-                _mod = 'other'
-            _rpnl = float(_ct.get('realized_pnl') or 0.0)
-            _ms = module_stats[_mod]
-            _ms['closed_pnl'] += _rpnl
-            _ms['trade_count'] += 1
-            if _rpnl > 0:
-                _ms['wins'] += 1
-            # _date is set by read_all_trades() from the trade log filename (entry date)
-            _date_str = (_ct.get('_date') or _ct.get('date', ''))[:10]
-            _rdate = None
-            if _date_str:
-                try:
-                    _rdate = _date_cls2.fromisoformat(_date_str)
-                except Exception:
-                    pass
-            if _rdate:
-                if _rdate.year == _today.year and _rdate.month == _today.month:
-                    _ms['closed_pnl_month'] += _rpnl
-                    _ms['trade_count_month'] += 1
-                if _rdate.year == _today.year:
-                    _ms['closed_pnl_year'] += _rpnl
-                    _ms['trade_count_year'] += 1
-    except Exception:
-        pass
 
     # ── Open positions ───────────────────────────────────────────────────────
     open_pnl_total = 0.0
@@ -1192,7 +1107,7 @@ def get_pnl_history():
 
             side      = t.get('side', 'no')
             mp        = t.get('market_prob', 0.5) or 0.5
-            entry_p   = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+            entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
             cost      = t.get('size_dollars', 25)
             contracts = t.get('contracts', 0) or 0
             if contracts > 0 and cost > 0:
