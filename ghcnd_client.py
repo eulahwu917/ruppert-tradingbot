@@ -260,8 +260,8 @@ def compute_station_bias(ticker: str, token: str, lookback_days: int = 30) -> fl
         return None
 
     # Use yesterday as end (today's data is often incomplete until midnight)
-    # P2-1 fix: start_date was `today - (lookback_days + 1)` which fetched lookback_days+1 days.
-    # Corrected to `today - lookback_days` to fetch exactly lookback_days days.
+    # Query window: yesterday as the end date (today's observations are often incomplete
+    # until midnight); start is lookback_days before today for exactly lookback_days days.
     end_date   = (date.today() - timedelta(days=1)).isoformat()
     start_date = (date.today() - timedelta(days=lookback_days)).isoformat()
 

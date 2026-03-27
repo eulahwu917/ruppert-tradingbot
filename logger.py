@@ -140,22 +140,117 @@ def log_activity(message):
 
 
 def get_daily_exposure():
-    """Calculate total $ exposure from today's trades."""
-    log_path = _today_log_path()
-    if not os.path.exists(log_path):
-        return 0.0
+    """Calculate total $ exposure from today's open positions.
 
-    total = 0.0
-    with open(log_path, 'r', encoding='utf-8') as f:
-        for line in f:
-            try:
-                entry = json.loads(line)
-                # Only count entries (buy), not exits — exits don't consume new capital
-                if entry.get('action', 'buy') != 'exit':
-                    total += entry.get('size_dollars', 0)
-            except:
-                pass
-    return total
+    Also reads yesterday's log to catch multi-day positions that were entered
+    yesterday but not yet exited. Only counts entries (buys) that have no
+    corresponding exit across both log files.
+    """
+    today_str     = date.today().isoformat()
+    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+
+    entries   = {}   # key: (ticker, side) → size_dollars of the latest entry
+    exit_keys = set()
+
+    for day_str in [yesterday_str, today_str]:
+        log_path = os.path.join(LOG_DIR, f"trades_{day_str}.jsonl")
+        if not os.path.exists(log_path):
+            continue
+        with open(log_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    entry = json.loads(line)
+                    ticker = entry.get('ticker', '')
+                    side   = entry.get('side', '')
+                    action = entry.get('action', 'buy')
+                    key    = (ticker, side)
+                    if action == 'exit':
+                        exit_keys.add(key)
+                    else:
+                        entries[key] = entry.get('size_dollars', 0)
+                except:
+                    pass
+
+    # Sum positions that have an entry but no corresponding exit
+    return sum(size for key, size in entries.items() if key not in exit_keys)
+
+
+def normalize_entry_price(pos: dict) -> float:
+    """Return entry_price in cents from a position record.
+
+    Falls back to market_prob if entry_price is missing. Handles
+    probability-formatted values (0–1) by converting to cents.
+    Uses the NO-side convention: market_prob represents YES probability,
+    so NO entry cost = (1 - market_prob) * 100.
+    """
+    side        = pos.get('side', 'no')
+    entry_price = pos.get('entry_price') or pos.get('market_prob', 0.5) * 100
+    if side == 'no':
+        entry_price = entry_price if isinstance(entry_price, (int, float)) else 50
+        # Normalize: if value looks like a probability (0–1), convert to cents
+        if 0 < entry_price < 1:
+            entry_price = round((1 - entry_price) * 100)
+    return entry_price
+
+
+def acquire_exit_lock(ticker: str, side: str) -> bool:
+    """Create a file-based lock for exit operations on (ticker, side).
+
+    Returns True if the lock was acquired, False if another process already
+    holds it. Lock files older than 5 minutes are treated as stale and
+    automatically removed so a crashed process can't block exits forever.
+    """
+    import time
+    lock_path = os.path.join(LOG_DIR, f'.exit_lock_{ticker}_{side}')
+    if os.path.exists(lock_path):
+        try:
+            age = time.time() - os.path.getmtime(lock_path)
+            if age < 300:   # 5 minutes
+                return False
+            os.remove(lock_path)  # stale lock — remove and re-acquire
+        except Exception:
+            return False
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
+
+
+def release_exit_lock(ticker: str, side: str) -> None:
+    """Remove the exit lock file for (ticker, side). Safe to call even if absent."""
+    lock_path = os.path.join(LOG_DIR, f'.exit_lock_{ticker}_{side}')
+    try:
+        os.remove(lock_path)
+    except Exception:
+        pass
+
+
+def classify_module(src: str, ticker: str) -> str:
+    """Classify a trade into a module bucket based on source and ticker prefix.
+
+    Single source of truth — imported by dashboard/api.py to stay in sync.
+    """
+    t = (ticker or '').upper()
+    if src in ('weather',) or (src in ('weather', 'bot') and t.startswith('KXHIGH')):
+        return 'weather'
+    if src == 'crypto' or (src in ('crypto', 'bot') and any(
+        t.startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXSOL', 'KXDOGE')
+    )):
+        return 'crypto'
+    if src == 'fed' or t.startswith('KXFED'):
+        return 'fed'
+    if src == 'econ' or t.startswith('KXCPI'):
+        return 'econ'
+    if src == 'geo' or any(t.startswith(p) for p in (
+        'KXUKRAINE', 'KXRUSSIA', 'KXISRAEL', 'KXIRAN', 'KXTAIWAN',
+        'KXNATO', 'KXCHINA', 'KXNKOREA', 'KXCEASEFIRE',
+    )):
+        return 'geo'
+    if src == 'manual':
+        return 'manual'
+    return 'other'
 
 
 def get_computed_capital():

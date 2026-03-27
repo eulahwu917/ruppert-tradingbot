@@ -23,15 +23,18 @@ def contracts_from_size(size_dollars: float, price_cents: float) -> int:
 
 
 def _legacy_kelly_fraction(prob: float, bet_price_cents: float) -> float:
-    """Quarter-Kelly fraction (legacy, from risk.py). Used only by check_pre_trade fallback."""
-    if prob <= 0 or prob >= 1 or bet_price_cents <= 0:
+    """Quarter-Kelly fraction (legacy, from risk.py). Used only by check_pre_trade fallback.
+
+    Uses the same formula as bot/strategy.py: f = edge / (1 - win_prob),
+    where edge = win_prob - (1 - win_prob) * (bet_price / (100 - bet_price)).
+    """
+    if prob <= 0 or prob >= 1 or bet_price_cents <= 0 or bet_price_cents >= 100:
         return 0
-    q = 1 - prob
-    b = (100 - bet_price_cents) / bet_price_cents
-    if b <= 0:
+    edge = prob - (1 - prob) * (bet_price_cents / (100 - bet_price_cents))
+    if edge <= 0:
         return 0
-    kelly = (b * prob - q) / b
-    return max(0, kelly * 0.25)
+    f = edge / (1.0 - prob)
+    return max(0, f * 0.25)
 
 
 def _legacy_calculate_position_size(bankroll: float, opportunity: dict) -> float:

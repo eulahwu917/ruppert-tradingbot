@@ -12,6 +12,7 @@ import json
 from datetime import date, datetime
 from pathlib import Path
 from capital import get_capital, get_buying_power
+from logger import classify_module
 
 app = FastAPI(title="Ruppert Trading Dashboard")
 LOGS_DIR = Path(__file__).parent.parent / "logs"
@@ -140,24 +141,7 @@ SPORTS_EXCLUSIONS = [
 ]
 
 
-def classify_module(src: str, ticker: str) -> str:
-    """Classify a trade into a module bucket based on source and ticker prefix."""
-    t = (ticker or '').upper()
-    if (src in ('weather', 'bot')) and t.startswith('KXHIGH'):
-        return 'weather'
-    if src == 'crypto' or (src == 'bot' and (
-        t.startswith('KXBTC') or t.startswith('KXETH') or
-        t.startswith('KXXRP') or t.startswith('KXSOL') or t.startswith('KXDOGE')
-    )):
-        return 'crypto'
-    if src == 'fed' or t.startswith('KXFED') or t.startswith('KXCPI'):
-        return 'fed'
-    if src == 'geo' or t.startswith('KXUKRAINE') or t.startswith('KXRUSSIA') or \
-       t.startswith('KXISRAEL') or t.startswith('KXIRAN') or t.startswith('KXTAIWAN') or \
-       t.startswith('KXNATO') or t.startswith('KXCHINA') or t.startswith('KXNKOREA') or \
-       t.startswith('KXCEASEFIRE'):
-        return 'geo'
-    return 'other'
+# classify_module imported from logger — single source of truth
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────

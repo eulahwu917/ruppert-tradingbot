@@ -24,7 +24,7 @@ import config
 DRY_RUN = getattr(config, 'DRY_RUN', True)
 
 from kalshi_client import KalshiClient
-from logger import log_trade, log_activity
+from logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock
 
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -135,7 +135,9 @@ def check_weather_position(pos, market):
             series_ticker = ticker.split('-')[0].upper()
             threshold_f = parse_threshold_from_ticker(ticker)
             target_date = parse_date_from_ticker(ticker)
-            if threshold_f is not None:
+            if threshold_f is None:
+                print(f'  WARN: {ticker}: parse_threshold_from_ticker returned None — skipping ensemble check')
+            else:
                 sig = get_full_weather_signal(series_ticker, threshold_f, target_date)
                 ens_prob = sig.get('final_prob', 0.5) or 0.5
                 if side == 'no' and ens_prob > 0.80:
@@ -286,33 +288,40 @@ def run_monitor():
 
         # Handle actions
         if action == 'auto_exit':
-            print(f"  AUTO-EXIT: {ticker} {side.upper()} — {reason}")
+            if not acquire_exit_lock(ticker, side):
+                print(f"  SKIP: {ticker} {side.upper()} exit already in progress (lock held)")
+                skipped += 1
+                continue
+            try:
+                print(f"  AUTO-EXIT: {ticker} {side.upper()} — {reason}")
 
-            exit_opp = {
-                'ticker': ticker, 'title': pos.get('title', ticker),
-                'side': side, 'action': 'exit',
-                'market_prob': cur_price / 100, 'noaa_prob': None, 'edge': None,
-                'size_dollars': round(pos_contracts * cur_price / 100, 2),
-                'contracts': pos_contracts, 'source': source,
-                'timestamp': ts(), 'date': str(date.today()),
-            }
+                exit_opp = {
+                    'ticker': ticker, 'title': pos.get('title', ticker),
+                    'side': side, 'action': 'exit',
+                    'market_prob': cur_price / 100, 'noaa_prob': None, 'edge': None,
+                    'size_dollars': round(pos_contracts * cur_price / 100, 2),
+                    'contracts': pos_contracts, 'source': source,
+                    'timestamp': ts(), 'date': str(date.today()),
+                }
 
-            if DRY_RUN:
-                log_trade(exit_opp, exit_opp['size_dollars'], pos_contracts, {'dry_run': True})
-                log_activity(f'[POST-MONITOR EXIT] {ticker} {side.upper()} @ {cur_price}c — {reason}')
-                print(f"    [DEMO] Exit logged")
-            else:
-                try:
-                    result = client.sell_position(ticker, side, cur_price, pos_contracts)
-                    log_trade(exit_opp, exit_opp['size_dollars'], pos_contracts, result)
+                if DRY_RUN:
+                    log_trade(exit_opp, exit_opp['size_dollars'], pos_contracts, {'dry_run': True})
                     log_activity(f'[POST-MONITOR EXIT] {ticker} {side.upper()} @ {cur_price}c — {reason}')
-                    print(f"    [LIVE] Exit executed")
-                except Exception as e:
-                    print(f"    EXIT ERROR: {e}")
-                    continue
+                    print(f"    [DEMO] Exit logged")
+                else:
+                    try:
+                        result = client.sell_position(ticker, side, cur_price, pos_contracts)
+                        log_trade(exit_opp, exit_opp['size_dollars'], pos_contracts, result)
+                        log_activity(f'[POST-MONITOR EXIT] {ticker} {side.upper()} @ {cur_price}c — {reason}')
+                        print(f"    [LIVE] Exit executed")
+                    except Exception as e:
+                        print(f"    EXIT ERROR: {e}")
+                        continue
 
-            push_alert('exit', f'POST-MONITOR EXIT: {ticker} {side.upper()} — {reason}', ticker=ticker, pnl=pnl)
-            exits_executed += 1
+                push_alert('exit', f'POST-MONITOR EXIT: {ticker} {side.upper()} — {reason}', ticker=ticker, pnl=pnl)
+                exits_executed += 1
+            finally:
+                release_exit_lock(ticker, side)
 
         elif action == 'alert':
             print(f"  ALERT: {ticker} {side.upper()} — {reason}")

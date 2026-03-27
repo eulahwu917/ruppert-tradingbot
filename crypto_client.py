@@ -135,9 +135,10 @@ def _cache_set(key: str, data):
 # Binance Futures perpetual symbols for funding rate data
 # Note: public market data endpoint — no auth required, US accessible
 FUNDING_SYMBOLS = {
-    'BTC': 'BTCUSDT',
-    'ETH': 'ETHUSDT',
-    'XRP': 'XRPUSDT',
+    'BTC':  'BTCUSDT',
+    'ETH':  'ETHUSDT',
+    'XRP':  'XRPUSDT',
+    'DOGE': 'DOGEUSDT',
 }
 
 # Limit = 96 × 8h intervals ≈ 32 days ≈ rolling 30-day window

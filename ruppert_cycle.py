@@ -20,7 +20,7 @@ ALERT_LOG   = LOGS / 'cycle_log.jsonl'
 
 import config
 from kalshi_client import KalshiClient
-from logger import log_trade, log_activity, get_daily_exposure, get_computed_capital, send_telegram, rotate_logs
+from logger import log_trade, log_activity, get_daily_exposure, get_computed_capital, send_telegram, rotate_logs, normalize_entry_price, acquire_exit_lock, release_exit_lock
 from bot.strategy import check_daily_cap, check_open_exposure, should_enter
 from capital import get_capital, get_buying_power
 
@@ -110,7 +110,7 @@ try:
             yes_ask = m.get('yes_ask', 50) or 50
             no_ask  = m.get('no_ask', 50) or 50
             side    = pos.get('side', 'no')
-            entry_p = pos.get('entry_price') or (100 - round(pos.get('market_prob',0.5)*100))
+            entry_p = normalize_entry_price(pos)
             cur_p   = no_ask if side == 'no' else yes_ask
             contracts = pos.get('contracts', 0)
             pnl     = round((cur_p - entry_p) * contracts / 100, 2)
@@ -159,22 +159,28 @@ try:
     # Execute auto-exits
     if actions_taken:
         for action, ticker, side, price, contracts, pnl in actions_taken:
-            opp = {'ticker': ticker, 'title': ticker, 'side': side, 'action': 'exit',
-                   'yes_price': price if side=='yes' else 100-price,
-                   'market_prob': price/100, 'noaa_prob': None, 'edge': None,
-                   'size_dollars': round(contracts*price/100, 2), 'contracts': contracts,
-                   'source': 'weather', 'timestamp': ts(), 'date': str(date.today())}
-            if DRY_RUN:
-                log_trade(opp, opp['size_dollars'], contracts, {'dry_run': True})
-                log_activity(f'[AUTO-EXIT] {ticker} {side.upper()} @ {price}c P&L=${pnl:+.2f}')
-                print(f'  [DEMO] AUTO-EXIT logged: {ticker}')
-            else:
-                try:
-                    result = client.sell_position(ticker, side, price, contracts)
-                    log_trade(opp, opp['size_dollars'], contracts, result)
-                    print(f'  [LIVE] AUTO-EXIT executed: {ticker}')
-                except Exception as e:
-                    print(f'  EXIT ERROR {ticker}: {e}')
+            if not acquire_exit_lock(ticker, side):
+                print(f'  SKIP: {ticker} exit already in progress (lock held)')
+                continue
+            try:
+                opp = {'ticker': ticker, 'title': ticker, 'side': side, 'action': 'exit',
+                       'yes_price': price if side=='yes' else 100-price,
+                       'market_prob': price/100, 'noaa_prob': None, 'edge': None,
+                       'size_dollars': round(contracts*price/100, 2), 'contracts': contracts,
+                       'source': 'weather', 'timestamp': ts(), 'date': str(date.today())}
+                if DRY_RUN:
+                    log_trade(opp, opp['size_dollars'], contracts, {'dry_run': True})
+                    log_activity(f'[AUTO-EXIT] {ticker} {side.upper()} @ {price}c P&L=${pnl:+.2f}')
+                    print(f'  [DEMO] AUTO-EXIT logged: {ticker}')
+                else:
+                    try:
+                        result = client.sell_position(ticker, side, price, contracts)
+                        log_trade(opp, opp['size_dollars'], contracts, result)
+                        print(f'  [LIVE] AUTO-EXIT executed: {ticker}')
+                    except Exception as e:
+                        print(f'  EXIT ERROR {ticker}: {e}')
+            finally:
+                release_exit_lock(ticker, side)
 
 except Exception as e:
     print(f'  Position check error: {e}')
