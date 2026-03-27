@@ -381,6 +381,9 @@ try:
 except Exception as e:
     print(f"  Weather scan error: {e}")
 
+# Refresh global exposure cap after weather trades before passing to next scan
+OPEN_POSITION_VALUE += sum(t.get('size_dollars', 0) for t in new_weather)
+
 # ── STEP 4: CRYPTO OPPORTUNITY SCAN (full mode only) ─────────────────────────
 print("\n[4] Scanning for new crypto opportunities...")
 new_crypto = []
@@ -396,6 +399,9 @@ try:
 except Exception as e:
     print(f"  Crypto scan error: {e}")
     import traceback; traceback.print_exc()
+
+# Refresh global exposure cap after crypto trades before passing to next scan
+OPEN_POSITION_VALUE += sum(t.get('size_dollars', 0) for t in new_crypto)
 
 # ── STEP 4b: FED RATE DECISION SCAN (full mode only) ─────────────────────
 print("\n[4b] Scanning for Fed rate decision opportunities...")

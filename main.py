@@ -386,6 +386,7 @@ def run_weather_scan(dry_run=True):
                 # see the updated cap (prevents over-deployment if multiple trades fire)
                 deployed_today += decision['size']
                 _weather_deployed_this_cycle += decision['size']
+                _open_exposure += decision['size']
                 log_activity(f"  [Strategy] ENTER {opp['ticker']}: {decision['reason']}")
             else:
                 log_activity(f"  [Strategy] SKIP  {opp['ticker']}: {decision['reason']}")

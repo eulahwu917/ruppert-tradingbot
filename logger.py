@@ -7,6 +7,13 @@ import json
 import os
 import uuid
 from datetime import datetime, date, timedelta
+from zoneinfo import ZoneInfo
+
+_PDT = ZoneInfo('America/Los_Angeles')
+
+def _pdt_today() -> date:
+    """Return the current date in America/Los_Angeles (PDT/PST)."""
+    return datetime.now(_PDT).date()
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs')
 LIVE_LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs-live')
@@ -51,10 +58,10 @@ def rotate_logs(retention_days: int = LOG_RETENTION_DAYS) -> int:
 
 
 def _today_log_path():
-    return os.path.join(LOG_DIR, f"trades_{date.today().isoformat()}.jsonl")
+    return os.path.join(LOG_DIR, f"trades_{_pdt_today().isoformat()}.jsonl")
 
 def _activity_log_path():
-    return os.path.join(LOG_DIR, f"activity_{date.today().isoformat()}.log")
+    return os.path.join(LOG_DIR, f"activity_{_pdt_today().isoformat()}.log")
 
 
 def build_trade_entry(opportunity, size, contracts, order_result):
@@ -148,8 +155,8 @@ def get_daily_exposure():
     yesterday but not yet exited. Only counts entries (buys) that have no
     corresponding exit across both log files.
     """
-    today_str     = date.today().isoformat()
-    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+    today_str     = _pdt_today().isoformat()
+    yesterday_str = (_pdt_today() - timedelta(days=1)).isoformat()
 
     entries   = {}   # key: (ticker, side) → size_dollars of the latest entry
     exit_keys = set()
