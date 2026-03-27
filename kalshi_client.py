@@ -219,8 +219,36 @@ class KalshiClient:
 
     def get_positions(self):
         """Get current open positions."""
-        result = self.client.get_positions()
-        return result.market_positions or []
+        try:
+            result = self.client.get_positions()
+            return result.market_positions or []
+        except Exception:
+            # SDK Pydantic deserialization fails when API returns None for StrictInt fields.
+            # Fall back to raw HTTP request and return SimpleNamespace objects.
+            return self._get_positions_raw()
+
+    def _get_positions_raw(self):
+        """Raw HTTP fallback for get_positions when SDK Pydantic deserialization fails."""
+        import requests
+        from types import SimpleNamespace
+        host = DEMO_HOST if self.environment == 'demo' else PROD_HOST
+        url = f"{host}/portfolio/positions"
+        path = '/trade-api/v2/portfolio/positions'
+        headers = self.client.kalshi_auth.create_auth_headers('GET', path)
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        raw = resp.json().get('market_positions') or []
+        positions = []
+        for p in raw:
+            positions.append(SimpleNamespace(
+                ticker=p.get('ticker') or '',
+                position=int(p.get('position') or 0),
+                total_traded=int(p.get('total_traded') or 0),
+                market_exposure=int(p.get('market_exposure') or 0),
+                realized_pnl=int(p.get('realized_pnl') or 0),
+                fees_paid=int(p.get('fees_paid') or 0),
+            ))
+        return positions
 
     def get_orders(self):
         """Get recent orders."""

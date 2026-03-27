@@ -84,10 +84,15 @@ try:
 
     for _kpos in _kalshi_positions:
         try:
-            _ticker = _kpos.ticker if hasattr(_kpos, 'ticker') else _kpos.get('ticker', '')
-            _raw_pos = getattr(_kpos, 'position', None)
-            if _raw_pos is None:
-                _raw_pos = _kpos.get('position', 0)
+            if isinstance(_kpos, dict):
+                _ticker = _kpos.get('ticker', '') or ''
+                _raw_pos = _kpos.get('position', 0) or 0
+            else:
+                _ticker = getattr(_kpos, 'ticker', None) or ''
+                _raw_pos = getattr(_kpos, 'position', None)
+                if _raw_pos is None:
+                    _raw_pos = 0
+            _raw_pos = int(_raw_pos)
             _side = 'yes' if _raw_pos > 0 else 'no'
             _contracts = abs(_raw_pos)
         except Exception as _e:
