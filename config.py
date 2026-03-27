@@ -87,6 +87,9 @@ GEO_MIN_EDGE_THRESHOLD   = 0.15    # 15% min edge (higher than weather/crypto - 
 GEO_MAX_CONFIDENCE       = 0.85    # Cap - LLM estimates less calibrated than ensemble weather
 GEO_MIN_DAYS_TO_EXPIRY   = 1       # No same-day expiry for geo markets
 
+# Loss circuit breaker — halt trading if realized losses exceed this % of capital today
+LOSS_CIRCUIT_BREAKER_PCT = 0.05  # 5% of capital
+
 # Bot settings
 CHECK_INTERVAL_HOURS = 6       # How often to scan for opportunities
 # Minimum hours remaining before market close to enter a trade.

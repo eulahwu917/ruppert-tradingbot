@@ -8,7 +8,6 @@ Usage: python post_trade_monitor.py
 """
 import sys
 import json
-import requests
 from pathlib import Path
 from datetime import date, datetime, timezone
 
@@ -18,7 +17,6 @@ sys.stderr.reconfigure(encoding='utf-8')
 LOGS = Path(__file__).parent / 'logs'
 LOGS.mkdir(exist_ok=True)
 ALERTS_FILE = LOGS / 'pending_alerts.json'
-BASE = "https://api.elections.kalshi.com/trade-api/v2/markets"
 
 import config
 DRY_RUN = getattr(config, 'DRY_RUN', True)
@@ -91,10 +89,9 @@ def load_open_positions():
 def get_market_data(ticker):
     """Fetch current market data from Kalshi API. Returns dict or None."""
     try:
-        r = requests.get(f'{BASE}/{ticker}', timeout=5)
-        if r.status_code != 200:
-            return None
-        return r.json().get('market', {})
+        _client = KalshiClient()
+        result = _client.get_market(ticker)
+        return result if result else None
     except Exception:
         return None
 

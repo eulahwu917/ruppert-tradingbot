@@ -140,8 +140,8 @@ FED_MIN_KALSHI_PRICE = 0.15  # never trade contracts below 15¢ (favorite-longsh
 _LOGS_DIR   = Path(__file__).parent / "logs"
 _SCAN_FILE  = _LOGS_DIR / "fed_scan_latest.json"
 
-# Kalshi public markets endpoint (no auth needed for reading)
-KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
+# Kalshi market access via KalshiClient (handles retries, orderbook enrichment, DEMO/LIVE)
+from kalshi_client import KalshiClient as _KalshiClient
 
 
 # ── FOMC Date Utilities ───────────────────────────────────────────────────────
@@ -717,15 +717,8 @@ def get_kalshi_fed_markets(meeting_date: date) -> list:
     Each dict includes: ticker, title, yes_ask, yes_bid, outcome_type.
     """
     try:
-        url    = f"{KALSHI_BASE}/markets"
-        params = {
-            "series_ticker": "KXFEDDECISION",
-            "status":        "open",
-            "limit":         50,
-        }
-        r = requests.get(url, params=params, timeout=15)
-        r.raise_for_status()
-        markets = r.json().get("markets", [])
+        _client = _KalshiClient()
+        markets = _client.get_markets("KXFEDDECISION", status="open", limit=50)
 
         # Filter to markets relevant to the target meeting
         date_filters = [

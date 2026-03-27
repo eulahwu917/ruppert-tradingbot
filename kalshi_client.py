@@ -4,9 +4,55 @@ Uses the official kalshi_python_sync SDK.
 """
 import os
 import time
+from dataclasses import dataclass
+from typing import Optional
 from kalshi_python_sync import Configuration, KalshiClient as _KalshiClient
 
 import config as cfg
+
+
+# TODO: migrate callers to use KalshiMarket.from_dict() for type safety
+@dataclass
+class KalshiMarket:
+    ticker: str
+    yes_ask: Optional[int] = None
+    no_ask: Optional[int] = None
+    yes_bid: Optional[int] = None
+    no_bid: Optional[int] = None
+    status: str = 'active'
+    close_time: str = ''
+    title: str = ''
+    volume_fp: str = '0'
+    open_interest_fp: str = '0'
+
+    @classmethod
+    def from_dict(cls, d: dict) -> 'KalshiMarket':
+        return cls(
+            ticker=d.get('ticker', ''),
+            yes_ask=d.get('yes_ask'),
+            no_ask=d.get('no_ask'),
+            yes_bid=d.get('yes_bid'),
+            no_bid=d.get('no_bid'),
+            status=d.get('status', 'active'),
+            close_time=d.get('close_time', ''),
+            title=d.get('title', ''),
+            volume_fp=d.get('volume_fp', '0'),
+            open_interest_fp=d.get('open_interest_fp', '0'),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            'ticker': self.ticker,
+            'yes_ask': self.yes_ask,
+            'no_ask': self.no_ask,
+            'yes_bid': self.yes_bid,
+            'no_bid': self.no_bid,
+            'status': self.status,
+            'close_time': self.close_time,
+            'title': self.title,
+            'volume_fp': self.volume_fp,
+            'open_interest_fp': self.open_interest_fp,
+        }
 
 # ---------------------------------------------------------------------------
 # HTTP retry helper (handles 429 + transient 5xx)

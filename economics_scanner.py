@@ -8,7 +8,6 @@ Live mode requires config.ECON_AUTO_TRADE = True.
 Author: Ruppert (AI Trading Analyst)
 Updated: 2026-03-26
 """
-import requests
 import sys
 import config
 from datetime import datetime, date
@@ -20,9 +19,6 @@ from economics_client import (
     get_economic_signal,
     get_upcoming_releases,
 )
-
-BASE = 'https://api.elections.kalshi.com/trade-api/v2'
-HEADERS = {'User-Agent': 'KalshiEconBot/1.0'}
 
 # Known economics series on Kalshi (verified active as of 2026-03-10)
 ACTIVE_ECON_SERIES = [

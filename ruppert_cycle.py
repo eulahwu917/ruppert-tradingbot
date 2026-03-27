@@ -8,6 +8,7 @@ Modes:
   econ_prescan  — position check + econ scan only, skip if no release today (5am)
   weather_only  — position check + weather scan only (7pm)
   crypto_only   — position check + crypto scan only (10am, 6pm)
+  report        — 7am P&L summary + loss detection
 """
 import sys, json, time, math, requests
 from pathlib import Path
@@ -24,7 +25,7 @@ ALERT_LOG   = LOGS / 'cycle_log.jsonl'
 import config
 from kalshi_client import KalshiClient
 from logger import log_trade, log_activity, get_daily_exposure, get_computed_capital, send_telegram, rotate_logs, normalize_entry_price, acquire_exit_lock, release_exit_lock
-from bot.strategy import check_daily_cap, check_open_exposure, should_enter
+from bot.strategy import check_daily_cap, check_open_exposure, should_enter, check_loss_circuit_breaker
 from capital import get_capital, get_buying_power
 
 DRY_RUN = config.DRY_RUN  # Derived from mode.json: demo=True, live=False
@@ -50,6 +51,20 @@ def log_cycle(event, data=None):
     if data: entry.update(data)
     with open(ALERT_LOG, 'a', encoding='utf-8') as f:
         f.write(json.dumps(entry) + '\n')
+
+
+def save_state():
+    """Write traded_tickers + metadata to logs/state.json for cross-cycle persistence."""
+    try:
+        _state_path = LOGS / 'state.json'
+        _state_data = {
+            'traded_tickers': sorted(traded_tickers),
+            'last_cycle_ts': ts(),
+            'last_cycle_mode': MODE,
+        }
+        _state_path.write_text(json.dumps(_state_data, indent=2), encoding='utf-8')
+    except Exception as _e:
+        print(f"  [State] Could not write state.json: {_e}")
 
 
 def run_post_cycle_exposure_check():
@@ -86,8 +101,6 @@ except Exception as _e:
     print(f"[Logger] Log rotation skipped: {_e}")
 
 client = KalshiClient()
-BASE   = "https://api.elections.kalshi.com/trade-api/v2/markets"
-HDR    = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 traded_tickers = set()
 
 # Populate traded_tickers from today's trade log to prevent cross-cycle duplicates
@@ -111,6 +124,39 @@ if _trade_log_path.exists():
             print(f"  [Init] Loaded {len(traded_tickers)} open ticker(s) from today's log: {traded_tickers}")
     except Exception as _tl_err:
         print(f"  [Init] Could not read trade log (non-blocking): {_tl_err}")
+
+# Merge traded_tickers from persistent state.json (cross-cycle robustness)
+STATE_FILE = LOGS / 'state.json'
+try:
+    if STATE_FILE.exists():
+        _state = json.loads(STATE_FILE.read_text(encoding='utf-8'))
+        _state_ts = _state.get('last_cycle_ts', '')
+        if _state_ts[:10] == date.today().isoformat():
+            _state_tickers = set(_state.get('traded_tickers', []))
+            _before = len(traded_tickers)
+            traded_tickers |= _state_tickers
+            _added = len(traded_tickers) - _before
+            if _added:
+                print(f"  [Init] Merged {_added} ticker(s) from state.json")
+        else:
+            print(f"  [Init] state.json is from {_state_ts[:10]} (stale) — skipped")
+except Exception as _sf_err:
+    print(f"  [Init] Could not read state.json (non-blocking): {_sf_err}")
+
+# Loss circuit breaker — halt if today's realized losses exceed threshold
+try:
+    _cb_capital = get_capital()
+    _cb = check_loss_circuit_breaker(str(LOGS), _cb_capital)
+    if _cb['tripped']:
+        print(f"  [CIRCUIT BREAKER] {_cb['reason']}")
+        push_alert('warning', _cb['reason'])
+        save_state()
+        log_cycle('circuit_breaker', _cb)
+        sys.exit(0)
+    elif _cb['loss_today'] > 0:
+        print(f"  [LossCheck] Today's losses: ${_cb['loss_today']:.2f} — within threshold")
+except Exception as _cb_err:
+    print(f"  [LossCheck] Circuit breaker check failed (non-blocking): {_cb_err}")
 
 # Compute open exposure once per cycle — used by global 70% cap check in should_enter()
 try:
@@ -201,9 +247,8 @@ try:
 
         # Get current market price
         try:
-            r = requests.get(f'{BASE}/{ticker}', timeout=5)
-            if r.status_code != 200: continue
-            m = r.json().get('market', {})
+            m = client.get_market(ticker)
+            if not m: continue
             status = m.get('status', '')
             if status in ('finalized', 'settled'): continue
 
@@ -287,6 +332,7 @@ except Exception as e:
     import traceback; traceback.print_exc()
 
 if MODE == 'check':
+    save_state()
     log_cycle('done', {'actions': len(actions_taken) if 'actions_taken' in dir() else 0})
     print(f"\nCheck-only cycle done. {ts()}")
     sys.exit(0)
@@ -303,6 +349,7 @@ if MODE == 'econ_prescan':
         _releases_today = [r for r in _get_upcoming() if r.get('days_away') == 0]
         if not _releases_today:
             print("  No econ release today — skipping scan")
+            save_state()
             log_cycle('done', {'econ_trades': 0, 'reason': 'no_release_today'})
             sys.exit(0)
 
@@ -399,6 +446,7 @@ if MODE == 'econ_prescan':
         print(f"  econ_prescan error: {_e}")
         import traceback; traceback.print_exc()
 
+    save_state()
     log_cycle('done', {'econ_trades': _econ_trades})
     print(f"\necon_prescan done — {_econ_trades} trade(s). {ts()}")
     sys.exit(0)
@@ -419,6 +467,7 @@ if MODE == 'weather_only':
         print(f"  weather_only error: {_e}")
         import traceback; traceback.print_exc()
 
+    save_state()
     log_cycle('done', {'weather_trades': _weather_count})
     print(f"\nweather_only done — {_weather_count} trade(s). {ts()}")
     sys.exit(0)
@@ -439,6 +488,7 @@ if MODE == 'crypto_only':
         print(f"  crypto_only error: {_e}")
         import traceback; traceback.print_exc()
 
+    save_state()
     log_cycle('done', {'crypto_trades': _crypto_count})
     print(f"\ncrypto_only done — {_crypto_count} trade(s). {ts()}")
     sys.exit(0)
@@ -549,6 +599,7 @@ if MODE == 'report':
     else:
         print("  No losses detected ΓÇö skipping optimizer review file")
 
+    save_state()
     log_cycle('done', {'mode': 'report', 'exit_count': len(exit_records), 'losses': len(losses)})
     print(f"\n7am report complete. {ts()}")
     sys.exit(0)
@@ -661,6 +712,7 @@ summary = {
     'auto_exits':     len(actions_taken) if 'actions_taken' in dir() else 0,
 }
 run_post_cycle_exposure_check()
+save_state()
 log_cycle('done', summary)
 
 print(f"\n{'='*60}")
