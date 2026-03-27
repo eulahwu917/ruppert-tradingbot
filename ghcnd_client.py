@@ -71,6 +71,90 @@ GHCND_STATIONS = {
         "lat": 33.4484, "lon": -112.0740,
         "tz": "America/Phoenix",
     },
+    'KXHIGHAUS': {
+        'station': 'USW00013904',
+        'name': 'Austin (Bergstrom)',
+        'lat': 30.1975, 'lon': -97.6664,
+        'tz': 'America/Chicago',
+    },
+    'KXHIGHDEN': {
+        'station': 'USW00003017',
+        'name': 'Denver (International)',
+        'lat': 39.8561, 'lon': -104.6737,
+        'tz': 'America/Denver',
+    },
+    'KXHIGHLAX': {
+        'station': 'USW00023174',
+        'name': 'Los Angeles (LAX)',
+        'lat': 34.0522, 'lon': -118.2437,
+        'tz': 'America/Los_Angeles',
+    },
+    'KXHIGHPHIL': {
+        'station': 'USW00013739',
+        'name': 'Philadelphia (International)',
+        'lat': 39.9526, 'lon': -75.1652,
+        'tz': 'America/New_York',
+    },
+    'KXHIGHTMIN': {
+        'station': 'USW00014922',
+        'name': 'Minneapolis (St Paul)',
+        'lat': 44.9778, 'lon': -93.2650,
+        'tz': 'America/Chicago',
+    },
+    'KXHIGHTDAL': {
+        'station': 'USW00003927',
+        'name': 'Dallas (Fort Worth)',
+        'lat': 32.7767, 'lon': -96.7970,
+        'tz': 'America/Chicago',
+    },
+    'KXHIGHTDC': {
+        'station': 'USW00013743',
+        'name': 'Washington DC (Reagan)',
+        'lat': 38.8951, 'lon': -77.0364,
+        'tz': 'America/New_York',
+    },
+    'KXHIGHTLV': {
+        'station': 'USW00023169',
+        'name': 'Las Vegas (McCarran)',
+        'lat': 36.1699, 'lon': -115.1398,
+        'tz': 'America/Los_Angeles',
+    },
+    'KXHIGHTNOU': {
+        'station': 'USW00012916',
+        'name': 'New Orleans (Armstrong)',
+        'lat': 29.9511, 'lon': -90.0715,
+        'tz': 'America/Chicago',
+    },
+    'KXHIGHTOKC': {
+        'station': 'USW00013967',
+        'name': 'Oklahoma City (Will Rogers)',
+        'lat': 35.4676, 'lon': -97.5164,
+        'tz': 'America/Chicago',
+    },
+    'KXHIGHTSFO': {
+        'station': 'USW00023234',
+        'name': 'San Francisco (SFO)',
+        'lat': 37.7749, 'lon': -122.4194,
+        'tz': 'America/Los_Angeles',
+    },
+    'KXHIGHTSEA': {
+        'station': 'USW00024233',
+        'name': 'Seattle (Sea-Tac)',
+        'lat': 47.6062, 'lon': -122.3321,
+        'tz': 'America/Los_Angeles',
+    },
+    'KXHIGHTSATX': {
+        'station': 'USW00012921',
+        'name': 'San Antonio (International)',
+        'lat': 29.4241, 'lon': -98.4936,
+        'tz': 'America/Chicago',
+    },
+    'KXHIGHTATL': {
+        'station': 'USW00013874',
+        'name': 'Atlanta (Hartsfield)',
+        'lat': 33.7490, 'lon': -84.3880,
+        'tz': 'America/New_York',
+    },
 }
 
 # Fallback hardcoded offsets — used when NOAA API is unavailable
@@ -82,6 +166,20 @@ HARDCODED_BIAS_F = {
     "KXHIGHLA":  3.0,
     "KXHIGHHOU": 3.0,
     "KXHIGHPHX": 3.0,
+    "KXHIGHAUS": 3.0,
+    "KXHIGHDEN": 3.0,
+    "KXHIGHLAX": 3.0,
+    "KXHIGHPHIL": 3.0,
+    "KXHIGHTMIN": 3.0,
+    "KXHIGHTDAL": 3.0,
+    "KXHIGHTDC": 3.0,
+    "KXHIGHTLV": 3.0,
+    "KXHIGHTNOU": 3.0,
+    "KXHIGHTOKC": 3.0,
+    "KXHIGHTSFO": 3.0,
+    "KXHIGHTSEA": 3.0,
+    "KXHIGHTSATX": 3.0,
+    "KXHIGHTATL": 3.0,
 }
 DEFAULT_HARDCODED_BIAS_F = 3.0  # fallback for unknown tickers
 
