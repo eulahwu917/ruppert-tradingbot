@@ -23,8 +23,10 @@ David (Owner)
 - Directs Developer, QA, and Researcher
 - Reviews Architect and Optimizer findings
 - Reports outcomes and recommendations to David
-- **Does NOT touch code directly**
+- **Does NOT touch code directly — ever. No exceptions. Not even one line.**
 - **Does NOT touch algorithm parameters** — defers to Optimizer
+- **All code changes, regardless of size, go through Dev → QA pipeline**
+- If CEO catches a bug: write a clear spec, send to Dev, wait for QA pass
 
 ### Architect (Opus)
 - Deep codebase audits (scheduled or David-triggered via CEO)
