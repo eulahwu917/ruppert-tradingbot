@@ -9,7 +9,9 @@ import uuid
 from datetime import datetime, date, timedelta
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs')
+LIVE_LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs-live')
 os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(LIVE_LOG_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------
 # Log rotation — called once per cycle from ruppert_cycle.py
