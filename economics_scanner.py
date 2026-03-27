@@ -35,7 +35,7 @@ ACTIVE_ECON_SERIES = [
 
 # Minimum edge threshold — sourced from config.py (Phase 5)
 MIN_EDGE = config.ECON_MIN_EDGE         # 12% standard gate
-MIN_VOLUME = 100  # Minimum market volume (contracts) to consider
+MIN_VOLUME = config.ECON_MIN_VOLUME  # Minimum market volume (contracts) to consider
 
 # Confidence filters
 CONFIDENCE_FILTER = ['medium', 'high']  # Only include these confidence levels

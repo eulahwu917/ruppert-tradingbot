@@ -27,7 +27,6 @@ from logger import log_activity, log_trade, get_daily_summary, get_daily_exposur
 from capital import get_capital, get_buying_power
 from economics_scanner import find_econ_opportunities
 from geopolitical_scanner import run_geo_scan, format_geo_brief
-from best_bets_scanner import find_best_bets
 import config
 from bot.strategy import (
     should_enter, should_add, should_exit,

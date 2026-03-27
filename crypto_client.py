@@ -58,16 +58,12 @@ ASSET_CONFIG = {
 }
 
 # Top Polymarket crypto trader wallets (leaderboard Mar 2026)
+# Live list is maintained by bot/wallet_updater.py → logs/smart_money_wallets.json
+# This fallback is used only if the live file is unavailable.
 TOP_TRADER_WALLETS = {
     '0xdE17f7144fbD0eddb2679132C10ff5e74B120988': '0xdE17f7',
     '0x1f0ebc543B2d411f66947041625c0Aa1ce61CF86': '0x1f0ebc',
     '0x95d470e8d82d3dd6a899e91e36d7cee4b2c7c38c': 'ScroogeX',
-    # TODO: replace with verified Polymarket leaderboard wallets
-    '0xTODO_wallet_placeholder_4': 'Trader4',
-    '0xTODO_wallet_placeholder_5': 'Trader5',
-    '0xTODO_wallet_placeholder_6': 'Trader6',
-    '0xTODO_wallet_placeholder_7': 'Trader7',
-    '0xTODO_wallet_placeholder_8': 'Trader8',
 }
 
 # Path to the auto-refreshed wallet list produced by bot/wallet_updater.py
@@ -437,7 +433,7 @@ def _build_signal(symbol: str) -> dict:
     bull_count = int(bull_score)
     bear_count = int(bear_score)
 
-    SIGNAL_THRESHOLD = 3.5
+    SIGNAL_THRESHOLD = config.CRYPTO_SIGNAL_THRESHOLD
     if bull_score >= SIGNAL_THRESHOLD and bull_score > bear_score:
         direction = 'BULLISH'
     elif bear_score >= SIGNAL_THRESHOLD and bear_score > bull_score:

@@ -50,6 +50,7 @@ MIN_MARKET_LIQUIDITY = 100.00  # Min $ volume in market to trade
 
 # Risk settings - Crypto (separate budget, FULLY AUTO like weather)
 CRYPTO_MIN_EDGE_THRESHOLD = 0.12   # 12% min edge (consistent with weather)
+CRYPTO_SIGNAL_THRESHOLD   = 3.5    # bull/bear score threshold to declare directional signal
 
 # Auto-trade settings
 # Weather + Crypto = fully autonomous (no notification, no approval)
@@ -59,6 +60,7 @@ CRYPTO_AUTO_TRADE   = True   # Bot executes without asking
 GEO_AUTO_TRADE      = False  # Disabled: geopolitical scanner has no edge signal (news_volume only, not calibrated)
 ECON_AUTO_TRADE       = True    # DEMO: fully autonomous (Phase 5)
 ECON_MIN_EDGE         = 0.12   # 12% min edge to trigger a trade
+ECON_MIN_VOLUME       = 100    # minimum market volume (contracts) to consider
 ECON_FAR_DATED_MIN_EDGE = 0.20 # 20% min edge for contracts >60 days out
 ECON_MAX_ENTRY_PRICE  = 0.65   # No entries above 65c (poor risk/reward)
 ECON_MAX_POSITION     = 25.00  # kept for ruppert_cycle.py budget checks

@@ -20,7 +20,7 @@ ALERT_LOG   = LOGS / 'cycle_log.jsonl'
 
 import config
 from kalshi_client import KalshiClient
-from logger import log_trade, log_activity, get_daily_exposure, get_computed_capital, send_telegram
+from logger import log_trade, log_activity, get_daily_exposure, get_computed_capital, send_telegram, rotate_logs
 from bot.strategy import check_daily_cap, check_open_exposure, should_enter
 from capital import get_capital, get_buying_power
 
@@ -54,6 +54,12 @@ print(f"\n{'='*60}")
 print(f"  RUPPERT CYCLE  mode={MODE.upper()}  {ts()}")
 print(f"{'='*60}")
 log_cycle('start')
+
+# Rotate logs once per cycle (keeps last 90 days, deletes older files)
+try:
+    rotate_logs()
+except Exception as _e:
+    print(f"[Logger] Log rotation skipped: {_e}")
 
 client = KalshiClient()
 BASE   = "https://api.elections.kalshi.com/trade-api/v2/markets"

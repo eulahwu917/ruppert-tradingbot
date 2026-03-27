@@ -2,13 +2,50 @@
 Trade Logger
 Logs all bot activity, trades, and outcomes to files.
 """
+import glob
 import json
 import os
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 LOG_DIR = os.path.join(os.path.dirname(__file__), 'logs')
 os.makedirs(LOG_DIR, exist_ok=True)
+
+# ---------------------------------------------------------------------------
+# Log rotation — called once per cycle from ruppert_cycle.py
+# ---------------------------------------------------------------------------
+
+LOG_RETENTION_DAYS = 90  # keep 90 days of trade + activity logs
+
+def rotate_logs(retention_days: int = LOG_RETENTION_DAYS) -> int:
+    """
+    Delete trade and activity log files older than retention_days.
+    Returns count of files deleted.
+
+    Safe: only removes files matching trades_YYYY-MM-DD.jsonl and
+    activity_YYYY-MM-DD.log patterns — never touches other files.
+    """
+    cutoff = date.today() - timedelta(days=retention_days)
+    patterns = [
+        os.path.join(LOG_DIR, 'trades_*.jsonl'),
+        os.path.join(LOG_DIR, 'activity_*.log'),
+    ]
+    deleted = 0
+    for pattern in patterns:
+        for path in glob.glob(pattern):
+            fname = os.path.basename(path)
+            # Extract date portion: trades_YYYY-MM-DD.jsonl → YYYY-MM-DD
+            try:
+                date_str = fname.split('_', 1)[1].rsplit('.', 1)[0]
+                file_date = date.fromisoformat(date_str)
+                if file_date < cutoff:
+                    os.remove(path)
+                    deleted += 1
+            except Exception:
+                pass  # skip files that don't match expected date format
+    if deleted:
+        print(f"[Logger] Rotated {deleted} log file(s) older than {retention_days} days")
+    return deleted
 
 
 def _today_log_path():
