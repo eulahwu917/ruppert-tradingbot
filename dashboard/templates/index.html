@@ -813,7 +813,7 @@ async function loadPositions() {
   window._cachedPositions = positions;
   tb.innerHTML = positions.map(p => {
     const name  = (p.title||p.ticker||'');
-    const side  = p.side==='YES' ? '<span class="b-yes">YES</span>' : '<span class="b-no">NO</span>';
+    const side  = p.side?.toLowerCase()==='yes' ? '<span class="b-yes">YES</span>' : '<span class="b-no">NO</span>';
     const cur   = '<span style="color:#555;font-size:10px;">live↓</span>';
     const _s = (p.ticker||"").split("-")[0].toLowerCase(); const url = `https://kalshi.com/markets/${_s}`; 
     const pnlH  = v => v!=null ? `<span class="${pcls(v)}">${sign(v)}${dollar(v)}</span>` : '<span style="color:#333">--</span>';
@@ -872,7 +872,7 @@ async function loadLivePrices(positions) {
     // Backend normalises settled market prices: last_price=99 → no_ask=1
     // so this formula works correctly for both live and settled positions.
     // Use bid price (realizable sale value), not ask price (cost to buy more)
-    let cp = p.side==='YES'
+    let cp = p.side?.toLowerCase()==='yes'
       ? (lv.yes_bid ?? lv.yes_ask ?? null)
       : (lv.no_bid != null ? lv.no_bid : (lv.yes_ask != null ? 100 - lv.yes_ask : null));
     if(cp==null) continue;
@@ -912,7 +912,7 @@ async function loadLivePrices(positions) {
     let botPnl = 0, manPnl = 0;
     for (const p of positions) {
       const lv = prices[p.ticker]; if (!lv) continue;
-      let cp = p.side === 'YES'
+      let cp = p.side?.toLowerCase() === 'yes'
         ? (lv.yes_bid ?? lv.yes_ask ?? null)
         : (lv.no_bid != null ? lv.no_bid : (lv.yes_ask != null ? 100 - lv.yes_ask : null));
       if (cp == null) continue;
