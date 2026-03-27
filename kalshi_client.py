@@ -8,6 +8,40 @@ from kalshi_python_sync import Configuration, KalshiClient as _KalshiClient
 
 import config as cfg
 
+# ---------------------------------------------------------------------------
+# HTTP retry helper (handles 429 + transient 5xx)
+# ---------------------------------------------------------------------------
+
+def _get_with_retry(url: str, params=None, headers=None, timeout=10, max_retries=3):
+    """
+    GET request with exponential backoff on 429 (rate limit) and 5xx errors.
+    Returns the Response object on success, or None if all retries exhausted.
+    """
+    import requests
+    delay = 1.0
+    for attempt in range(max_retries):
+        try:
+            resp = requests.get(url, params=params, headers=headers, timeout=timeout)
+            if resp.status_code == 429:
+                retry_after = float(resp.headers.get('Retry-After', delay))
+                print(f"  [RateLimit] 429 on {url} — waiting {retry_after:.1f}s (attempt {attempt+1}/{max_retries})")
+                time.sleep(retry_after)
+                delay *= 2
+                continue
+            if resp.status_code >= 500:
+                print(f"  [ServerError] HTTP {resp.status_code} on {url} — retrying in {delay:.1f}s (attempt {attempt+1}/{max_retries})")
+                time.sleep(delay)
+                delay *= 2
+                continue
+            return resp
+        except Exception as e:
+            print(f"  [RequestError] {e} on {url} — retrying in {delay:.1f}s (attempt {attempt+1}/{max_retries})")
+            time.sleep(delay)
+            delay *= 2
+    print(f"  [RequestError] All {max_retries} retries exhausted for {url}")
+    return None
+
+
 # API URLs
 PROD_HOST = 'https://api.elections.kalshi.com/trade-api/v2'
 DEMO_HOST = 'https://api.elections.kalshi.com/trade-api/v2'  # Same URL, demo uses demo account credentials
@@ -72,8 +106,8 @@ class KalshiClient:
             try:
                 url = 'https://api.elections.kalshi.com/trade-api/v2/markets'
                 params = {'series_ticker': series, 'status': 'open', 'limit': 30}
-                resp = requests.get(url, params=params, timeout=10)
-                if resp.status_code == 200:
+                resp = _get_with_retry(url, params=params, timeout=10)
+                if resp is not None and resp.status_code == 200:
                     data = resp.json()
                     markets = data.get('markets', [])
 
@@ -85,8 +119,8 @@ class KalshiClient:
                             continue
                         try:
                             ob_url = f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook'
-                            ob_resp = requests.get(ob_url, timeout=5)
-                            if ob_resp.status_code == 200:
+                            ob_resp = _get_with_retry(ob_url, timeout=5)
+                            if ob_resp is not None and ob_resp.status_code == 200:
                                 ob = ob_resp.json().get('orderbook_fp', {})
                                 no_bids  = ob.get('no_dollars', [])   # [[price_str, vol_str], ...]
                                 yes_bids = ob.get('yes_dollars', [])
@@ -100,8 +134,12 @@ class KalshiClient:
                                     best_yes_bid = max(float(p) for p, v in yes_bids)
                                     market['yes_bid'] = int(round(best_yes_bid * 100))
                                     market['no_ask']  = 100 - market['yes_bid']  # implied
-                        except Exception:
-                            pass  # leave bid/ask as None if orderbook unavailable
+                                if not no_bids and not yes_bids:
+                                    print(f"  [Warning] Empty orderbook for {ticker} — bid/ask will be null")
+                            elif ob_resp is not None:
+                                print(f"  [Warning] Orderbook fetch failed for {ticker}: HTTP {ob_resp.status_code} — bid/ask will be null")
+                        except Exception as e:
+                            print(f"  [Warning] Orderbook error for {ticker}: {e} — bid/ask will be null")
                         time.sleep(0.05)  # 20 req/sec rate limit
 
                     all_markets.extend(markets)

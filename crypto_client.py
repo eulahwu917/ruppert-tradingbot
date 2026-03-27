@@ -121,11 +121,14 @@ def _load_wallets() -> dict:
 # In-process cache (TTL: 5 min for prices, 15 min for smart money)
 _CACHE: dict = {}
 
+_CACHE_MISS = object()  # Sentinel: distinguishes "not cached" from "cached value is None"
+
 def _cache_get(key: str, ttl: int = 300):
+    """Return cached value, or _CACHE_MISS sentinel if absent/expired."""
     entry = _CACHE.get(key)
     if entry and (time.time() - entry['ts']) < ttl:
         return entry['data']
-    return None
+    return _CACHE_MISS
 
 def _cache_set(key: str, data):
     _CACHE[key] = {'data': data, 'ts': time.time()}
@@ -161,7 +164,7 @@ def get_funding_rates(symbol: str, limit: int = FUNDING_RATE_LIMIT) -> list | No
         List of funding rates as floats (most recent last), or None on failure.
     """
     cached = _cache_get(f'funding_{symbol}', ttl=3600)  # cache 1h (funding settles 8h)
-    if cached is not None:
+    if cached is not _CACHE_MISS:
         return cached
 
     try:
@@ -205,7 +208,7 @@ def _compute_funding_z_scores() -> dict:
         }
     """
     cached = _cache_get('funding_z_scores', ttl=3600)
-    if cached is not None:
+    if cached is not _CACHE_MISS:
         return cached
 
     result = {'btc': None, 'eth': None, 'xrp': None, 'raw_rates': {}, 'available': False}
@@ -294,7 +297,7 @@ def _kraken_ohlc(pair: str, interval_min: int = 60, count: int = 50) -> list | N
     Returns list of [time, open, high, low, close, vwap, volume, count] or None.
     """
     cached = _cache_get(f'kraken_{pair}_{interval_min}', ttl=300)
-    if cached:
+    if cached is not _CACHE_MISS:
         return cached
     try:
         r = requests.get(f'{KRAKEN}/OHLC',
@@ -483,7 +486,7 @@ def get_realized_vol(symbol: str, lookback_hours: int = 24) -> float:
     Returns hourly vol as a fraction (e.g., 0.007 = 0.7%/h).
     """
     cached = _cache_get(f'rvol_{symbol}', ttl=1800)
-    if cached is not None:
+    if cached is not _CACHE_MISS:
         return cached
 
     cfg = ASSET_CONFIG[symbol]
@@ -515,7 +518,7 @@ def get_btc_signal() -> dict:
       realized_hourly_vol}
     """
     cached = _cache_get('signal_BTC', ttl=300)
-    if cached:
+    if cached is not _CACHE_MISS:
         return cached
     sig = _build_signal('BTC')
     sig['realized_hourly_vol'] = get_realized_vol('BTC')
@@ -526,7 +529,7 @@ def get_btc_signal() -> dict:
 def get_eth_signal() -> dict:
     """Same as get_btc_signal() but for ETH."""
     cached = _cache_get('signal_ETH', ttl=300)
-    if cached:
+    if cached is not _CACHE_MISS:
         return cached
     sig = _build_signal('ETH')
     sig['realized_hourly_vol'] = get_realized_vol('ETH')
@@ -537,7 +540,7 @@ def get_eth_signal() -> dict:
 def get_xrp_signal() -> dict:
     """Same for XRP."""
     cached = _cache_get('signal_XRP', ttl=300)
-    if cached:
+    if cached is not _CACHE_MISS:
         return cached
     sig = _build_signal('XRP')
     sig['realized_hourly_vol'] = get_realized_vol('XRP')
@@ -548,7 +551,7 @@ def get_xrp_signal() -> dict:
 def get_doge_signal() -> dict:
     """Same for DOGE."""
     cached = _cache_get('signal_DOGE', ttl=300)
-    if cached:
+    if cached is not _CACHE_MISS:
         return cached
     sig = _build_signal('DOGE')
     sig['realized_hourly_vol'] = get_realized_vol('DOGE')
@@ -636,7 +639,7 @@ def get_polymarket_smart_money(wallets: dict | None = None) -> dict:
         wallets = _load_wallets()
 
     cached = _cache_get('smart_money', ttl=900)
-    if cached:
+    if cached is not _CACHE_MISS:
         return cached
 
     raw_signals = []
