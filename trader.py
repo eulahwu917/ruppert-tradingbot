@@ -54,6 +54,9 @@ class Trader:
 
         if self.dry_run:
             log_activity(f"  [DRY RUN] Would have placed order — skipping actual execution")
+            opportunity['scan_contracts'] = contracts
+            opportunity['scan_price'] = price_cents
+            opportunity['fill_price'] = price_cents
             log_trade(opportunity, size, contracts, {'dry_run': True, 'status': 'simulated'})
             return True
 
@@ -65,7 +68,23 @@ class Trader:
                 count=contracts,
             )
             log_activity(f"  Order placed successfully: {result}")
-            log_trade(opportunity, size, contracts, result)
+
+            # Extract actual fill count from order result if available
+            opportunity['scan_contracts'] = contracts
+            filled = None
+            if isinstance(result, dict):
+                filled = result.get('filled_count') or result.get('count') or result.get('contracts_filled')
+            fill_contracts = filled if filled is not None else contracts
+            opportunity['fill_contracts'] = fill_contracts
+
+            # Extract actual fill price from order result if available
+            opportunity['scan_price'] = price_cents
+            fill_price = None
+            if isinstance(result, dict):
+                fill_price = result.get('yes_price') or result.get('price') or result.get('fill_price')
+            opportunity['fill_price'] = fill_price if fill_price is not None else price_cents
+
+            log_trade(opportunity, size, fill_contracts, result)
             self.bankroll -= size  # Update local balance tracking
             return True
 

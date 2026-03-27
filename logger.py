@@ -115,6 +115,10 @@ def build_trade_entry(opportunity, size, contracts, order_result):
                         else abs(opportunity.get('edge') or 0),
         'size_dollars': size,
         'contracts':    contracts,
+        'scan_contracts': opportunity.get('scan_contracts'),
+        'fill_contracts': opportunity.get('fill_contracts'),
+        'scan_price':   opportunity.get('scan_price'),
+        'fill_price':   opportunity.get('fill_price'),
         'order_result': order_result,
     }
 

@@ -133,6 +133,22 @@ try:
 except Exception as _recon_err:
     print(f"  [Orphan] Reconciliation failed (non-blocking): {_recon_err}")
 
+print('\n[0b] Log vs API exposure reconciliation...')
+try:
+    _log_exposure = get_daily_exposure()
+    _api_exposure = max(0.0, _cycle_capital - _cycle_buying_power) if _cycle_capital > 0 else 0.0
+    _divergence = abs(_log_exposure - _api_exposure)
+    _divergence_pct = (_divergence / _cycle_capital * 100) if _cycle_capital > 0 else 0
+    print(f'  Log exposure: ${_log_exposure:.2f} | API exposure: ${_api_exposure:.2f} | Divergence: ${_divergence:.2f} ({_divergence_pct:.1f}%)')
+    if _divergence > 50 and _divergence_pct > 5:
+        _recon_msg = f'Exposure divergence: logs=${_log_exposure:.2f} vs API=${_api_exposure:.2f} (${_divergence:.2f} gap). Review positions.'
+        print(f'  [WARNING] {_recon_msg}')
+        push_alert('warning', _recon_msg)
+    else:
+        print('  Reconciliation OK')
+except Exception as _recon2_err:
+    print(f'  [Reconciliation] Log vs API check failed (non-blocking): {_recon2_err}')
+
 # ΓöÇΓöÇ STEP 1: POSITION CHECK (every run) ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 print("\n[1] Position check...")
 # P0-3 fix: initialize actions_taken BEFORE the try block so it's always in scope.
