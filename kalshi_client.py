@@ -208,6 +208,60 @@ class KalshiClient:
 
         return all_markets
 
+    def get_markets_metadata(self, series_ticker, status='open'):
+        """
+        Paginate through ALL markets for a series and return raw dicts
+        WITHOUT orderbook enrichment. Fast: one list call per page.
+        Each dict has floor_strike, ticker, yes_ask_dollars, no_ask_dollars, etc.
+        """
+        host = DEMO_HOST if self.environment == 'demo' else PROD_HOST
+        url = f"{host}/markets"
+        all_markets = []
+        cursor = None
+        while True:
+            params = {'series_ticker': series_ticker, 'status': status, 'limit': 100}
+            if cursor:
+                params['cursor'] = cursor
+            resp = _get_with_retry(url, params=params, timeout=10)
+            if resp is None or resp.status_code != 200:
+                break
+            data = resp.json()
+            batch = data.get('markets', [])
+            all_markets.extend(batch)
+            cursor = data.get('cursor')
+            if not cursor or not batch:
+                break
+            time.sleep(0.05)  # rate limit courtesy
+        return all_markets
+
+    def enrich_orderbook(self, market):
+        """Enrich a single market dict with live orderbook bid/ask prices. Modifies in place."""
+        ticker = market.get('ticker', '')
+        if not ticker:
+            return market
+        try:
+            host = DEMO_HOST if self.environment == 'demo' else PROD_HOST
+            ob_url = f"{host}/markets/{ticker}/orderbook"
+            ob_resp = _get_with_retry(ob_url, timeout=5)
+            if ob_resp is not None and ob_resp.status_code == 200:
+                ob = ob_resp.json().get('orderbook_fp', {})
+                no_bids  = ob.get('no_dollars', [])
+                yes_bids = ob.get('yes_dollars', [])
+                if no_bids:
+                    best_no_bid = max(float(p) for p, v in no_bids)
+                    market['no_bid']  = int(round(best_no_bid * 100))
+                    market['yes_ask'] = 100 - market['no_bid']
+                if yes_bids:
+                    best_yes_bid = max(float(p) for p, v in yes_bids)
+                    market['yes_bid'] = int(round(best_yes_bid * 100))
+                    market['no_ask']  = 100 - market['yes_bid']
+            else:
+                print(f"  [Warning] Orderbook fetch failed for {ticker}: HTTP {ob_resp.status_code if ob_resp else 'timeout'}")
+        except Exception as e:
+            print(f"  [Warning] Orderbook error for {ticker}: {e}")
+        time.sleep(0.05)
+        return market
+
     def get_markets(self, series_ticker, status='open', limit=30):
         """
         Fetch markets for a series ticker via raw HTTP — bypasses SDK Pydantic deserialization.

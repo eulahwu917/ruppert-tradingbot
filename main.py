@@ -470,13 +470,40 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
             sigma = daily_vol * math.sqrt(hours / 24)
             drift = drift_sigma * sigma
 
-            # Use KalshiClient to get real orderbook bid/ask prices.
-            # This makes one orderbook API call per market (~250 calls across all series).
-            # Intentional: the list endpoint returns null for yes_ask/no_ask.
-            markets = client.get_markets(series, status='open', limit=50)
+            # Price-targeted fetching: get ALL market metadata (cheap paginated list),
+            # filter to markets near current price, then enrich only those with orderbook.
+            all_meta = client.get_markets_metadata(series, status='open')
+            print(f"  [{series}] {len(all_meta)} total markets found")
+
+            # Filter to markets near spot price using floor_strike
+            near_price = []
+            for m in all_meta:
+                try:
+                    strike = float(m.get('floor_strike', 0))
+                except (TypeError, ValueError):
+                    continue
+                # Keep markets within 2x half_w of spot
+                if abs(strike - spot) <= half_w * 4:
+                    near_price.append(m)
+
+            # Also include markets with list-endpoint yes_ask in tradeable range
+            # (catches markets whose floor_strike is 0 or missing)
+            near_tickers = {m.get('ticker') for m in near_price}
+            for m in all_meta:
+                if m.get('ticker') in near_tickers:
+                    continue
+                ya_d = float(m.get('yes_ask_dollars') or 0)
+                if 0.05 <= ya_d <= 0.92:
+                    near_price.append(m)
+
+            print(f"  [{series}] {len(near_price)} markets near spot (${spot:,.2f}), enriching orderbooks...")
+
+            # Enrich only the near-price markets with orderbook data
+            for m in near_price:
+                client.enrich_orderbook(m)
 
             from datetime import timezone
-            for m in markets:
+            for m in near_price:
                 ticker = m.get('ticker', '')
                 if ticker in traded_tickers:
                     continue
