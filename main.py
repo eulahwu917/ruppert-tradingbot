@@ -482,8 +482,8 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                     strike = float(m.get('floor_strike', 0))
                 except (TypeError, ValueError):
                     continue
-                # Keep markets within 2x half_w of spot
-                if abs(strike - spot) <= half_w * 4:
+                # Keep markets within ±10% of current spot price
+                if abs(strike - spot) <= spot * 0.10:
                     near_price.append(m)
 
             # Also include markets with list-endpoint yes_ask in tradeable range
