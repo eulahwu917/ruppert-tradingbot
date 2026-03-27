@@ -1,121 +1,104 @@
-"""
-Phase 2 — Tests for mode handling in ruppert_cycle.py.
-Verifies that each mode has a proper handler branch, calls sys.exit(0),
-and that the mode list in the docstring stays in sync with actual handlers.
-"""
+"""Tests for ruppert_cycle.py module structure and mode dispatch."""
+import importlib
+import importlib.util
+import inspect
 import re
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CYCLE_PATH = REPO_ROOT / 'ruppert_cycle.py'
 
-REQUIRED_MODES = ['check', 'econ_prescan', 'weather_only', 'crypto_only']
-
-
-def _read_cycle():
-    return CYCLE_PATH.read_text(encoding='utf-8', errors='replace')
+REQUIRED_MODES = ['check', 'econ_prescan', 'weather_only', 'crypto_only', 'report']
+FALLTHROUGH_MODES = {'full', 'smart'}
 
 
-# ── Test 1: Every required mode has an explicit `if MODE == '<mode>'` branch ──
-
-def test_all_modes_have_explicit_handler():
-    """Each required mode must have an `if MODE == '<mode>':` guard."""
-    text = _read_cycle()
-    missing = []
-    for mode in REQUIRED_MODES:
-        pattern = rf"""if\s+MODE\s*==\s*['"]""" + re.escape(mode) + r"""['"]"""
-        if not re.search(pattern, text):
-            missing.append(mode)
-    assert missing == [], (
-        f"ruppert_cycle.py missing explicit `if MODE == ...` for: {missing}"
+def _import_cycle():
+    """Import ruppert_cycle without executing the cycle."""
+    # This should now be safe — no side effects at module level
+    spec = importlib.util.spec_from_file_location(
+        'ruppert_cycle', REPO_ROOT / 'ruppert_cycle.py'
     )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
 
 
-# ── Test 2: Every mode handler ends with sys.exit(0) ─────────────────────────
+# Test 1: run_cycle exists and is callable
+def test_run_cycle_exists():
+    mod = _import_cycle()
+    assert hasattr(mod, 'run_cycle'), "ruppert_cycle.py must export run_cycle()"
+    assert callable(mod.run_cycle)
 
-def test_mode_handlers_call_sys_exit():
-    """Each mode branch must call sys.exit(0) so it doesn't fall through."""
-    text = _read_cycle()
-    lines = text.splitlines()
 
-    for mode in REQUIRED_MODES:
-        # Find the line with `if MODE == '<mode>':`
-        handler_line = None
-        for i, line in enumerate(lines):
-            if re.search(rf"""if\s+MODE\s*==\s*['"]""" + re.escape(mode) + r"""['"]""", line):
-                handler_line = i
-                break
-        assert handler_line is not None, (
-            f"Could not find handler for mode '{mode}'"
+# Test 2: Each required mode has a dedicated handler function
+def test_mode_handler_functions_exist():
+    mod = _import_cycle()
+    expected = {
+        'check': 'run_check_mode',
+        'econ_prescan': 'run_econ_prescan_mode',
+        'weather_only': 'run_weather_only_mode',
+        'crypto_only': 'run_crypto_only_mode',
+        'report': 'run_report_mode',
+    }
+    missing = []
+    for mode, func_name in expected.items():
+        if not hasattr(mod, func_name) or not callable(getattr(mod, func_name)):
+            missing.append(f"{mode} -> {func_name}")
+    assert missing == [], f"Missing mode handler functions: {missing}"
+
+
+# Test 3: run_full_mode exists (covers full + smart)
+def test_full_mode_handler_exists():
+    mod = _import_cycle()
+    assert hasattr(mod, 'run_full_mode'), "ruppert_cycle.py must export run_full_mode()"
+    assert callable(mod.run_full_mode)
+
+
+# Test 4: run_cycle dispatches to correct handler (check source for mode strings)
+def test_run_cycle_dispatches_all_modes():
+    """Verify run_cycle source contains dispatch for all required modes."""
+    mod = _import_cycle()
+    source = inspect.getsource(mod.run_cycle)
+    for mode in REQUIRED_MODES + list(FALLTHROUGH_MODES):
+        assert f"'{mode}'" in source, (
+            f"run_cycle() does not reference mode '{mode}'"
         )
 
-        # Scan forward from the handler to the next top-level `if MODE ==` or EOF
-        block = []
-        for j in range(handler_line + 1, len(lines)):
-            if re.search(r"""^if\s+MODE\s*==\s*['"]""", lines[j]):
-                break
-            block.append(lines[j])
 
-        block_text = '\n'.join(block)
-        assert 'sys.exit(0)' in block_text, (
-            f"Mode '{mode}' handler does not call sys.exit(0) — "
-            f"may fall through to later modes"
-        )
+# Test 5: No side effects on import (module-level code doesn't call KalshiClient)
+def test_no_side_effects_on_import():
+    """Importing ruppert_cycle should not instantiate KalshiClient or call APIs."""
+    source = (REPO_ROOT / 'ruppert_cycle.py').read_text(encoding='utf-8')
+    lines = source.splitlines()
+    for i, line in enumerate(lines, 1):
+        stripped = line.strip()
+        # Skip lines inside function/class bodies (indented) and comments
+        if stripped.startswith('#') or stripped.startswith('def ') or stripped.startswith('class '):
+            continue
+        if not line.startswith(' ') and not line.startswith('\t'):
+            # Top-level line
+            assert 'KalshiClient()' not in stripped, (
+                f"Line {i}: KalshiClient() called at module level"
+            )
 
 
-# ── Test 3: Docstring mode list matches actual handlers ──────────────────────
-
+# Test 6: Docstring modes match handler functions
 def test_docstring_modes_match_handlers():
-    """Modes listed in the module docstring must match actual if-MODE branches.
-
-    'full' and 'smart' are fallthrough modes (no explicit guard) — they run
-    the main body after all early-exit modes have called sys.exit(0).
-    """
-    text = _read_cycle()
-
-    # Extract modes from the docstring (lines like `  full  — ...`)
-    docstring_match = re.search(r'"""(.*?)"""', text, re.DOTALL)
-    assert docstring_match, "Could not find module docstring in ruppert_cycle.py"
+    """Modes in module docstring must match mode handler functions."""
+    source = (REPO_ROOT / 'ruppert_cycle.py').read_text(encoding='utf-8')
+    docstring_match = re.search(r'"""(.*?)"""', source, re.DOTALL)
+    assert docstring_match, "Could not find module docstring"
     docstring = docstring_match.group(1)
 
     doc_modes = set()
     for line in docstring.splitlines():
-        m = re.match(r'\s+(\w+)\s+—', line)
+        m = re.match(r'\s+(\w+)\s+\u2014', line)
         if m:
             doc_modes.add(m.group(1))
 
-    # Extract modes from actual `if MODE == '...'` branches
-    handler_modes = set(re.findall(r"""if\s+MODE\s*==\s*['"](\w+)['"]""", text))
-
-    # 'full' and 'smart' are fallthrough modes — no explicit guard needed
-    FALLTHROUGH_MODES = {'full', 'smart'}
-
-    # Docstring modes that have no handler (excluding fallthrough)
-    doc_only = doc_modes - handler_modes - FALLTHROUGH_MODES
-    # Handler modes not documented
-    handler_only = handler_modes - doc_modes
-
-    assert doc_only == set(), (
-        f"Modes in docstring but missing handler: {doc_only}"
-    )
-    assert handler_only == set(), (
-        f"Modes with handler but missing from docstring: {handler_only}"
-    )
-
-
-# ── Test 4: No duplicate mode handlers ───────────────────────────────────────
-
-def test_no_duplicate_mode_handlers():
-    """Each mode should have exactly one `if MODE ==` branch."""
-    text = _read_cycle()
-    all_modes = re.findall(r"""if\s+MODE\s*==\s*['"](\w+)['"]""", text)
-    seen = {}
-    duplicates = []
-    for mode in all_modes:
-        seen[mode] = seen.get(mode, 0) + 1
-    for mode, count in seen.items():
-        if count > 1:
-            duplicates.append(f"{mode} ({count}x)")
-    assert duplicates == [], (
-        f"Duplicate mode handlers in ruppert_cycle.py: {duplicates}"
-    )
+    # Every documented mode should have a handler or be in run_cycle dispatch
+    mod = _import_cycle()
+    run_cycle_source = inspect.getsource(mod.run_cycle)
+    for mode in doc_modes:
+        assert f"'{mode}'" in run_cycle_source, (
+            f"Mode '{mode}' documented but not in run_cycle dispatch"
+        )
