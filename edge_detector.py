@@ -394,12 +394,8 @@ def analyze_market(market: dict) -> dict | None:
         # Flag whether NWS was degraded (set in confidence block above)
         result['nws_degraded']     = ensemble_data.get("nws_current_f") is None
 
-    # Second line of defense: skip same-day markets after city's local 2pm
-    # (primary skip is in main.py; this catches any path that bypasses it)
-    if ensemble_data and ensemble_data.get('is_same_day'):
-        city_hours = (ensemble_data.get('conditions') or {}).get('hours_since_midnight', 0)
-        if city_hours >= config.SAME_DAY_SKIP_AFTER_HOUR:
-            return None  # day's high already observed — no valid signal
+    # Same-day cutoff handled upstream in main.py via MIN_HOURS_TO_CLOSE
+    # (uses Kalshi close_time directly — no timezone math needed)
 
     return result
 

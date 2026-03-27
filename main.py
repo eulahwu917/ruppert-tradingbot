@@ -275,36 +275,27 @@ def run_weather_scan(dry_run=True):
         markets = client.search_markets('temperature')
         log_activity(f"[Weather] Fetched {len(markets)} markets")
 
-        # Filter: skip same-day markets after SAME_DAY_SKIP_AFTER_HOUR (local time)
+        # Filter: skip markets with less than MIN_HOURS_TO_CLOSE hours remaining
+        # Uses close_time from Kalshi API directly — no timezone math needed
         import datetime as _dt
-        from edge_detector import parse_date_from_ticker
-        _now_local_hour = _dt.datetime.now().hour
-        _today = _dt.date.today()
-        _skip_hour = getattr(config, 'SAME_DAY_SKIP_AFTER_HOUR', 14)
-        all_markets_before = markets
+        _now_utc = _dt.datetime.now(_dt.timezone.utc)
+        _min_hours = getattr(config, 'MIN_HOURS_TO_CLOSE', 4.0)
+        _all_before = len(markets)
         filtered_markets = []
         for m in markets:
-            ticker = m.get('ticker', '')
-            # Primary check: parse settlement date from ticker (always available)
-            try:
-                settle_date = parse_date_from_ticker(ticker)
-                if settle_date == _today and _now_local_hour >= _skip_hour:
-                    continue  # skip — same-day market past local cutoff hour
-            except Exception:
-                pass
-            # Secondary check: close_time from API (if available)
             close_str = m.get('close_time', '')
             if close_str:
                 try:
-                    settle_date_api = _dt.datetime.fromisoformat(close_str.replace('Z', '+00:00')).date()
-                    if settle_date_api == _today and _now_local_hour >= _skip_hour:
+                    close_dt = _dt.datetime.fromisoformat(close_str.replace('Z', '+00:00'))
+                    hours_left = (close_dt - _now_utc).total_seconds() / 3600
+                    if hours_left < _min_hours:
+                        log_activity(f'[WeatherScan] Skipping {m.get("ticker","?")} — only {hours_left:.1f}h to close (min {_min_hours}h)')
                         continue
                 except Exception:
                     pass
             filtered_markets.append(m)
         markets = filtered_markets
-        _skipped_count = len(all_markets_before) - len(markets)
-        log_activity(f"[Weather] Filtered to {len(markets)} markets (same-day skip after {_skip_hour}:00: {_skipped_count} removed)")
+        log_activity(f"[Weather] Filtered to {len(markets)} markets ({_all_before - len(markets)} removed, <{_min_hours}h to close)")
 
         opportunities = find_opportunities(markets)
         log_activity(f"[Weather] Found {len(opportunities)} opportunities above {config.MIN_EDGE_THRESHOLD:.0%} threshold")

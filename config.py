@@ -89,10 +89,14 @@ GEO_MIN_DAYS_TO_EXPIRY   = 1       # No same-day expiry for geo markets
 
 # Bot settings
 CHECK_INTERVAL_HOURS = 6       # How often to scan for opportunities
-# Timezone: all daily cap resets and same-day cutoffs use server local time.
-# Server is on David's Windows machine (America/Los_Angeles / PDT).
-# This matches Kalshi's market windows — no adjustment needed.
-SAME_DAY_SKIP_AFTER_HOUR = 14  # 2pm Pacific — don't open same-day markets after this
+# Minimum hours remaining before market close to enter a trade.
+# Markets closing in less than this many hours are skipped.
+# Uses Kalshi close_time directly — no timezone math needed.
+# Autoresearch-tunable: lower = more trades, higher = more certainty of fill.
+MIN_HOURS_TO_CLOSE = 4.0
+
+# DEPRECATED: replaced by MIN_HOURS_TO_CLOSE (timezone-independent)
+# SAME_DAY_SKIP_AFTER_HOUR = 14
 
 # Minimum confidence thresholds per module
 MIN_CONFIDENCE = {
