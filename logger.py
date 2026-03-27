@@ -98,6 +98,17 @@ def build_trade_entry(opportunity, size, contracts, order_result):
             else:
                 module = source  # fallback: use source as module (e.g. 'unknown')
 
+    raw_action = opportunity.get('action', 'buy')
+    raw_lower = raw_action.strip().lower() if isinstance(raw_action, str) else str(raw_action).lower()
+    if raw_lower.startswith('buy'):
+        action = 'buy'
+    elif raw_lower.startswith('exit'):
+        action = 'exit'
+    elif raw_lower.startswith('open'):
+        action = 'open'
+    else:
+        action = raw_lower
+
     return {
         'trade_id':     str(uuid.uuid4()),
         'timestamp':    opportunity.get('timestamp') or datetime.now().isoformat(),
@@ -105,7 +116,8 @@ def build_trade_entry(opportunity, size, contracts, order_result):
         'ticker':       opportunity['ticker'],
         'title':        opportunity.get('title', opportunity['ticker']),
         'side':         opportunity['side'],
-        'action':       opportunity.get('action', 'buy'),
+        'action':       action,
+        'action_detail': raw_action,
         'source':       source,
         'module':       module,
         'noaa_prob':    opportunity.get('noaa_prob'),
