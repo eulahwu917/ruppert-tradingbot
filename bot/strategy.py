@@ -463,10 +463,12 @@ def get_strategy_summary() -> dict:
     """
     return {
         'kelly_fraction_max':           KELLY_FRACTION,   # 80%+ confidence tier
-        'kelly_fraction_tier_80plus':   0.25,
-        'kelly_fraction_tier_70_80':    0.20,
-        'kelly_fraction_tier_60_70':    0.15,
+        'kelly_fraction_tier_80plus':   0.16,
+        'kelly_fraction_tier_70_80':    0.14,
+        'kelly_fraction_tier_60_70':    0.12,
         'kelly_fraction_tier_50_60':    0.10,
+        'kelly_fraction_tier_40_50':    0.07,
+        'kelly_fraction_tier_25_40':    0.05,
         'max_position_pct':         getattr(_cfg, 'MAX_POSITION_PCT', 0.01),
         'pct_capital_cap':          getattr(_cfg, 'MAX_POSITION_PCT', 0.01),
         'daily_cap_ratio':          DAILY_CAP_RATIO,

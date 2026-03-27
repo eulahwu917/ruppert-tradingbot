@@ -553,7 +553,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 new_crypto.append({
                     'ticker': ticker, 'title': m.get('title', ticker),
                     'side': best_action, 'price': best_price,
-                    'yes_ask': ya, 'yes_bid': ya,
+                    'yes_ask': ya, 'yes_bid': m.get('yes_bid') or ya,
                     'prob_model': prob_model,
                     'confidence': _crypto_confidence,
                     'hours_to_settlement': _hours_left,

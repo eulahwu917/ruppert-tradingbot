@@ -108,7 +108,9 @@ def get_daily_exposure():
         for line in f:
             try:
                 entry = json.loads(line)
-                total += entry.get('size_dollars', 0)
+                # Only count entries (buy), not exits — exits don't consume new capital
+                if entry.get('action', 'buy') != 'exit':
+                    total += entry.get('size_dollars', 0)
             except:
                 pass
     return total

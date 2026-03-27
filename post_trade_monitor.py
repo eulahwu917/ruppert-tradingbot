@@ -44,29 +44,40 @@ def push_alert(level, message, ticker=None, pnl=None):
 
 
 def load_open_positions():
-    """Load today's open positions from trade log, filtering out exits."""
-    trade_log = LOGS / f"trades_{date.today().isoformat()}.jsonl"
-    if not trade_log.exists():
-        return []
+    """Load open positions from trade logs, filtering out exits.
+
+    Reads today's log AND yesterday's log so multi-day positions entered
+    yesterday are not missed. Today's entries/exits take precedence.
+    """
+    from datetime import timedelta
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    today = date.today().isoformat()
+
+    logs_to_check = [
+        LOGS / f"trades_{yesterday}.jsonl",
+        LOGS / f"trades_{today}.jsonl",
+    ]
 
     entries_by_ticker = {}
     exit_tickers = set()
 
-    for line in trade_log.read_text(encoding='utf-8').splitlines():
-        line = line.strip()
-        if not line:
+    for trade_log in logs_to_check:
+        if not trade_log.exists():
             continue
-        try:
-            rec = json.loads(line)
-        except Exception:
-            continue
-
-        ticker = rec.get('ticker', '')
-        action = rec.get('action', 'buy')
-        if action == 'exit':
-            exit_tickers.add(ticker)
-        else:
-            entries_by_ticker[ticker] = rec
+        for line in trade_log.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            ticker = rec.get('ticker', '')
+            action = rec.get('action', 'buy')
+            if action == 'exit':
+                exit_tickers.add(ticker)
+            else:
+                entries_by_ticker[ticker] = rec
 
     # Return only positions that haven't been exited
     return [rec for ticker, rec in entries_by_ticker.items() if ticker not in exit_tickers]
