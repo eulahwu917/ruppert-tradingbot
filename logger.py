@@ -267,6 +267,7 @@ def get_computed_capital():
 def send_telegram(message: str) -> bool:
     """Send a message directly to David via Telegram Bot API."""
     import urllib.request, urllib.parse
+    import config as _config
     try:
         config_path = os.path.join(os.path.dirname(__file__), '..', '..', 'openclaw.json')
         config_path = os.path.normpath(config_path)
@@ -274,7 +275,7 @@ def send_telegram(message: str) -> bool:
             import json as _json
             cfg = _json.load(f)
         bot_token = cfg['channels']['telegram']['botToken']
-        chat_id = '5003590611'
+        chat_id = _config.TELEGRAM_CHAT_ID
         url = f'https://api.telegram.org/bot{bot_token}/sendMessage'
         data = urllib.parse.urlencode({'chat_id': chat_id, 'text': message}).encode()
         req = urllib.request.Request(url, data=data)
