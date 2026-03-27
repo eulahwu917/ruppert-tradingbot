@@ -104,6 +104,7 @@ Schedule triggers OR David requests via CEO
 ## Hard Rules
 
 1. **CEO does not write or edit production code** — that is Developer's job
+   ⚠️ This means NEVER — not for one-liners, not for "trivial" fixes, not for anything. ALWAYS spawn Dev → QA.
 2. **CEO does not tune algorithm parameters** — that is Optimizer's job
 3. **Developer does not self-approve** — QA is always a separate session
 4. **No LIVE trades without David's explicit go-ahead** — scorecard required

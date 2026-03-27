@@ -1,37 +1,22 @@
-import sys
-sys.path.insert(0, r'C:\Users\David Wu\.openclaw\workspace\ruppert-tradingbot-demo')
-from kalshi_client import KalshiClient
 import requests
 
-client = KalshiClient()
-
-# Check a few of the high-edge YES markets directly
 tickers = [
-    'KXHIGHNY-26MAR27-T62',
-    'KXHIGHCHI-26MAR27-T37',
-    'KXHIGHTDC-26MAR27-T67',
-    'KXHIGHMIA-26MAR27-T77',
-    'KXHIGHTSEA-26MAR27-T53',
+    'KXHIGHTDC-26MAR27-B69.5',
+    'KXHIGHNY-26MAR27-B62.5',
+    'KXHIGHPHIL-26MAR27-T65',
+    'KXHIGHAUS-26MAR27-T86',
 ]
 
-print("=== Market Reality Check ===")
-for t in tickers:
-    try:
-        m = client.get_market(t)
-        print(f"{t}")
-        print(f"  yes_ask={m.get('yes_ask')}c  yes_bid={m.get('yes_bid')}c  no_ask={m.get('no_ask')}c  status={m.get('status')}")
-        print(f"  volume={m.get('volume')}  open_interest={m.get('open_interest')}")
-    except Exception as e:
-        print(f"{t}: ERROR - {e}")
-
-# Also check what NOAA/OpenMeteo actually says for NYC tomorrow
-print("\n=== OpenMeteo check for NYC tomorrow ===")
-from openmeteo_client import get_ensemble_forecast
-try:
-    result = get_ensemble_forecast('New York', '2026-03-27')
-    if result:
-        print(f"  forecast_high={result.get('forecast_high_f')}F  confidence={result.get('confidence')}")
+BASE = 'https://api.elections.kalshi.com/trade-api/v2/markets'
+for ticker in tickers:
+    r = requests.get(f'{BASE}/{ticker}', timeout=5)
+    if r.status_code == 200:
+        m = r.json().get('market', {})
+        print(ticker)
+        print('  status=' + str(m.get('status')) + ' result=' + str(m.get('result')))
+        print('  yes_ask=' + str(m.get('yes_ask')) + ' yes_bid=' + str(m.get('yes_bid')) + ' no_ask=' + str(m.get('no_ask')) + ' no_bid=' + str(m.get('no_bid')))
+        print('  last_price=' + str(m.get('last_price')) + ' close_time=' + str(m.get('close_time')))
+        print('  title=' + str(m.get('title')))
     else:
-        print("  No result returned")
-except Exception as e:
-    print(f"  ERROR: {e}")
+        print(ticker + ' -> HTTP ' + str(r.status_code))
+    print()

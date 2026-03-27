@@ -158,8 +158,13 @@ def calculate_position_size(edge: float, win_prob: float, capital: float,
         kelly_size *= 1 / vol_ratio            ← vol shrinkage
         size        = min(kelly_size, $25, 2.5% of capital)
     """
-    if win_prob <= 0 or win_prob >= 1 or edge <= 0 or capital <= 0:
+    if win_prob <= 0 or edge <= 0 or capital <= 0:
         return 0.0
+
+    # Cap win_prob at 0.999 to avoid division-by-zero in Kelly formula
+    # when NOAA gives 100% probability — these are our highest-edge trades.
+    if win_prob >= 0.999:
+        win_prob = 0.999
 
     kf = kelly_fraction_for_confidence(confidence)
     f = edge / (1.0 - win_prob)

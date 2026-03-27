@@ -2,9 +2,12 @@
 Ruppert Autonomous Trading Cycle
 Runs on schedule via Windows Task Scheduler.
 Modes:
-  full   ΓÇö scan + positions + smart money + execute (7am, 3pm)
-  check  ΓÇö positions only (12pm, 10pm)
-  smart  ΓÇö smart money refresh only (lightweight)
+  full          — scan + positions + smart money + execute (7am, 3pm)
+  check         — positions only (10pm)
+  smart         — smart money refresh only (lightweight)
+  econ_prescan  — position check + econ scan only, skip if no release today (5am)
+  weather_only  — position check + weather scan only (7pm)
+  crypto_only   — position check + crypto scan only (10am, 6pm)
 """
 import sys, json, time, math, requests
 from pathlib import Path
@@ -86,6 +89,28 @@ client = KalshiClient()
 BASE   = "https://api.elections.kalshi.com/trade-api/v2/markets"
 HDR    = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
 traded_tickers = set()
+
+# Populate traded_tickers from today's trade log to prevent cross-cycle duplicates
+_trade_log_path = LOGS / f'trades_{date.today().isoformat()}.jsonl'
+if _trade_log_path.exists():
+    try:
+        for _line in _trade_log_path.read_text(encoding='utf-8').splitlines():
+            _line = _line.strip()
+            if not _line:
+                continue
+            _rec = json.loads(_line)
+            _action = _rec.get('action', '')
+            _tk = _rec.get('ticker', '')
+            if not _tk:
+                continue
+            if _action in ('buy', 'open'):
+                traded_tickers.add(_tk)
+            elif _action == 'exit':
+                traded_tickers.discard(_tk)
+        if traded_tickers:
+            print(f"  [Init] Loaded {len(traded_tickers)} open ticker(s) from today's log: {traded_tickers}")
+    except Exception as _tl_err:
+        print(f"  [Init] Could not read trade log (non-blocking): {_tl_err}")
 
 # Compute open exposure once per cycle — used by global 70% cap check in should_enter()
 try:
@@ -264,6 +289,158 @@ except Exception as e:
 if MODE == 'check':
     log_cycle('done', {'actions': len(actions_taken) if 'actions_taken' in dir() else 0})
     print(f"\nCheck-only cycle done. {ts()}")
+    sys.exit(0)
+
+# ── ECON PRESCAN MODE (5am) ─────────────────────────────────────────────────
+if MODE == 'econ_prescan':
+    print("\n[econ_prescan] Checking for econ releases today...")
+    _econ_trades = 0
+    try:
+        from economics_client import get_upcoming_releases as _get_upcoming
+        from economics_scanner import find_econ_opportunities as _find_econ
+        from logger import get_computed_capital as _get_cap_econ
+
+        _releases_today = [r for r in _get_upcoming() if r.get('days_away') == 0]
+        if not _releases_today:
+            print("  No econ release today — skipping scan")
+            log_cycle('done', {'econ_trades': 0, 'reason': 'no_release_today'})
+            sys.exit(0)
+
+        print(f"  {len(_releases_today)} release(s) today: {[r['event'] for r in _releases_today]}")
+        _econ_opps = _find_econ()
+        print(f"  {len(_econ_opps)} econ opportunity(ies) found")
+
+        _econ_capital  = _get_cap_econ()
+        _econ_deployed = get_daily_exposure()
+        _econ_daily_cap = _econ_capital * getattr(config, 'ECON_DAILY_CAP_PCT', 0.04)
+        _econ_spent = 0.0
+
+        for opp in _econ_opps:
+            ticker = opp.get('ticker', '')
+            if ticker in traded_tickers:
+                print(f"  Already traded {ticker} — skipping")
+                continue
+
+            side = opp.get('bet_direction', 'yes')
+            mkt_price = int(opp.get('yes_ask', 50) if side == 'yes' else opp.get('no_ask', 50))
+            bet_price = mkt_price if side == 'yes' else 100 - mkt_price
+            hours_left = max(1.0, opp.get('hours_to_settlement', 48))
+
+            if not check_open_exposure(_econ_capital, OPEN_POSITION_VALUE):
+                print(f"  [GlobalCap] STOP: open exposure ${OPEN_POSITION_VALUE:.2f} >= 70% of capital")
+                break
+
+            _cap_ok = check_daily_cap(_econ_capital, _econ_deployed + _econ_spent)
+            if _cap_ok <= 0:
+                print(f"  [DailyCap] Daily cap reached — stopping econ trades")
+                break
+
+            signal = {
+                'edge': opp.get('edge', 0),
+                'win_prob': opp.get('model_prob', 0.5),
+                'confidence': opp.get('confidence', 0),
+                'hours_to_settlement': hours_left,
+                'module': 'econ',
+                'vol_ratio': 1.0,
+                'side': side,
+                'yes_ask': int(opp.get('yes_ask', 50)),
+                'yes_bid': int(opp.get('yes_bid', 50)),
+                'open_position_value': OPEN_POSITION_VALUE,
+            }
+            decision = should_enter(signal, _econ_capital, _econ_deployed + _econ_spent)
+            if not decision['enter']:
+                print(f"  [Strategy] SKIP {ticker}: {decision['reason']}")
+                continue
+            if decision['size'] > _econ_daily_cap - _econ_spent:
+                print(f"  [DailyCap] SKIP {ticker}: would exceed econ daily cap")
+                continue
+
+            size = min(decision['size'], _cap_ok)
+            contracts = max(1, int(size / bet_price * 100))
+            actual_cost = round(contracts * bet_price / 100, 2)
+
+            trade = {
+                'ticker': ticker,
+                'title': opp.get('title', ticker),
+                'side': side,
+                'action': 'buy',
+                'yes_price': int(opp.get('yes_ask', 50)),
+                'market_prob': opp.get('market_prob', 0.5),
+                'noaa_prob': None,
+                'edge': opp.get('edge'),
+                'confidence': opp.get('confidence'),
+                'size_dollars': actual_cost,
+                'contracts': contracts,
+                'source': 'econ',
+                'note': opp.get('reasoning', '')[:200],
+                'timestamp': ts(),
+                'date': str(date.today()),
+            }
+
+            if DRY_RUN:
+                log_trade(trade, actual_cost, contracts, {'dry_run': True})
+                log_activity(f'[ECON-PRESCAN] BUY {side.upper()} {ticker} {contracts}@{bet_price}c ${actual_cost:.2f}')
+                print(f"  [DEMO] BUY {side.upper()} {ticker} {contracts}@{bet_price}c ${actual_cost:.2f}")
+            else:
+                try:
+                    result = client.place_order(ticker, side, bet_price, contracts)
+                    log_trade(trade, actual_cost, contracts, result)
+                    log_activity(f'[ECON-PRESCAN] EXECUTED {ticker} {side.upper()} {contracts}@{bet_price}c')
+                    print(f"  [LIVE] EXECUTED econ trade: {ticker}")
+                except Exception as _ex:
+                    print(f"  ERROR executing econ trade {ticker}: {_ex}")
+                    continue
+
+            traded_tickers.add(ticker)
+            _econ_spent += actual_cost
+            _econ_trades += 1
+
+    except Exception as _e:
+        print(f"  econ_prescan error: {_e}")
+        import traceback; traceback.print_exc()
+
+    log_cycle('done', {'econ_trades': _econ_trades})
+    print(f"\necon_prescan done — {_econ_trades} trade(s). {ts()}")
+    sys.exit(0)
+
+# ── WEATHER-ONLY MODE (7pm) ─────────────────────────────────────────────────
+if MODE == 'weather_only':
+    print("\n[weather_only] Running weather scan...")
+    _weather_count = 0
+    try:
+        from main import run_weather_scan as _run_weather
+        _weather_results = _run_weather(dry_run=DRY_RUN)
+        _weather_count = len(_weather_results) if _weather_results else 0
+        if _weather_count:
+            print(f"  {_weather_count} weather trade(s) executed")
+        else:
+            print("  No weather opportunities above threshold")
+    except Exception as _e:
+        print(f"  weather_only error: {_e}")
+        import traceback; traceback.print_exc()
+
+    log_cycle('done', {'weather_trades': _weather_count})
+    print(f"\nweather_only done — {_weather_count} trade(s). {ts()}")
+    sys.exit(0)
+
+# ── CRYPTO-ONLY MODE (10am, 6pm) ────────────────────────────────────────────
+if MODE == 'crypto_only':
+    print("\n[crypto_only] Running crypto scan...")
+    _crypto_count = 0
+    try:
+        from main import run_crypto_scan as _run_crypto
+        _crypto_results = _run_crypto(dry_run=DRY_RUN, direction=None, traded_tickers=traded_tickers, open_position_value=OPEN_POSITION_VALUE)
+        _crypto_count = len(_crypto_results) if _crypto_results else 0
+        if _crypto_count:
+            print(f"  {_crypto_count} crypto trade(s) executed")
+        else:
+            print("  No crypto opportunities above threshold")
+    except Exception as _e:
+        print(f"  crypto_only error: {_e}")
+        import traceback; traceback.print_exc()
+
+    log_cycle('done', {'crypto_trades': _crypto_count})
+    print(f"\ncrypto_only done — {_crypto_count} trade(s). {ts()}")
     sys.exit(0)
 
 # ΓöÇΓöÇ REPORT MODE: 7am P&L summary + loss detection ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
