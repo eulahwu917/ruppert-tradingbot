@@ -955,6 +955,13 @@ def run_cycle(mode):
         buying_power=buying_power,
     )
 
+    # Data Agent: daily historical audit (once per day, non-fatal)
+    try:
+        from data_agent import run_historical_audit
+        run_historical_audit(since_date='2026-03-26')
+    except Exception as _ha_err:
+        log_activity(f'[DataAgent] Historical audit failed: {_ha_err}')
+
     # Reconciliation (all modes)
     run_orphan_reconciliation(client, logs_dir)
     run_exposure_reconciliation(logs_dir, capital, buying_power)
@@ -977,6 +984,17 @@ def run_cycle(mode):
         summary = run_full_mode(client, state)
     else:
         raise ValueError(f'Unknown mode: {mode}')
+
+    # ── Data Agent: post-scan audit (non-fatal) ─────────────────────────────
+    if mode in ('full', 'crypto_only', 'weather_only', 'econ_prescan'):
+        try:
+            from data_agent import run_post_scan_audit
+            _audit = run_post_scan_audit(mode='post_cycle')
+            _iss = _audit.get('issues_found', 0)
+            if _iss:
+                print(f'  [DataAgent] {_iss} issue(s) found and handled')
+        except Exception as _da_err:
+            log_activity(f'[DataAgent] Post-scan audit failed: {_da_err}')
 
     save_state(logs_dir, state.traded_tickers, mode)
     log_cycle(mode, 'done', summary)
