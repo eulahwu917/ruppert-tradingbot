@@ -337,7 +337,10 @@ def analyze_market(market: dict) -> dict | None:
     # If |model_prob - market_prob| > MAX_MODEL_MARKET_DIVERGENCE, the market
     # is telling us something our model doesn't know (ghost market, unvalidated city,
     # warm bias error). Skip rather than fight the tape.
-    _divergence_gap = abs(model_prob - market_prob)
+    # For T_lower markets, model_prob = P(high >= threshold) but market_prob = P(YES) = P(high < threshold).
+    # Use semantically equivalent probability for a fair divergence comparison.
+    _divergence_model = (1.0 - model_prob) if market_type == "T_lower" else model_prob
+    _divergence_gap = abs(_divergence_model - market_prob)
     if _divergence_gap > config.MAX_MODEL_MARKET_DIVERGENCE:
         logger.debug(
             f"[Edge] {ticker}: skipping — model/market divergence "
