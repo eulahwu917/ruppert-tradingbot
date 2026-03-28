@@ -141,6 +141,9 @@ WS_ACTIVE_SERIES = [
     'KXBTC', 'KXETH', 'KXXRP', 'KXDOGE', 'KXSOL',
     # Crypto 15m direction
     'KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M',
+    # Crypto long-horizon (monthly/annual)
+    'KXBTCMAXM', 'KXBTCMAXY', 'KXBTCMINY', 'KXBTC2026250', 'KXBTCMAX100',
+    'KXETHMAXM', 'KXETHMINY', 'KXETHMAXY',
     # Econ
     'KXCPI', 'KXPCE', 'KXJOBS', 'KXUNEMPLOYMENT', 'KXGDP',
     # Fed
@@ -148,3 +151,9 @@ WS_ACTIVE_SERIES = [
 ]
 WS_CACHE_STALE_SECONDS = 60      # trigger REST fallback after this many seconds
 WS_CACHE_PURGE_SECONDS = 300     # purge dead entries after this many seconds
+
+# ── Long-Horizon Crypto (KXBTCMAXY, KXBTCMAXM, etc.) ────────────────────────
+LONG_HORIZON_MIN_EDGE = 0.08        # 8c minimum edge
+LONG_HORIZON_MAX_SPREAD = 10        # max 10c spread (monthly/annual are tighter)
+LONG_HORIZON_MAX_POSITION_PCT = 0.005  # 0.5% of capital per trade
+LONG_HORIZON_DAILY_CAP_PCT = 0.10   # 10% of capital/day total for this module

@@ -14,6 +14,7 @@ from datetime import date, datetime
 from pathlib import Path
 from capital import get_capital, get_buying_power
 from logger import classify_module
+import market_cache
 
 app = FastAPI(title="Ruppert Trading Dashboard")
 LOGS_DIR = Path(__file__).parent.parent / "logs"
@@ -385,7 +386,54 @@ def get_trades():
                 t['exit_type']    = exit_rec.get('exit_type', 'manual')
                 t['exit_reason']  = exit_rec.get('reason', '')
             else:
-                # Fallback: try market API
+                # Fallback: try WS cache first, then REST
+                _cached = market_cache.get_market_price(ticker)
+                if _cached and _cached.get('yes_ask') is not None:
+                    side      = t.get('side', 'no')
+                    mp        = t.get('market_prob', 0.5) or 0.5
+                    entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
+                    contracts = t.get('contracts', 0) or 0
+                    settle_yes = _cached['yes_ask']
+                    cur_p = (100 - settle_yes) if side == 'no' else settle_yes
+                    t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
+                    t['settled_price'] = settle_yes
+                else:
+                    try:
+                        import requests as req
+                        r = req.get(
+                            f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                            timeout=4
+                        )
+                        if r.status_code == 200:
+                            m         = r.json().get('market', {})
+                            result    = m.get('result')
+                            lp        = m.get('last_price')
+                            if lp is not None or result:
+                                side      = t.get('side', 'no')
+                                mp        = t.get('market_prob', 0.5) or 0.5
+                                entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
+                                contracts = t.get('contracts', 0) or 0
+                                if result == 'yes':   settle_yes = 100
+                                elif result == 'no':  settle_yes = 0
+                                else:                 settle_yes = lp or 50
+                                cur_p = (100 - settle_yes) if side == 'no' else settle_yes
+                                t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
+                                t['settled_price'] = settle_yes
+                    except Exception:
+                        pass
+        else:
+            # Settled market — try WS cache first, then REST for settlement result
+            _cached = market_cache.get_market_price(ticker)
+            if _cached and _cached.get('yes_ask') is not None:
+                side      = t.get('side', 'no')
+                mp        = t.get('market_prob', 0.5) or 0.5
+                entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
+                contracts = t.get('contracts', 0) or 0
+                settle_yes = _cached['yes_ask']
+                cur_p = (100 - settle_yes) if side == 'no' else settle_yes
+                t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
+                t['settled_price'] = settle_yes
+            else:
                 try:
                     import requests as req
                     r = req.get(
@@ -409,31 +457,6 @@ def get_trades():
                             t['settled_price'] = settle_yes
                 except Exception:
                     pass
-        else:
-            # Settled market — fetch final result from Kalshi API
-            try:
-                import requests as req
-                r = req.get(
-                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
-                    timeout=4
-                )
-                if r.status_code == 200:
-                    m         = r.json().get('market', {})
-                    result    = m.get('result')
-                    lp        = m.get('last_price')
-                    if lp is not None or result:
-                        side      = t.get('side', 'no')
-                        mp        = t.get('market_prob', 0.5) or 0.5
-                        entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
-                        contracts = t.get('contracts', 0) or 0
-                        if result == 'yes':   settle_yes = 100
-                        elif result == 'no':  settle_yes = 0
-                        else:                 settle_yes = lp or 50
-                        cur_p = (100 - settle_yes) if side == 'no' else settle_yes
-                        t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
-                        t['settled_price'] = settle_yes
-            except Exception:
-                pass
 
         t['module'] = classify_module(t.get('source', 'bot'), ticker)
         closed.append(t)
@@ -615,44 +638,52 @@ def get_live_prices():
         ticker = t.get('ticker','')
         if not ticker or ticker in prices:
             continue
-        try:
-            # Use orderbook endpoint — REST /markets/{ticker} returns null for bid/ask
-            ob_resp = req.get(
-                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook',
-                timeout=4
-            )
-            if ob_resp.status_code == 200:
-                ob = ob_resp.json().get('orderbook_fp', {})
-                no_dollars  = ob.get('no_dollars', [])
-                yes_dollars = ob.get('yes_dollars', [])
-                no_bid  = int(round(max((float(p) for p, _ in no_dollars),  default=0) * 100)) if no_dollars  else None
-                yes_bid = int(round(max((float(p) for p, _ in yes_dollars), default=0) * 100)) if yes_dollars else None
-                yes_ask = (100 - no_bid)  if no_bid  is not None else None
-                no_ask  = (100 - yes_bid) if yes_bid is not None else None
-                prices[ticker] = {
-                    'yes_ask': yes_ask,
-                    'yes_bid': yes_bid,
-                    'no_ask':  no_ask,
-                    'no_bid':  no_bid,
-                }
-            else:
-                # Fallback: REST endpoint for settled markets
-                rest_resp = req.get(
-                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+        _cached = market_cache.get_market_price(ticker)
+        if _cached:
+            prices[ticker] = {
+                'yes_ask': _cached['yes_ask'],
+                'yes_bid': _cached['yes_bid'],
+                'no_ask':  _cached['no_ask'],
+                'no_bid':  _cached['no_bid'],
+            }
+        else:
+            # REST fallback for settled/unavailable markets
+            try:
+                ob_resp = req.get(
+                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook',
                     timeout=4
                 )
-                if rest_resp.status_code == 200:
-                    m = rest_resp.json().get('market', {})
+                if ob_resp.status_code == 200:
+                    ob = ob_resp.json().get('orderbook_fp', {})
+                    no_dollars  = ob.get('no_dollars', [])
+                    yes_dollars = ob.get('yes_dollars', [])
+                    no_bid  = int(round(max((float(p) for p, _ in no_dollars),  default=0) * 100)) if no_dollars  else None
+                    yes_bid = int(round(max((float(p) for p, _ in yes_dollars), default=0) * 100)) if yes_dollars else None
+                    yes_ask = (100 - no_bid)  if no_bid  is not None else None
+                    no_ask  = (100 - yes_bid) if yes_bid is not None else None
                     prices[ticker] = {
-                        'yes_ask': m.get('yes_ask'),
-                        'yes_bid': m.get('yes_bid'),
-                        'no_ask':  m.get('no_ask'),
-                        'no_bid':  m.get('no_bid'),
+                        'yes_ask': yes_ask,
+                        'yes_bid': yes_bid,
+                        'no_ask':  no_ask,
+                        'no_bid':  no_bid,
                     }
-        except Exception:
-            pass
-        import time as _time
-        _time.sleep(0.05)  # rate-limit: 20 req/sec
+                else:
+                    rest_resp = req.get(
+                        f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                        timeout=4
+                    )
+                    if rest_resp.status_code == 200:
+                        m = rest_resp.json().get('market', {})
+                        prices[ticker] = {
+                            'yes_ask': m.get('yes_ask'),
+                            'yes_bid': m.get('yes_bid'),
+                            'no_ask':  m.get('no_ask'),
+                            'no_bid':  m.get('no_bid'),
+                        }
+            except Exception:
+                pass
+            import time as _time
+            _time.sleep(0.05)  # rate-limit: 20 req/sec
 
     # Override prices for settled markets using last_price (YES settlement price)
     # e.g. last_price=99 means YES won → NO is worth 1¢
@@ -695,17 +726,26 @@ def get_position_statuses():
             continue
         seen.add(ticker)
         try:
-            resp = req.get(
-                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
-                timeout=4
-            )
-            if resp.status_code == 200:
-                m = resp.json().get('market', {})
+            # Check WS cache first — if we have fresh prices, market is likely open
+            _cached = market_cache.get_market_price(ticker)
+            if _cached and _cached.get('source') == 'ws_cache':
                 statuses[ticker] = {
-                    'status': m.get('status', 'unknown'),
-                    'result': m.get('result', ''),
-                    'last_price': m.get('last_price'),
+                    'status': 'open',
+                    'result': '',
+                    'last_price': _cached['yes_ask'],
                 }
+            else:
+                resp = req.get(
+                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                    timeout=4
+                )
+                if resp.status_code == 200:
+                    m = resp.json().get('market', {})
+                    statuses[ticker] = {
+                        'status': m.get('status', 'unknown'),
+                        'result': m.get('result', ''),
+                        'last_price': m.get('last_price'),
+                    }
         except Exception:
             pass
     return statuses
@@ -982,29 +1022,41 @@ def get_pnl_history():
                 pnl = round(float(pnl), 2)
                 side = ex.get('side', t.get('side', 'no'))
             else:
-                r = req.get(
-                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
-                    timeout=4
-                )
-                if r.status_code != 200: continue
-                m = r.json().get('market', {})
-                lp     = m.get('last_price')
-                result = m.get('result')
-                if lp is None and not result: continue
-                # Use actual settlement result for finalized markets
-                if result == 'yes':   lp = 100
-                elif result == 'no':  lp = 0
+                # Try WS cache first for live price
+                _cached = market_cache.get_market_price(ticker)
+                if _cached and _cached.get('yes_ask') is not None:
+                    lp = _cached['yes_ask']
+                    side      = t.get('side', 'no')
+                    mp        = t.get('market_prob', 0.5) or 0.5
+                    entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
+                    cost      = t.get('size_dollars', 25)
+                    contracts = t.get('contracts', 0) or 0
+                    if contracts > 0 and cost > 0:
+                        contracts = min(contracts, int(cost / max(entry_p, 1) * 100) + 2)
+                    cur_p = (100 - lp) if side == 'no' else lp
+                    pnl   = round((cur_p - entry_p) * contracts / 100, 2)
+                else:
+                    r = req.get(
+                        f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                        timeout=4
+                    )
+                    if r.status_code != 200: continue
+                    m = r.json().get('market', {})
+                    lp     = m.get('last_price')
+                    result = m.get('result')
+                    if lp is None and not result: continue
+                    if result == 'yes':   lp = 100
+                    elif result == 'no':  lp = 0
 
-                side      = t.get('side', 'no')
-                mp        = t.get('market_prob', 0.5) or 0.5
-                entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
-                cost      = t.get('size_dollars', 25)
-                contracts = t.get('contracts', 0) or 0
-                if contracts > 0 and cost > 0:
-                    contracts = min(contracts, int(cost / max(entry_p, 1) * 100) + 2)
-
-                cur_p = (100 - lp) if side == 'no' else lp
-                pnl   = round((cur_p - entry_p) * contracts / 100, 2)
+                    side      = t.get('side', 'no')
+                    mp        = t.get('market_prob', 0.5) or 0.5
+                    entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
+                    cost      = t.get('size_dollars', 25)
+                    contracts = t.get('contracts', 0) or 0
+                    if contracts > 0 and cost > 0:
+                        contracts = min(contracts, int(cost / max(entry_p, 1) * 100) + 2)
+                    cur_p = (100 - lp) if side == 'no' else lp
+                    pnl   = round((cur_p - entry_p) * contracts / 100, 2)
             closed_pnl_total += pnl
             closed_total += 1
             if pnl > 0: closed_wins += 1
@@ -1084,18 +1136,24 @@ def get_pnl_history():
 
     for ticker, t in open_tickers.items():
         try:
-            # Use orderbook endpoint — REST /markets/{ticker} returns null for bid/ask
-            ob_resp = req.get(
-                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook',
-                timeout=4
-            )
-            if ob_resp.status_code != 200: continue
-            ob = ob_resp.json().get('orderbook_fp', {})
-            no_dollars  = ob.get('no_dollars', [])
-            yes_dollars = ob.get('yes_dollars', [])
-            no_bid  = int(round(max((float(p) for p, _ in no_dollars),  default=0) * 100)) if no_dollars  else None
-            yes_bid = int(round(max((float(p) for p, _ in yes_dollars), default=0) * 100)) if yes_dollars else None
-            yes_ask = (100 - no_bid)  if no_bid  is not None else None
+            # WS cache first, REST orderbook fallback
+            _cached = market_cache.get_market_price(ticker)
+            if _cached:
+                yes_bid = _cached['yes_bid']
+                yes_ask = _cached['yes_ask']
+                no_bid  = _cached['no_bid']
+            else:
+                ob_resp = req.get(
+                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook',
+                    timeout=4
+                )
+                if ob_resp.status_code != 200: continue
+                ob = ob_resp.json().get('orderbook_fp', {})
+                no_dollars  = ob.get('no_dollars', [])
+                yes_dollars = ob.get('yes_dollars', [])
+                no_bid  = int(round(max((float(p) for p, _ in no_dollars),  default=0) * 100)) if no_dollars  else None
+                yes_bid = int(round(max((float(p) for p, _ in yes_dollars), default=0) * 100)) if yes_dollars else None
+                yes_ask = (100 - no_bid)  if no_bid  is not None else None
 
             side      = t.get('side', 'no')
             mp        = t.get('market_prob', 0.5) or 0.5
@@ -1282,39 +1340,46 @@ def _build_state():
         seen2.add(ticker)
         open_pos_tickers[ticker] = t
 
-    # ── Fetch orderbook prices ONCE per open position ─────────────────────────
+    # ── Fetch prices ONCE per open position (WS cache first, REST fallback) ──
     prices: dict = {}
     for ticker in open_pos_tickers:
-        try:
-            ob_resp = req.get(
-                f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook',
-                timeout=4
-            )
-            if ob_resp.status_code == 200:
-                ob = ob_resp.json().get('orderbook_fp', {})
-                no_dollars  = ob.get('no_dollars', [])
-                yes_dollars = ob.get('yes_dollars', [])
-                no_bid  = int(round(max((float(p) for p, _ in no_dollars),  default=0) * 100)) if no_dollars  else None
-                yes_bid = int(round(max((float(p) for p, _ in yes_dollars), default=0) * 100)) if yes_dollars else None
-                yes_ask = (100 - no_bid)  if no_bid  is not None else None
-                no_ask  = (100 - yes_bid) if yes_bid is not None else None
-                prices[ticker] = {'yes_ask': yes_ask, 'yes_bid': yes_bid, 'no_ask': no_ask, 'no_bid': no_bid}
-            else:
-                rest_resp = req.get(
-                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+        _cached = market_cache.get_market_price(ticker)
+        if _cached:
+            prices[ticker] = {
+                'yes_ask': _cached['yes_ask'], 'yes_bid': _cached['yes_bid'],
+                'no_ask': _cached['no_ask'], 'no_bid': _cached['no_bid'],
+            }
+        else:
+            try:
+                ob_resp = req.get(
+                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook',
                     timeout=4
                 )
-                if rest_resp.status_code == 200:
-                    m = rest_resp.json().get('market', {})
-                    prices[ticker] = {
-                        'yes_ask': m.get('yes_ask'),
-                        'yes_bid': m.get('yes_bid'),
-                        'no_ask':  m.get('no_ask'),
-                        'no_bid':  m.get('no_bid'),
-                    }
-        except Exception:
-            pass
-        time.sleep(0.05)
+                if ob_resp.status_code == 200:
+                    ob = ob_resp.json().get('orderbook_fp', {})
+                    no_dollars  = ob.get('no_dollars', [])
+                    yes_dollars = ob.get('yes_dollars', [])
+                    no_bid  = int(round(max((float(p) for p, _ in no_dollars),  default=0) * 100)) if no_dollars  else None
+                    yes_bid = int(round(max((float(p) for p, _ in yes_dollars), default=0) * 100)) if yes_dollars else None
+                    yes_ask = (100 - no_bid)  if no_bid  is not None else None
+                    no_ask  = (100 - yes_bid) if yes_bid is not None else None
+                    prices[ticker] = {'yes_ask': yes_ask, 'yes_bid': yes_bid, 'no_ask': no_ask, 'no_bid': no_bid}
+                else:
+                    rest_resp = req.get(
+                        f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                        timeout=4
+                    )
+                    if rest_resp.status_code == 200:
+                        m = rest_resp.json().get('market', {})
+                        prices[ticker] = {
+                            'yes_ask': m.get('yes_ask'),
+                            'yes_bid': m.get('yes_bid'),
+                            'no_ask':  m.get('no_ask'),
+                            'no_bid':  m.get('no_bid'),
+                        }
+            except Exception:
+                pass
+            time.sleep(0.05)
 
     # ── Build positions list (reuses prices fetched above) ────────────────────
     module_keys = ['weather', 'crypto', 'fed', 'geo', 'other']
@@ -1417,28 +1482,42 @@ def _build_state():
                     pnl_val = round((xp - ep2) * ct2 / 100, 2)
                 pnl_val = round(float(pnl_val), 2)
             else:
-                r = req.get(
-                    f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
-                    timeout=4
-                )
-                if r.status_code != 200:
-                    continue
-                m_data = r.json().get('market', {})
-                lp     = m_data.get('last_price')
-                result = m_data.get('result')
-                if lp is None and not result:
-                    continue
-                if result == 'yes':  lp = 100
-                elif result == 'no': lp = 0
-                side2      = t.get('side', 'no')
-                mp2        = t.get('market_prob', 0.5) or 0.5
-                entry_p2   = round((1 - mp2) * 100) if side2 == 'no' else round(mp2 * 100)
-                contracts2 = t.get('contracts', 0) or 0
-                cost2      = t.get('size_dollars', 25)
-                if contracts2 > 0 and cost2 > 0:
-                    contracts2 = min(contracts2, int(cost2 / max(entry_p2, 1) * 100) + 2)
-                cur_p2  = (100 - lp) if side2 == 'no' else lp
-                pnl_val = round((cur_p2 - entry_p2) * contracts2 / 100, 2)
+                # Try WS cache first for live price
+                _cached = market_cache.get_market_price(ticker)
+                if _cached and _cached.get('yes_ask') is not None:
+                    lp = _cached['yes_ask']
+                    side2      = t.get('side', 'no')
+                    mp2        = t.get('market_prob', 0.5) or 0.5
+                    entry_p2   = round((1 - mp2) * 100) if side2 == 'no' else round(mp2 * 100)
+                    contracts2 = t.get('contracts', 0) or 0
+                    cost2      = t.get('size_dollars', 25)
+                    if contracts2 > 0 and cost2 > 0:
+                        contracts2 = min(contracts2, int(cost2 / max(entry_p2, 1) * 100) + 2)
+                    cur_p2  = (100 - lp) if side2 == 'no' else lp
+                    pnl_val = round((cur_p2 - entry_p2) * contracts2 / 100, 2)
+                else:
+                    r = req.get(
+                        f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
+                        timeout=4
+                    )
+                    if r.status_code != 200:
+                        continue
+                    m_data = r.json().get('market', {})
+                    lp     = m_data.get('last_price')
+                    result = m_data.get('result')
+                    if lp is None and not result:
+                        continue
+                    if result == 'yes':  lp = 100
+                    elif result == 'no': lp = 0
+                    side2      = t.get('side', 'no')
+                    mp2        = t.get('market_prob', 0.5) or 0.5
+                    entry_p2   = round((1 - mp2) * 100) if side2 == 'no' else round(mp2 * 100)
+                    contracts2 = t.get('contracts', 0) or 0
+                    cost2      = t.get('size_dollars', 25)
+                    if contracts2 > 0 and cost2 > 0:
+                        contracts2 = min(contracts2, int(cost2 / max(entry_p2, 1) * 100) + 2)
+                    cur_p2  = (100 - lp) if side2 == 'no' else lp
+                    pnl_val = round((cur_p2 - entry_p2) * contracts2 / 100, 2)
 
             closed_pnl_total += pnl_val
             closed_count     += 1

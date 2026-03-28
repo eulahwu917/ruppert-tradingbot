@@ -101,37 +101,66 @@ def load():
 
 # ─────────────────────────────── Helper ───────────────────────────────────────
 
-def get_market_price(ticker: str) -> tuple[int | None, int | None]:
+def get_market_price(ticker: str, fallback_client=None) -> dict | None:
     """
-    Cache-first price lookup with REST fallback.
-    Returns (yes_bid_cents, yes_ask_cents) or (None, None) on total failure.
-
-    All modules call this instead of KalshiClient.get_market() for prices.
+    Cache-first price lookup. Returns {yes_bid, yes_ask, no_bid, no_ask, source}
+    in cent integers, or None.
+    Falls back to REST via fallback_client if cache is stale/missing.
     """
-    bid, ask, is_stale = get_with_staleness(ticker)
-
-    if not is_stale and bid is not None and ask is not None:
-        return round(bid * 100), round(ask * 100)
-
-    # REST fallback
+    bid_d, ask_d, is_stale = get_with_staleness(ticker)
+    if not is_stale and bid_d is not None:
+        return {
+            'yes_bid': round(bid_d * 100),
+            'yes_ask': round(ask_d * 100),
+            'no_bid':  round((1 - ask_d) * 100),
+            'no_ask':  round((1 - bid_d) * 100),
+            'source': 'ws_cache',
+        }
+    # Stale or missing — fall back to REST
+    if fallback_client:
+        try:
+            market = fallback_client.get_market(ticker)
+            if market:
+                bid = market.get('yes_bid_dollars', 0)
+                ask = market.get('yes_ask_dollars', 0)
+                if bid and ask:
+                    update(ticker, float(bid), float(ask), source='rest')
+                return {
+                    'yes_bid': round(float(bid) * 100) if bid else None,
+                    'yes_ask': round(float(ask) * 100) if ask else None,
+                    'no_bid':  round((1 - float(ask)) * 100) if ask else None,
+                    'no_ask':  round((1 - float(bid)) * 100) if bid else None,
+                    'source': 'rest',
+                }
+        except Exception:
+            pass
+    # No fallback_client — try internal REST
     try:
         from kalshi_client import KalshiClient
         client = KalshiClient()
         market = client.get_market(ticker)
         if not market:
-            return None, None
-
-        yes_bid = market.get('yes_bid')
-        yes_ask = market.get('yes_ask')
-
-        # Update cache from REST so subsequent reads don't re-fetch
-        if yes_bid is not None and yes_ask is not None:
-            update(ticker, yes_bid / 100, yes_ask / 100, source='rest')
-
-        return yes_bid, yes_ask
+            return None
+        bid = market.get('yes_bid_dollars', 0)
+        ask = market.get('yes_ask_dollars', 0)
+        if bid and ask:
+            update(ticker, float(bid), float(ask), source='rest')
+        return {
+            'yes_bid': round(float(bid) * 100) if bid else None,
+            'yes_ask': round(float(ask) * 100) if ask else None,
+            'no_bid':  round((1 - float(ask)) * 100) if ask else None,
+            'no_ask':  round((1 - float(bid)) * 100) if bid else None,
+            'source': 'rest',
+        }
     except Exception as e:
         logger.warning('[MarketCache] REST fallback failed for %s: %s', ticker, e)
         # If we have stale data, return it rather than nothing
-        if bid is not None and ask is not None:
-            return round(bid * 100), round(ask * 100)
-        return None, None
+        if bid_d is not None and ask_d is not None:
+            return {
+                'yes_bid': round(bid_d * 100),
+                'yes_ask': round(ask_d * 100),
+                'no_bid':  round((1 - ask_d) * 100),
+                'no_ask':  round((1 - bid_d) * 100),
+                'source': 'ws_cache_stale',
+            }
+        return None

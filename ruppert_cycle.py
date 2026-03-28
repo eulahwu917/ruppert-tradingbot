@@ -773,6 +773,28 @@ def run_full_mode(client, state):
     # Refresh global exposure cap after crypto trades before passing to next scan
     state.open_position_value += sum(t.get('size_dollars', 0) for t in new_crypto)
 
+    # STEP 4a: LONG-HORIZON CRYPTO SCAN (daily, 7AM)
+    print("\n[4a] Scanning for long-horizon crypto opportunities...")
+    new_long_horizon = []
+    try:
+        from crypto_long_horizon import run_long_horizon_scan
+        new_long_horizon = run_long_horizon_scan(
+            client, dry_run=state.dry_run,
+            traded_tickers=state.traded_tickers,
+            open_position_value=state.open_position_value,
+        )
+        if new_long_horizon:
+            print(f"  {len(new_long_horizon)} long-horizon trade(s) executed")
+            for t in new_long_horizon:
+                print(f"    {t.get('ticker')} {t.get('side','').upper()} edge={t.get('edge',0)*100:.0f}%")
+        else:
+            print("  No long-horizon opportunities above threshold")
+    except Exception as e:
+        print(f"  Long-horizon scan error: {e}")
+        import traceback; traceback.print_exc()
+
+    state.open_position_value += sum(t.get('size_dollars', 0) for t in new_long_horizon)
+
     # STEP 4b: FED RATE DECISION SCAN
     print("\n[4b] Scanning for Fed rate decision opportunities...")
     new_fed = []
@@ -807,6 +829,7 @@ def run_full_mode(client, state):
     summary = {
         'weather_trades': len(new_weather) if new_weather else 0,
         'crypto_trades':  len(new_crypto) if new_crypto else 0,
+        'long_horizon_trades': len(new_long_horizon) if new_long_horizon else 0,
         'fed_trades':     len(new_fed) if new_fed else 0,
         'smart_money':    direction,
         'auto_exits':     len(state.actions_taken),
@@ -815,7 +838,7 @@ def run_full_mode(client, state):
 
     print(f"\n{'='*60}")
     print(f"  CYCLE COMPLETE  {ts()}")
-    print(f"  Weather: {summary['weather_trades']} new | Crypto: {summary['crypto_trades']} new | Fed: {summary['fed_trades']} new")
+    print(f"  Weather: {summary['weather_trades']} new | Crypto: {summary['crypto_trades']} new | LongHorizon: {summary['long_horizon_trades']} new | Fed: {summary['fed_trades']} new")
     print(f"  Auto-exits: {summary['auto_exits']} | Signal: {direction.upper()}")
     print(f"{'='*60}\n")
 

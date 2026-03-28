@@ -61,23 +61,28 @@ def _load():
 # ─────────────────────────────── Public API ───────────────────────────────────
 
 def add_position(ticker: str, quantity: int, side: str, entry_price: float,
-                 module: str = '', title: str = ''):
+                 module: str = '', title: str = '', holding_type: str = ''):
     """
     Call after every trade execution.
     entry_price: in cents (e.g. 45 = 45c).
+    holding_type: 'long_horizon' skips the 70% gain exit threshold.
     """
+    skip_gain_exit = (holding_type == 'long_horizon')
+
     if side == 'yes':
         thresholds = [
             {'price': EXIT_95C_THRESHOLD, 'action': 'sell_all', 'rule': '95c_rule'},
         ]
         # 70% gain threshold: entry_price + 70% of (100 - entry_price)
-        gain_target = entry_price + EXIT_GAIN_PCT * (100 - entry_price)
-        if gain_target < EXIT_95C_THRESHOLD:
-            thresholds.append({
-                'price': round(gain_target, 1),
-                'action': 'sell_all',
-                'rule': '70pct_gain',
-            })
+        # Skip for long_horizon positions (price has days/weeks to move)
+        if not skip_gain_exit:
+            gain_target = entry_price + EXIT_GAIN_PCT * (100 - entry_price)
+            if gain_target < EXIT_95C_THRESHOLD:
+                thresholds.append({
+                    'price': round(gain_target, 1),
+                    'action': 'sell_all',
+                    'rule': '70pct_gain',
+                })
     else:  # no side
         # For NO positions, track yes_bid dropping (our NO value rises)
         # 95c rule: yes_bid <= 5 means no_ask >= 95
