@@ -1596,11 +1596,15 @@ def _build_state():
         except Exception:
             pass
 
-    # Write pnl_cache so bot can read correct closed capital
+    # NOTE: pnl_cache.json is owned by data_agent.py — do NOT overwrite it here.
+    # Dashboard reads from it; Data Agent maintains it as source of truth.
+    # Read current cache value to reconcile display if needed.
     try:
         pnl_cache_path = LOGS_DIR / "pnl_cache.json"
-        with open(pnl_cache_path, 'w', encoding='utf-8') as _f:
-            json.dump({"closed_pnl": round(closed_pnl_total, 2)}, _f)
+        if pnl_cache_path.exists():
+            cached_pnl = json.loads(pnl_cache_path.read_text(encoding='utf-8')).get('closed_pnl', 0)
+            # Use cache value as authoritative closed P&L
+            closed_pnl_total = float(cached_pnl)
     except Exception:
         pass
 
