@@ -6,7 +6,7 @@ import json
 import os
 
 # Paths
-SECRETS_DIR = os.path.join(os.path.dirname(__file__), '..', 'secrets')
+SECRETS_DIR = os.path.join(os.path.dirname(__file__), '..', '..', 'secrets')
 CONFIG_FILE = os.path.join(SECRETS_DIR, 'kalshi_config.json')
 
 # DRY_RUN: derived from mode.json — True = demo (no real orders), False = live
