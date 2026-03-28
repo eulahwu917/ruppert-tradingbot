@@ -136,10 +136,11 @@ async def handle_message(msg: dict):
         ask_size = float(data.get('yes_ask_size_fp') or 0)
         bid_size = float(data.get('yes_bid_size_fp') or 0)
         book_depth_usd = ask_size + bid_size
+        dollar_oi = float(data.get('dollar_open_interest') or 0)
         if yes_ask and yes_bid:
             try:
                 from crypto_15m import evaluate_crypto_15m_entry
-                evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time, book_depth_usd)
+                evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time, book_depth_usd, dollar_oi)
             except Exception as e:
                 logger.warning('[WS Feed] 15m eval error: %s', e)
 

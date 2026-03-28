@@ -125,6 +125,7 @@ OPTIMIZER_MAX_AVG_SIZE       = 40.0  # flag if avg position size above this
 
 # ── 15-Min Crypto Direction (KXBTC15M / KXETH15M / KXXRP15M / KXDOGE15M) ────
 CRYPTO_15M_MIN_EDGE      = 0.08   # 8% minimum edge to enter
+CRYPTO_15M_LIQUIDITY_MIN_PCT = 0.003  # book depth must be >= 0.3% of open interest
 CRYPTO_15M_SIGMOID_SCALE = 1.0    # sigmoid scale factor (autoresearcher-tunable)
 CRYPTO_15M_DAILY_CAP_PCT = 0.04   # 4% of capital per day
 

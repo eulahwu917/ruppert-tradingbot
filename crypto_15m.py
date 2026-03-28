@@ -527,6 +527,7 @@ def check_risk_filters(
     tfi_stale: bool,
     obi_stale: bool,
     fr_z: float | None,
+    dollar_oi: float = 0.0,
 ) -> str | None:
     """
     Apply all 10 risk filters. Returns block reason string or None if clear.
@@ -543,8 +544,15 @@ def check_risk_filters(
     if spread > 8:
         return 'WIDE_SPREAD'
 
-    # R3: Thin Kalshi book
-    if book_depth_usd < 100:
+    # R3: Thin Kalshi book — percentage of OI (scales with market activity)
+    # Require book depth >= LIQUIDITY_MIN_PCT of open interest (default 0.3%)
+    # Falls back to absolute $100 floor if OI is unavailable
+    liquidity_min_pct = getattr(config, 'CRYPTO_15M_LIQUIDITY_MIN_PCT', 0.003)
+    if dollar_oi > 0:
+        min_depth = max(dollar_oi * liquidity_min_pct, 50.0)  # at least $50 floor
+    else:
+        min_depth = 100.0  # fallback if OI unavailable
+    if book_depth_usd < min_depth:
         return 'LOW_KALSHI_LIQUIDITY'
 
     # R4: Thin underlying volume
@@ -657,6 +665,7 @@ def evaluate_crypto_15m_entry(
     close_time: str | None = None,
     open_time: str | None = None,
     book_depth_usd: float = 2000.0,
+    dollar_oi: float = 0.0,
 ):
     """
     Evaluate a 15-min crypto direction market for entry.
@@ -834,6 +843,7 @@ def evaluate_crypto_15m_entry(
         tfi_stale=tfi['stale'],
         obi_stale=obi['stale'],
         fr_z=fr_z,
+        dollar_oi=dollar_oi,
     )
     if block_reason:
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
