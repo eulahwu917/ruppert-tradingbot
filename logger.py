@@ -21,7 +21,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(LIVE_LOG_DIR, exist_ok=True)
 
 # ---------------------------------------------------------------------------
-# Log rotation — called once per cycle from ruppert_cycle.py
+# Log rotation - called once per cycle from ruppert_cycle.py
 # ---------------------------------------------------------------------------
 
 LOG_RETENTION_DAYS = 90  # keep 90 days of trade + activity logs
@@ -32,7 +32,7 @@ def rotate_logs(retention_days: int = LOG_RETENTION_DAYS) -> int:
     Returns count of files deleted.
 
     Safe: only removes files matching trades_YYYY-MM-DD.jsonl and
-    activity_YYYY-MM-DD.log patterns — never touches other files.
+    activity_YYYY-MM-DD.log patterns - never touches other files.
     """
     cutoff = date.today() - timedelta(days=retention_days)
     patterns = [
@@ -204,7 +204,7 @@ def normalize_entry_price(pos: dict) -> float:
     """Return entry_price in cents from a position record.
 
     Falls back to market_prob if entry_price is missing. Handles
-    probability-formatted values (0–1) by converting to cents.
+    probability-formatted values (0-1) by converting to cents.
     Uses the NO-side convention: market_prob represents YES probability,
     so NO entry cost = (1 - market_prob) * 100.
     """
@@ -212,7 +212,7 @@ def normalize_entry_price(pos: dict) -> float:
     entry_price = pos.get('entry_price') or pos.get('market_prob', 0.5) * 100
     if side == 'no':
         entry_price = entry_price if isinstance(entry_price, (int, float)) else 50
-        # Normalize: if value looks like a probability (0–1), convert to cents
+        # Normalize: if value looks like a probability (0-1), convert to cents
         if 0 < entry_price < 1:
             entry_price = round((1 - entry_price) * 100)
     return entry_price
@@ -232,7 +232,7 @@ def acquire_exit_lock(ticker: str, side: str) -> bool:
             age = time.time() - os.path.getmtime(lock_path)
             if age < 300:   # 5 minutes
                 return False
-            os.remove(lock_path)  # stale lock — remove and re-acquire
+            os.remove(lock_path)  # stale lock - remove and re-acquire
         except Exception:
             return False
     try:
@@ -255,7 +255,7 @@ def release_exit_lock(ticker: str, side: str) -> None:
 def classify_module(src: str, ticker: str) -> str:
     """Classify a trade into a module bucket based on source and ticker prefix.
 
-    Single source of truth — imported by dashboard/api.py to stay in sync.
+    Single source of truth - imported by dashboard/api.py to stay in sync.
     """
     t = (ticker or '').upper()
     if src in ('weather',) or (src in ('weather', 'bot') and t.startswith('KXHIGH')):
@@ -280,7 +280,7 @@ def classify_module(src: str, ticker: str) -> str:
 
 def get_computed_capital():
     """
-    Backward-compatible wrapper — delegates to capital.get_capital().
+    Backward-compatible wrapper - delegates to capital.get_capital().
 
     Kept so existing code that imports get_computed_capital() still works.
     New code should import from capital.py directly.
@@ -293,10 +293,11 @@ def send_telegram(message: str) -> bool:
     """Send a message to David via the openclaw CLI (routes through gateway)."""
     import subprocess
     try:
-        # On Windows, openclaw is a .cmd shim — must run via cmd.exe so it
-        # resolves correctly without shell=True (which mangles multiline args).
+        # Use node to invoke openclaw.mjs directly — avoids cmd.exe newline
+        # truncation bug where multiline -m args are split at \n by the shell.
+        oc_mjs = r'C:\Users\David Wu\AppData\Roaming\npm\node_modules\openclaw\openclaw.mjs'
         result = subprocess.run(
-            ['cmd', '/c', 'openclaw', 'message', 'send',
+            ['node', oc_mjs, 'message', 'send',
              '--channel', 'telegram',
              '-t', '5003590611',
              '-m', message],
