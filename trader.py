@@ -59,6 +59,18 @@ class Trader:
             opportunity['scan_price'] = price_cents
             opportunity['fill_price'] = price_cents
             log_trade(opportunity, size, contracts, {'dry_run': True, 'status': 'simulated'})
+            try:
+                import position_tracker
+                position_tracker.add_position(
+                    ticker=ticker,
+                    quantity=contracts,
+                    side=side,
+                    entry_price=price_cents,
+                    module=opportunity.get('module', ''),
+                    title=opportunity.get('title', ticker),
+                )
+            except Exception as e:
+                log_activity(f"[Trader] Warning: could not register {ticker} in position tracker: {e}")
             return True
 
         try:
@@ -86,6 +98,18 @@ class Trader:
             opportunity['fill_price'] = fill_price if fill_price is not None else price_cents
 
             log_trade(opportunity, size, fill_contracts, result)
+            try:
+                import position_tracker
+                position_tracker.add_position(
+                    ticker=ticker,
+                    quantity=fill_contracts,
+                    side=side,
+                    entry_price=opportunity['fill_price'],
+                    module=opportunity.get('module', ''),
+                    title=opportunity.get('title', ticker),
+                )
+            except Exception as e:
+                log_activity(f"[Trader] Warning: could not register {ticker} in position tracker: {e}")
             self.bankroll -= size  # Update local balance tracking
             return True
 
