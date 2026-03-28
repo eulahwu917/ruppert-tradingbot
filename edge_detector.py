@@ -160,6 +160,25 @@ def classify_market_type(temp_range) -> str:
     return "B_band"
 
 
+def apply_volume_tier(edge: float, volume: int) -> tuple[float, str]:
+    """
+    Discount edge score for thin markets.
+
+    Thin markets need higher raw edge to clear MIN_EDGE_THRESHOLD.
+    Returns (adjusted_edge, tier_label) where tier_label is 'thick'/'mid'/'thin'.
+
+    Args:
+        edge: Raw edge score (model_prob - market_prob)
+        volume: 24-hour volume in contracts (volume_24h_fp from Kalshi API)
+    """
+    if volume >= config.VOLUME_TIER_THICK:
+        return edge, 'thick'
+    elif volume >= config.VOLUME_TIER_MID:
+        return edge * config.VOLUME_DISCOUNT_MID, 'mid'
+    else:
+        return edge * config.VOLUME_DISCOUNT_THIN, 'thin'
+
+
 def parse_city_from_title(title: str):
     title_lower = title.lower()
     for keyword, city in CITY_MAP.items():
@@ -356,8 +375,21 @@ def analyze_market(market: dict) -> dict | None:
         model_prob = 1.0 - model_prob
         logger.debug(f"[Edge] {ticker}: T_lower market — flipped model_prob to {model_prob:.4f}")
 
+    # ── Volume-tier edge discounting ──────────────────────────────────────────
+    # Discount edge for thin markets before divergence gate and threshold check.
+    # Thin markets need higher raw edge to pass. Uses volume_24h_fp from market data.
+    _volume = int(market.get('volume_24h_fp', 0) or 0)
+    _raw_edge = model_prob - market_prob
+    _adj_edge, _volume_tier = apply_volume_tier(_raw_edge, _volume)
+    if _volume_tier != 'thick':
+        logger.debug(
+            f"[Edge] {ticker}: volume_tier={_volume_tier} (vol={_volume}) — "
+            f"edge {_raw_edge:.4f} → {_adj_edge:.4f}"
+        )
+    model_prob_for_edge = market_prob + _adj_edge  # reconstruct model_prob equivalent
+
     # ── Edge calculation ──────────────────────────────────────────────────────
-    edge = model_prob - market_prob
+    edge = _adj_edge
 
     is_t_market = market_type in ("T_upper", "T_lower")
 
@@ -405,6 +437,13 @@ def analyze_market(market: dict) -> dict | None:
         'yes_price':   yes_ask,
         'bet_price':   bet_price,
         'action':      f"BUY {side.upper()} at {bet_price}c",
+        'raw_edge':        round(_raw_edge, 4),
+        'volume_tier':     _volume_tier,
+        'volume_tier_miss': (
+            _volume_tier in ('mid', 'thin') and
+            abs(_raw_edge) >= config.MIN_EDGE_THRESHOLD and
+            abs(_adj_edge) >= config.MIN_EDGE_THRESHOLD
+        ),
     }
 
     # Attach ensemble detail if available

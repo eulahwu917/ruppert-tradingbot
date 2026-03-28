@@ -100,6 +100,14 @@ MIN_CONFIDENCE = {
     'geo':     0.50,
 }
 
+# ── Volume-Tier Edge Discounting ──────────────────────────────────────────────
+# Discount edge for thin markets — low volume means poor price discovery
+# Optimizer will review thin-market outcomes after 30 days of data
+VOLUME_TIER_THICK    = 5000   # contracts/24h; no discount
+VOLUME_TIER_MID      = 1000   # moderate discount
+VOLUME_DISCOUNT_MID  = 0.85   # edge × 0.85 (15% discount)
+VOLUME_DISCOUNT_THIN = 0.65   # edge × 0.65 (35% discount)
+
 # Minimum yes_ask price to enter (skip penny markets with no orderbook)
 MIN_YES_ASK = 5  # cents — skip markets priced at 1-4c
 
