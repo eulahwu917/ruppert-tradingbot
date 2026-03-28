@@ -27,7 +27,8 @@ import statistics
 import requests
 import uuid
 from collections import deque
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone, date, timedelta
+import pytz
 from pathlib import Path
 
 import config
@@ -655,6 +656,8 @@ def evaluate_crypto_15m_entry(
     window_close_ts = close_time or ''
 
     elapsed_secs = 0.0
+    close_dt = None
+
     if open_time:
         try:
             open_dt = datetime.fromisoformat(open_time.replace('Z', '+00:00'))
@@ -662,14 +665,47 @@ def evaluate_crypto_15m_entry(
         except Exception:
             pass
 
-    close_dt = None
     if close_time:
         try:
             close_dt = datetime.fromisoformat(close_time.replace('Z', '+00:00'))
         except Exception:
             pass
 
-    # If no open_time, estimate from close_time (15-min window)
+    # If no open_time or close_time from WS message (WS ticker msgs don't include them),
+    # parse window open time directly from ticker name.
+    # Format: KXBTC15M-26MAR281315-15 → window opens at 2026-03-28 13:15 UTC
+    if not elapsed_secs:
+        try:
+            parts = ticker.split('-')
+            if len(parts) >= 2:
+                date_part = parts[1]  # e.g. '26MAR281315'
+                # Format: YYMMMDDhhmm
+                import re
+                m = re.match(r'(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})', date_part)
+                if m:
+                    yr = 2000 + int(m.group(1))
+                    mon_str = m.group(2)
+                    day = int(m.group(3))
+                    hour = int(m.group(4))
+                    minute = int(m.group(5))
+                    mon_map = {'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,
+                               'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
+                    mon = mon_map.get(mon_str, 1)
+                    # Kalshi ticker encodes CLOSE time in EST (UTC-4)
+                    # e.g. 26MAR281330 = closes at 13:30 EST = 17:30 UTC
+                    est = pytz.timezone('America/New_York')
+                    close_est = est.localize(datetime(yr, mon, day, hour, minute))
+                    close_dt = close_est.astimezone(timezone.utc)
+                    open_dt = close_dt - timedelta(minutes=15)
+                    elapsed_secs = (now - open_dt).total_seconds()
+                    if not window_open_ts:
+                        window_open_ts = open_dt.isoformat()
+                    if not window_close_ts:
+                        window_close_ts = close_dt.isoformat()
+        except Exception:
+            pass
+
+    # Final fallback: estimate from close_time if we somehow have it but not elapsed
     if not elapsed_secs and close_dt:
         elapsed_secs = max(0, 900 - (close_dt - now).total_seconds())
 
@@ -880,3 +916,4 @@ def evaluate_crypto_15m_entry(
                    signals, kalshi_info,
                    direction.upper(), None,
                    edge, entry_price, position_usd)
+
