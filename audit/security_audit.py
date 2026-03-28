@@ -128,7 +128,7 @@ else:
 
 # ── 4. Verify secrets are stored safely ─────────────────────────────────────
 print("\n[4] Checking secrets storage...")
-secrets_dir = Path('../../secrets')
+secrets_dir = Path(__file__).resolve().parent.parent / 'secrets'
 if secrets_dir.exists():
     for sf in secrets_dir.iterdir():
         print(f"  {sf.name} — exists (local only)")
