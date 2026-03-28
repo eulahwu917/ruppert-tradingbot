@@ -544,7 +544,7 @@ def check_risk_filters(
         return 'WIDE_SPREAD'
 
     # R3: Thin Kalshi book
-    if book_depth_usd < 500:
+    if book_depth_usd < 100:
         return 'LOW_KALSHI_LIQUIDITY'
 
     # R4: Thin underlying volume
