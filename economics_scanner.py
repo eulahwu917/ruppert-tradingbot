@@ -59,6 +59,18 @@ def analyze_market(market: dict, econ_data: dict) -> dict | None:
     volume = market.get('volume', 0)
     series = market.get('series_ticker', '')
 
+    # WS cache overlay: use fresher WS price if available
+    try:
+        import market_cache
+        cached_bid, cached_ask, is_stale = market_cache.get_with_staleness(ticker)
+        if not is_stale and cached_ask is not None:
+            yes_ask = round(cached_ask * 100)
+            market['yes_ask'] = yes_ask
+            if cached_bid is not None:
+                market['yes_bid'] = round(cached_bid * 100)
+    except ImportError:
+        pass
+
     # Skip illiquid markets
     if volume < MIN_VOLUME:
         return None

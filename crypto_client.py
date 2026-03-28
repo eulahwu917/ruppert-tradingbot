@@ -818,6 +818,18 @@ def get_crypto_edge(market: dict, all_event_markets: list | None = None) -> dict
     ticker = market.get('ticker', '')
     yes_ask = market.get('yes_ask')
     yes_bid = market.get('yes_bid', 0)
+
+    # WS cache overlay: use fresher WS price if available
+    try:
+        import market_cache
+        _cb, _ca, _stale = market_cache.get_with_staleness(ticker)
+        if not _stale and _ca is not None:
+            yes_ask = round(_ca * 100)
+            if _cb is not None:
+                yes_bid = round(_cb * 100)
+    except ImportError:
+        pass
+
     volume = market.get('volume', 0)
     close_time = market.get('close_time', '')
     title = market.get('title', '')

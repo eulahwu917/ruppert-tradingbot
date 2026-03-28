@@ -127,3 +127,24 @@ OPTIMIZER_MAX_AVG_SIZE       = 40.0  # flag if avg position size above this
 CRYPTO_15M_MIN_EDGE      = 0.08   # 8% minimum edge to enter
 CRYPTO_15M_SIGMOID_SCALE = 1.0    # sigmoid scale factor (autoresearcher-tunable)
 CRYPTO_15M_DAILY_CAP_PCT = 0.04   # 4% of capital per day
+
+# ── WS-First Architecture ────────────────────────────────────────────────────
+# Active series prefixes — only cache tickers matching these.
+# Update this list when adding new market series (no code change needed).
+WS_ACTIVE_SERIES = [
+    # Weather
+    'KXHIGHT', 'KXHIGHNY', 'KXHIGHMI', 'KXHIGHCH',
+    'KXHIGHDE', 'KXHIGHAT', 'KXHIGHLAX', 'KXHIGHAUS',
+    'KXHIGHSE', 'KXHIGHSF', 'KXHIGHPH', 'KXHIGHLV',
+    'KXHIGHSA', 'KXHIGHMIA',
+    # Crypto hourly bands
+    'KXBTC', 'KXETH', 'KXXRP', 'KXDOGE', 'KXSOL',
+    # Crypto 15m direction
+    'KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M',
+    # Econ
+    'KXCPI', 'KXPCE', 'KXJOBS', 'KXUNEMPLOYMENT', 'KXGDP',
+    # Fed
+    'KXFED', 'KXFOMC',
+]
+WS_CACHE_STALE_SECONDS = 60      # trigger REST fallback after this many seconds
+WS_CACHE_PURGE_SECONDS = 300     # purge dead entries after this many seconds

@@ -1,5 +1,8 @@
 """
 Post-Trade Position Monitor
+Deprecated: WS position tracker (position_tracker.py + ws_feed.py) handles exits
+in real-time. This runs as a safety net — polling fallback for any missed exits.
+
 Unified post-entry position watcher for ALL modules.
 Checks exit conditions based on module type, executes auto-exits or queues alerts.
 Runs every 30 minutes via Task Scheduler (6am-11pm).

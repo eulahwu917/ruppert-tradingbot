@@ -817,6 +817,15 @@ def main():
     args = parser.parse_args()
 
     if args.persistent:
+        # Delegate to ws_feed.py — the new persistent WS-first architecture.
+        # ws_feed.py handles: market_cache, position_tracker, crypto entry routing.
+        try:
+            from ws_feed import run
+            print("  [Monitor] Delegating to ws_feed.py (WS-first architecture)")
+            run()
+            return
+        except ImportError as e:
+            print(f"  [Monitor] ws_feed import failed ({e}) — falling back to legacy persistent mode")
         if not _in_market_hours():
             print(f"  [Persistent WS] Outside market hours ({PERSISTENT_MARKET_HOUR_START}:00–{PERSISTENT_MARKET_HOUR_END}:00) — exiting")
             return
