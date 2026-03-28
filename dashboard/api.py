@@ -15,7 +15,6 @@ from pathlib import Path
 from capital import get_capital, get_buying_power
 from logger import classify_module
 import market_cache
-import config
 
 app = FastAPI(title="Ruppert Trading Dashboard")
 LOGS_DIR = Path(__file__).parent.parent / "logs"
@@ -1271,14 +1270,6 @@ def get_pnl_history():
         "man_cost_basis": round(manual_cost_basis, 2),
         "modules": modules_out,
     }
-    # Write bot-only closed_pnl to cache so bot can read correct capital without duplicate API calls
-    if not config.DRY_RUN:
-        try:
-            pnl_cache = LOGS_DIR / "pnl_cache.json"
-            with open(pnl_cache, 'w', encoding='utf-8') as _f:
-                json.dump({"closed_pnl": round(closed_by_source['bot'], 2)}, _f)
-        except Exception:
-            pass
     return pnl_result
 
 
