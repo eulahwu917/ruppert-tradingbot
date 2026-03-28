@@ -124,8 +124,9 @@ def synthesize_alerts(events: list = None) -> list:
 def synthesize_pnl_cache(events: list = None) -> dict:
     """
     Recompute pnl_cache.json from trade log files.
-    Uses SETTLEMENT events from today's log to incorporate settled trades
-    that may not yet be reflected in trade log files.
+    Trade files are the authoritative source for P&L — exit and settle records
+    are the only inputs. SETTLEMENT events in the raw log are used elsewhere
+    to trigger synthesis but must NOT contribute to the P&L total here.
 
     Returns the updated pnl_cache dict.
     """
@@ -157,19 +158,6 @@ def synthesize_pnl_cache(events: list = None) -> dict:
                             pass
             except Exception:
                 pass
-
-    # Also incorporate SETTLEMENT events from today's event log that
-    # may not have been written to trade files yet
-    if events is None:
-        events = read_today_events()
-
-    settlement_events = [e for e in events if e.get('type') == 'SETTLEMENT']
-    for event in settlement_events:
-        pnl = event.get('pnl', 0)
-        try:
-            closed_pnl += float(pnl)
-        except (TypeError, ValueError):
-            pass
 
     cache = {'closed_pnl': round(closed_pnl, 2)}
     _write_truth('pnl_cache.json', cache)
