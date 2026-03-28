@@ -620,4 +620,35 @@ Delete new files, remove from Task Scheduler.
 
 ---
 
+## Agent Ownership & Boundaries
+
+### Core Principle
+**Each agent owns their domain. No agent touches another agent's files, code, or responsibilities.**
+
+- CEO receives reports from agents but does NOT directly edit their files or make decisions in their domain
+- Data Scientist owns all truth files — no other agent writes to them
+- Trader owns execution — no other agent places orders or modifies position state
+- Strategist owns algo parameters — no other agent changes thresholds or sizing logic
+- Researcher owns opportunity backlog — no other agent writes to it
+- Dev and QA own the code pipeline — agents do not self-modify code
+
+### If an agent sees something broken in another agent's domain
+They do NOT fix it themselves. They:
+1. Log an ALERT_CANDIDATE event with the issue description
+2. Tag the responsible agent in the alert
+3. CEO routes the alert to the responsible agent for investigation
+4. The responsible agent investigates and proposes a fix
+5. Fix goes through normal Dev → QA → CEO → David pipeline
+
+### Why this matters
+Agents crossing ownership boundaries creates:
+- Race conditions (two writers to same file)
+- Responsibility confusion (who owns the fix?)
+- Trust erosion (unexpected mutations in "owned" domains)
+- Hard-to-debug state corruption (seen today with pnl_cache)
+
+**The agent who owns it, fixes it. Everyone else reports.**
+
+---
+
 *Pipeline document complete. All agents follow this process.*
