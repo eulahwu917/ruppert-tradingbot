@@ -280,7 +280,7 @@ def compute_pnl_from_logs() -> float:
     total_pnl = 0.0
     for path in _get_trade_files():
         for t in _read_trades_file(path):
-            if t.get('action') == 'exit' and t.get('pnl') is not None:
+            if t.get('action') in ('exit', 'settle') and t.get('pnl') is not None:
                 try:
                     total_pnl += float(t['pnl'])
                 except (ValueError, TypeError):
