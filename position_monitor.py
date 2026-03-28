@@ -58,6 +58,9 @@ WS_ENABLED = True                    # Toggle WebSocket mode
 WS_EVENT_LOOP_DURATION = 840         # 14 minutes (Task Scheduler runs every 30 min)
 POLL_BACKSTOP_INTERVAL = 300         # 5 min polling backstop inside WS loop
 
+# 15-min crypto direction series
+CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M']
+
 # ─────────────────────────────── Helpers ──────────────────────────────────────
 
 def ts():
@@ -529,12 +532,12 @@ async def run_ws_mode(client: KalshiClient):
     # Add active crypto markets for real-time entry
     crypto_tickers = []
     try:
-        for series in ['KXBTC', 'KXETH']:
+        for series in ['KXBTC', 'KXETH'] + CRYPTO_15M_SERIES:
             markets = client.search_markets(series_ticker=series, status='open')
-            crypto_tickers.extend([m.get('ticker', '') for m in markets[:25]])
+            crypto_tickers.extend([m.get('ticker', '') for m in markets[:5 if series in CRYPTO_15M_SERIES else 25]])
     except Exception as e:
         print(f"  [WS] Could not fetch crypto markets: {e}")
-    
+
     all_tickers = list(set(filter(None, position_tickers + crypto_tickers)))
     
     if not all_tickers:
@@ -591,12 +594,21 @@ async def run_ws_mode(client: KalshiClient):
                 yes_ask = msg.get('yes_ask')
                 yes_bid = msg.get('yes_bid')
                 close_time = msg.get('close_time')
-                
-                # Check if this is a crypto ticker for real-time entry
-                if any(ticker.upper().startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE')):
+                open_time = msg.get('open_time')
+
+                # Route 15-min crypto direction tickers to new evaluator
+                if any(ticker.upper().startswith(s) for s in CRYPTO_15M_SERIES):
+                    if yes_ask and yes_bid:
+                        try:
+                            from crypto_15m import evaluate_crypto_15m_entry
+                            evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time)
+                        except Exception as e:
+                            logger.warning('[WS] 15m crypto eval error: %s', e)
+                # Hourly band crypto tickers → existing evaluator
+                elif any(ticker.upper().startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE')):
                     if yes_ask and yes_bid:
                         evaluate_crypto_entry(ticker, yes_ask, yes_bid, close_time)
-                
+
                 # Check for settlement (price at 99 or 1)
                 if yes_ask is not None and ticker not in settled_tickers:
                     if yes_ask >= 99:
@@ -673,9 +685,9 @@ async def run_persistent_ws_mode():
         # Build subscription list from active crypto markets
         crypto_tickers = []
         try:
-            for series in ['KXBTC', 'KXETH']:
+            for series in ['KXBTC', 'KXETH'] + CRYPTO_15M_SERIES:
                 markets = client.search_markets(series_ticker=series, status='open')
-                crypto_tickers.extend([m.get('ticker', '') for m in markets[:25]])
+                crypto_tickers.extend([m.get('ticker', '') for m in markets[:5 if series in CRYPTO_15M_SERIES else 25]])
         except Exception as e:
             print(f"  [Persistent WS] Could not fetch crypto markets: {e}")
 
@@ -719,9 +731,9 @@ async def run_persistent_ws_mode():
                 if now - last_resub >= PERSISTENT_RESUB_INTERVAL:
                     new_tickers = []
                     try:
-                        for series in ['KXBTC', 'KXETH']:
+                        for series in ['KXBTC', 'KXETH'] + CRYPTO_15M_SERIES:
                             markets = client.search_markets(series_ticker=series, status='open')
-                            new_tickers.extend([m.get('ticker', '') for m in markets[:25]])
+                            new_tickers.extend([m.get('ticker', '') for m in markets[:5 if series in CRYPTO_15M_SERIES else 25]])
                     except Exception:
                         pass
                     new_tickers = list(set(filter(None, new_tickers)))
@@ -739,8 +751,18 @@ async def run_persistent_ws_mode():
                     yes_ask = msg.get('yes_ask')
                     yes_bid = msg.get('yes_bid')
                     close_time = msg.get('close_time')
+                    open_time = msg.get('open_time')
 
-                    if any(ticker.upper().startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE')):
+                    # Route 15-min direction tickers to new evaluator
+                    if any(ticker.upper().startswith(s) for s in CRYPTO_15M_SERIES):
+                        if yes_ask and yes_bid:
+                            try:
+                                from crypto_15m import evaluate_crypto_15m_entry
+                                evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time)
+                            except Exception as e:
+                                logger.warning('[Persistent WS] 15m crypto eval error: %s', e)
+                    # Hourly band tickers → existing evaluator
+                    elif any(ticker.upper().startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE')):
                         if yes_ask and yes_bid:
                             evaluate_crypto_entry(ticker, yes_ask, yes_bid, close_time)
 

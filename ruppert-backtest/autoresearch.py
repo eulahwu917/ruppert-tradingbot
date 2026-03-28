@@ -20,7 +20,7 @@ def run_autoresearch():
 
     # Print per-domain status
     print("Autoresearch — per-domain status:")
-    for domain in ["weather", "crypto", "fed", "geo", "econ"]:
+    for domain in ["weather", "crypto", "crypto_15m", "fed", "geo", "econ"]:
         count = counts.get(domain, 0)
         print(f"  {domain.capitalize()}: {count}/{THRESHOLD}")
 

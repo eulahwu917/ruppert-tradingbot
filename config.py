@@ -122,3 +122,8 @@ OPTIMIZER_BRIER_FLAG         = 0.25  # flag if Brier score above this (worse cal
 OPTIMIZER_HOLD_TIME_FLAG_HRS = 12    # flag if avg hold time above this
 OPTIMIZER_CAP_UTIL_FLAG      = 0.30  # flag if avg cap utilization below 30%
 OPTIMIZER_MAX_AVG_SIZE       = 40.0  # flag if avg position size above this
+
+# ── 15-Min Crypto Direction (KXBTC15M / KXETH15M / KXXRP15M / KXDOGE15M) ────
+CRYPTO_15M_MIN_EDGE      = 0.08   # 8% minimum edge to enter
+CRYPTO_15M_SIGMOID_SCALE = 1.0    # sigmoid scale factor (autoresearcher-tunable)
+CRYPTO_15M_DAILY_CAP_PCT = 0.04   # 4% of capital per day
