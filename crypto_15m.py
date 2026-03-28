@@ -37,17 +37,16 @@ logger = logging.getLogger(__name__)
 
 # ─────────────────────────────── Constants ────────────────────────────────────
 
-BINANCE_FUTURES = 'https://fapi.binance.com/fapi/v1'
-BINANCE_DATA    = 'https://fapi.binance.com/futures/data'
-COINBASE_API    = 'https://api.coinbase.com/v2/prices'
+OKX_API      = 'https://www.okx.com/api/v5'
+COINBASE_API = 'https://api.coinbase.com/v2/prices'
 
 CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M']
 
 ASSET_SYMBOLS = {
-    'BTC':  'BTCUSDT',
-    'ETH':  'ETHUSDT',
-    'XRP':  'XRPUSDT',
-    'DOGE': 'DOGEUSDT',
+    'BTC':  'BTC-USDT-SWAP',
+    'ETH':  'ETH-USDT-SWAP',
+    'XRP':  'XRP-USDT-SWAP',
+    'DOGE': 'DOGE-USDT-SWAP',
 }
 
 # Signal weights (fixed — autoresearcher will optimize)
@@ -113,42 +112,59 @@ def _update_rolling(store: dict, symbol: str, value: float):
 
 def fetch_taker_flow_imbalance(symbol: str) -> dict:
     """
-    Fetch Taker Buy/Sell Volume from Binance Futures.
+    Compute Taker Flow Imbalance from OKX recent trades.
+    OKX doesn't have pre-bucketed taker vol — we compute buy/sell vol
+    from raw trades grouped into 5-min buckets.
     Returns {'tfi_z': float, 'stale': bool, 'raw': float, 'ts': float}
     """
     try:
         r = requests.get(
-            f'{BINANCE_FUTURES}/takeLongShortRatio',
-            params={'symbol': symbol, 'period': '5m', 'limit': 3},
+            f'{OKX_API}/market/trades',
+            params={'instId': symbol, 'limit': '200'},
             timeout=10,
         )
         r.raise_for_status()
-        data = r.json()
+        resp = r.json()
+        trades = resp.get('data', [])
     except Exception as e:
         logger.warning('TFI fetch failed for %s: %s', symbol, e)
         return {'tfi_z': 0.0, 'stale': True, 'raw': 0.0, 'ts': 0.0}
 
-    if not data or len(data) < 1:
+    if not trades:
         return {'tfi_z': 0.0, 'stale': True, 'raw': 0.0, 'ts': 0.0}
 
-    # Compute per-bucket TFI and time-weighted composite
-    weights = [0.20, 0.30, 0.50]
-    buckets = []
+    # Group trades into 5-min buckets by timestamp
+    bucket_size_ms = 5 * 60 * 1000
+    buckets_map: dict[int, dict] = {}
     last_ts = 0
 
-    for item in data[-3:]:
-        buy_vol = float(item.get('buyVol', item.get('buySellRatio', 1.0)))
-        sell_vol = float(item.get('sellVol', 1.0))
-        total = buy_vol + sell_vol
-        tfi = (buy_vol - sell_vol) / total if total > 0 else 0.0
-        buckets.append(tfi)
-        last_ts = max(last_ts, float(item.get('timestamp', 0)) / 1000)
+    for t in trades:
+        ts_ms = int(t.get('ts', 0))
+        side = t.get('side', '')
+        sz = float(t.get('sz', 0))
+        bucket_key = ts_ms // bucket_size_ms
+        if bucket_key not in buckets_map:
+            buckets_map[bucket_key] = {'buy': 0.0, 'sell': 0.0}
+        if side == 'buy':
+            buckets_map[bucket_key]['buy'] += sz
+        else:
+            buckets_map[bucket_key]['sell'] += sz
+        last_ts = max(last_ts, ts_ms / 1000)
 
-    # Pad if fewer than 3 buckets
-    while len(buckets) < 3:
-        buckets.insert(0, 0.0)
+    # Sort buckets chronologically and compute TFI per bucket
+    sorted_keys = sorted(buckets_map.keys())
+    bucket_tfis = []
+    for k in sorted_keys:
+        b = buckets_map[k]
+        total = b['buy'] + b['sell']
+        tfi = (b['buy'] - b['sell']) / total if total > 0 else 0.0
+        bucket_tfis.append(tfi)
 
-    tfi_composite = sum(w * t for w, t in zip(weights, buckets[-3:]))
+    # Time-weighted composite of last 3 buckets
+    weights = [0.20, 0.30, 0.50]
+    while len(bucket_tfis) < 3:
+        bucket_tfis.insert(0, 0.0)
+    tfi_composite = sum(w * t for w, t in zip(weights, bucket_tfis[-3:]))
 
     # Update rolling window and compute z-score
     _update_rolling(_rolling_tfi, symbol, tfi_composite)
@@ -165,21 +181,23 @@ _obi_snapshots: dict[str, deque] = {}  # EWM history per symbol
 
 def fetch_orderbook_imbalance(symbol: str) -> dict:
     """
-    Fetch orderbook depth from Binance Futures.
+    Fetch orderbook depth from OKX.
     Returns {'obi_z': float, 'stale': bool, 'raw': float, 'ts': float}
     """
     try:
         r = requests.get(
-            f'{BINANCE_FUTURES}/depth',
-            params={'symbol': symbol, 'limit': 20},
+            f'{OKX_API}/market/books',
+            params={'instId': symbol, 'sz': '10'},
             timeout=10,
         )
         r.raise_for_status()
-        data = r.json()
+        resp = r.json()
+        data = resp.get('data', [{}])[0]
     except Exception as e:
         logger.warning('OBI fetch failed for %s: %s', symbol, e)
         return {'obi_z': 0.0, 'stale': True, 'raw': 0.0, 'ts': 0.0}
 
+    # OKX format: bids/asks are [[price, qty, 0, orders], ...]
     bids = data.get('bids', [])[:10]
     asks = data.get('asks', [])[:10]
 
@@ -207,8 +225,8 @@ def fetch_orderbook_imbalance(symbol: str) -> dict:
     _update_rolling(_rolling_obi, symbol, ewm)
     obi_z = _z_score(ewm, _rolling_obi.get(symbol, deque()))
 
-    snap_ts = float(data.get('T', data.get('lastUpdateId', time.time() * 1000))) / 1000
-    age = time.time() - snap_ts if snap_ts > 1e9 else 0  # heuristic: if it looks like a real ts
+    snap_ts = float(data.get('ts', time.time() * 1000)) / 1000
+    age = time.time() - snap_ts if snap_ts > 1e9 else 0
     return {'obi_z': round(obi_z, 4), 'stale': age > 30, 'raw': round(ewm, 6), 'ts': snap_ts}
 
 
@@ -216,17 +234,19 @@ def fetch_orderbook_imbalance(symbol: str) -> dict:
 
 def fetch_macd_signal(symbol: str) -> dict:
     """
-    Compute MACD histogram on 5-min candles from Binance Futures.
+    Compute MACD histogram on 5-min candles from OKX.
     Returns {'macd_z': float, 'stale': bool, 'raw': float, 'ts': float}
     """
     try:
         r = requests.get(
-            f'{BINANCE_FUTURES}/klines',
-            params={'symbol': symbol, 'interval': '5m', 'limit': 30},
+            f'{OKX_API}/market/candles',
+            params={'instId': symbol, 'bar': '5m', 'limit': '30'},
             timeout=10,
         )
         r.raise_for_status()
-        data = r.json()
+        resp = r.json()
+        # OKX returns newest first — reverse to chronological
+        data = list(reversed(resp.get('data', [])))
     except Exception as e:
         logger.warning('MACD fetch failed for %s: %s', symbol, e)
         return {'macd_z': 0.0, 'stale': True, 'raw': 0.0, 'ts': 0.0}
@@ -234,6 +254,7 @@ def fetch_macd_signal(symbol: str) -> dict:
     if not data or len(data) < 26:
         return {'macd_z': 0.0, 'stale': True, 'raw': 0.0, 'ts': 0.0}
 
+    # OKX candle format: [ts, o, h, l, c, vol, volCcy, volCcyQuote, confirm]
     closes = [float(candle[4]) for candle in data]  # index 4 = close price
     last_ts = float(data[-1][0]) / 1000  # open time of last candle
 
@@ -263,32 +284,39 @@ def fetch_macd_signal(symbol: str) -> dict:
 
 def fetch_oi_conviction(symbol: str) -> dict:
     """
-    Open Interest delta conviction signal.
+    Open Interest delta conviction signal from OKX.
+    OKX provides a snapshot (not history) — we cache the previous value
+    and compute delta vs the cached value.
     Returns {'oi_z': float, 'stale': bool, 'raw': float, 'ts': float}
     """
     try:
         r = requests.get(
-            f'{BINANCE_DATA}/openInterestHist',
-            params={'symbol': symbol, 'period': '5m', 'limit': 3},
+            f'{OKX_API}/public/open-interest',
+            params={'instType': 'SWAP', 'instId': symbol},
             timeout=10,
         )
         r.raise_for_status()
-        data = r.json()
+        resp = r.json()
+        oi_data = resp.get('data', [])
     except Exception as e:
         logger.warning('OI fetch failed for %s: %s', symbol, e)
         return {'oi_z': 0.0, 'stale': True, 'raw': 0.0, 'ts': 0.0}
 
-    if not data or len(data) < 2:
+    if not oi_data:
         return {'oi_z': 0.0, 'stale': True, 'raw': 0.0, 'ts': 0.0}
 
-    oi_now = float(data[-1].get('sumOpenInterest', 0))
-    oi_prev = float(data[-2].get('sumOpenInterest', 0))
-    last_ts = float(data[-1].get('timestamp', 0)) / 1000
+    curr_oi = float(oi_data[0].get('oiCcy', 0))
+    last_ts = float(oi_data[0].get('ts', 0)) / 1000
 
-    if oi_prev == 0:
+    # Retrieve previous OI from cache, then store current
+    prev_oi_key = f'prev_oi_{symbol}'
+    prev_oi = _cache_get(prev_oi_key, ttl=600)  # 10 min TTL for previous snapshot
+    _cache_set(prev_oi_key, curr_oi)
+
+    if prev_oi is _CACHE_MISS or prev_oi == 0:
         return {'oi_z': 0.0, 'stale': False, 'raw': 0.0, 'ts': last_ts}
 
-    oi_delta_pct = (oi_now - oi_prev) / oi_prev
+    oi_delta_pct = (curr_oi - prev_oi) / prev_oi
 
     # Need price delta for conviction — fetch from klines cache or quick fetch
     price_delta = _get_recent_price_delta(symbol)
@@ -303,19 +331,20 @@ def fetch_oi_conviction(symbol: str) -> dict:
 
 
 def _get_recent_price_delta(symbol: str) -> float:
-    """Get 5-min price delta from recent klines (cached)."""
+    """Get 5-min price delta from recent OKX candles (cached)."""
     cached = _cache_get(f'price_delta_{symbol}', ttl=120)
     if cached is not _CACHE_MISS:
         return cached
 
     try:
         r = requests.get(
-            f'{BINANCE_FUTURES}/klines',
-            params={'symbol': symbol, 'interval': '5m', 'limit': 2},
+            f'{OKX_API}/market/candles',
+            params={'instId': symbol, 'bar': '5m', 'limit': '2'},
             timeout=10,
         )
         r.raise_for_status()
-        data = r.json()
+        resp = r.json()
+        data = list(reversed(resp.get('data', [])))  # OKX returns newest first
         if len(data) >= 2:
             p_now = float(data[-1][4])   # close
             p_prev = float(data[-2][4])  # close
@@ -352,21 +381,23 @@ def fetch_coinbase_price(asset: str) -> float | None:
         return None
 
 
-def fetch_binance_price(symbol: str) -> float | None:
-    """Fetch mark price from Binance Futures."""
-    cached = _cache_get(f'binance_price_{symbol}', ttl=30)
+def fetch_okx_price(symbol: str) -> float | None:
+    """Fetch last price from OKX."""
+    cached = _cache_get(f'okx_price_{symbol}', ttl=30)
     if cached is not _CACHE_MISS:
         return cached
 
     try:
         r = requests.get(
-            f'{BINANCE_FUTURES}/ticker/price',
-            params={'symbol': symbol},
+            f'{OKX_API}/market/ticker',
+            params={'instId': symbol},
             timeout=10,
         )
         r.raise_for_status()
-        price = float(r.json()['price'])
-        _cache_set(f'binance_price_{symbol}', price)
+        resp = r.json()
+        data = resp.get('data', [{}])[0]
+        price = float(data['last'])
+        _cache_set(f'okx_price_{symbol}', price)
         return price
     except Exception:
         return None
@@ -418,24 +449,25 @@ def _get_session_pnl_15m() -> float:
     return total
 
 
-def _fetch_binance_5m_volume(symbol: str) -> float | None:
-    """Get recent 5-min volume from Binance klines."""
+def _fetch_okx_5m_volume(symbol: str) -> float | None:
+    """Get recent 5-min volume from OKX candles."""
     try:
         r = requests.get(
-            f'{BINANCE_FUTURES}/klines',
-            params={'symbol': symbol, 'interval': '5m', 'limit': 1},
+            f'{OKX_API}/market/candles',
+            params={'instId': symbol, 'bar': '5m', 'limit': '1'},
             timeout=10,
         )
         r.raise_for_status()
-        data = r.json()
+        resp = r.json()
+        data = resp.get('data', [])
         if data:
-            return float(data[0][5])  # index 5 = volume
+            return float(data[0][5])  # index 5 = vol (in contracts)
     except Exception:
         pass
     return None
 
 
-def _fetch_30d_avg_binance_vol(symbol: str) -> float | None:
+def _fetch_30d_avg_okx_vol(symbol: str) -> float | None:
     """Get 30-day average daily volume as proxy (cached 1h)."""
     cached = _cache_get(f'avg_vol_30d_{symbol}', ttl=3600)
     if cached is not _CACHE_MISS:
@@ -443,12 +475,13 @@ def _fetch_30d_avg_binance_vol(symbol: str) -> float | None:
 
     try:
         r = requests.get(
-            f'{BINANCE_FUTURES}/klines',
-            params={'symbol': symbol, 'interval': '1d', 'limit': 30},
+            f'{OKX_API}/market/candles',
+            params={'instId': symbol, 'bar': '1D', 'limit': '30'},
             timeout=10,
         )
         r.raise_for_status()
-        data = r.json()
+        resp = r.json()
+        data = resp.get('data', [])
         if data:
             vols = [float(d[5]) for d in data]
             avg = statistics.mean(vols) if vols else 0.0
@@ -462,15 +495,16 @@ def _fetch_30d_avg_binance_vol(symbol: str) -> float | None:
 
 
 def _get_realized_5m_vol(symbol: str) -> tuple[float | None, float | None]:
-    """Get 5-min realized vol and 30-day average 5-min vol."""
+    """Get 5-min realized vol from OKX candles."""
     try:
         r = requests.get(
-            f'{BINANCE_FUTURES}/klines',
-            params={'symbol': symbol, 'interval': '5m', 'limit': 2},
+            f'{OKX_API}/market/candles',
+            params={'instId': symbol, 'bar': '5m', 'limit': '2'},
             timeout=10,
         )
         r.raise_for_status()
-        data = r.json()
+        resp = r.json()
+        data = list(reversed(resp.get('data', [])))  # OKX returns newest first
         if data and len(data) >= 2:
             high = float(data[-1][2])
             low = float(data[-1][3])
@@ -499,7 +533,7 @@ def check_risk_filters(
     """
     # R1: Extreme realized vol
     vol_5m, _ = _get_realized_5m_vol(symbol)
-    avg_vol_30d = _fetch_30d_avg_binance_vol(symbol)
+    avg_vol_30d = _fetch_30d_avg_okx_vol(symbol)
     if vol_5m is not None and avg_vol_30d is not None and avg_vol_30d > 0:
         if vol_5m > 3.0 * avg_vol_30d:
             return 'EXTREME_VOL'
@@ -514,10 +548,10 @@ def check_risk_filters(
         return 'LOW_KALSHI_LIQUIDITY'
 
     # R4: Thin underlying volume
-    binance_vol = _fetch_binance_5m_volume(symbol)
-    avg_binance_vol = _fetch_30d_avg_binance_vol(symbol)
-    if binance_vol is not None and avg_binance_vol is not None and avg_binance_vol > 0:
-        if binance_vol < 0.25 * avg_binance_vol:
+    okx_vol = _fetch_okx_5m_volume(symbol)
+    avg_okx_vol = _fetch_30d_avg_okx_vol(symbol)
+    if okx_vol is not None and avg_okx_vol is not None and avg_okx_vol > 0:
+        if okx_vol < 0.25 * avg_okx_vol:
             return 'THIN_MARKET'
 
     # R5: Stale data
@@ -550,11 +584,11 @@ def check_risk_filters(
     except (ImportError, AttributeError):
         pass  # Not available in all contexts
 
-    # R10: Coinbase-Binance basis
+    # R10: Coinbase-OKX basis
     coinbase_price = fetch_coinbase_price(asset)
-    binance_price = fetch_binance_price(symbol)
-    if coinbase_price and binance_price and binance_price > 0:
-        basis = abs(coinbase_price - binance_price) / binance_price
+    okx_price = fetch_okx_price(symbol)
+    if coinbase_price and okx_price and okx_price > 0:
+        basis = abs(coinbase_price - okx_price) / okx_price
         if basis > 0.0015:
             return 'BASIS_RISK'
 
