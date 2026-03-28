@@ -1,0 +1,1 @@
+{"min_edge_weather": 0.15, "min_edge_crypto": 0.12, "min_confidence_weather": 0.55, "min_confidence_crypto": 0.5, "pct_capital_cap": 0.025, "max_position_cap": 50.0, "daily_cap_pct": 0.7, "same_day_skip_hour": 14, "fractional_kelly": 0.25, "min_trade_size": 5.0}

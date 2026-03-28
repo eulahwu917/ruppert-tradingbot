@@ -129,7 +129,7 @@ def load_traded_tickers(logs_dir):
                     continue
                 if _action in ('buy', 'open'):
                     traded_tickers.add(_tk)
-                elif _action == 'exit':
+                elif _action in ('exit', 'settle'):
                     traded_tickers.discard(_tk)
             if traded_tickers:
                 print(f"  [Init] Loaded {len(traded_tickers)} open ticker(s) from today's log: {traded_tickers}")
@@ -627,7 +627,7 @@ def run_report_mode(state):
             continue
         if action in ('buy', 'open'):
             entries_by_ticker[ticker] = rec
-        elif action == 'exit':
+        elif action in ('exit', 'settle'):
             exit_records.append(rec)
 
     # Compute high-level P&L summary

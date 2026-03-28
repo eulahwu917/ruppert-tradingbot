@@ -1,0 +1,16 @@
+[backtest] Period    : 2026-03-10 → 2026-03-13
+[backtest] Capital   : $400.00
+[backtest] Mode      : SINGLE
+
+[backtest] Running single backtest with default config...
+
+  Total P&L  : $-84.41
+  Win rate   : 0.0%
+  Trades     : 17
+  Capital    : $400.00 → $315.59
+
+[backtest] Report written → C:\Users\David Wu\.openclaw\workspace\ruppert-backtest\results\20260313_185220_report.txt
+
+---STDERR---
+
+---RETURNCODE: 0---

@@ -135,7 +135,7 @@ def _compute_pnl(trades: list) -> tuple[float, int, int]:
 
         if action in ('buy', 'open'):
             total_cost += size
-        elif action == 'exit':
+        elif action in ('exit', 'settle'):
             total_exit += size
             if realized is not None:
                 if float(realized) >= 0:
@@ -249,7 +249,7 @@ def generate_report() -> str:
                 action = rec.get('action', 'buy')
                 if action in ('buy', 'open'):
                     tickers_entered[ticker] = float(rec.get('size_dollars', 0) or 0)
-                elif action == 'exit' and ticker in tickers_entered:
+                elif action in ('exit', 'settle') and ticker in tickers_entered:
                     del tickers_entered[ticker]
             except Exception:
                 pass

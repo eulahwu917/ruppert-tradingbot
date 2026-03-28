@@ -40,12 +40,8 @@ def _update_pnl_cache(pnl_delta: float):
         data['closed_pnl'] = round(current + pnl_delta, 2)
         # Atomic write: write to temp file then replace
         tmp_path = cache_path.with_suffix('.tmp')
-        try:
-            tmp_path.write_text(json.dumps(data), encoding='utf-8')
-            tmp_path.replace(cache_path)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
+        tmp_path.write_text(json.dumps(data), encoding='utf-8')
+        tmp_path.replace(cache_path)
     except Exception as e:
         print(f"  [pnl_cache] Update failed (non-fatal): {e}")
     finally:
@@ -295,7 +291,7 @@ def load_open_positions():
             side = rec.get('side', '')
             action = rec.get('action', 'buy')
             key = (ticker, side)
-            if action in ('exit', 'settle'):
+            if action == 'exit':
                 exit_keys.add(key)
             else:
                 entries_by_key[key] = rec

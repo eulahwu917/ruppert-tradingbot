@@ -386,8 +386,6 @@ def analyze_market(market: dict) -> dict | None:
             f"[Edge] {ticker}: volume_tier={_volume_tier} (vol={_volume}) — "
             f"edge {_raw_edge:.4f} → {_adj_edge:.4f}"
         )
-    model_prob_for_edge = market_prob + _adj_edge  # reconstruct model_prob equivalent
-
     # ── Edge calculation ──────────────────────────────────────────────────────
     edge = _adj_edge
 

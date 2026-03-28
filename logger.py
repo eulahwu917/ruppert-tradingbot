@@ -189,7 +189,7 @@ def get_daily_exposure():
                     side   = entry.get('side', '')
                     action = entry.get('action', 'buy')
                     key    = (ticker, side)
-                    if action == 'exit':
+                    if action in ('exit', 'settle'):
                         exit_keys.add(key)
                     else:
                         entries[key] = entry.get('size_dollars', 0)
