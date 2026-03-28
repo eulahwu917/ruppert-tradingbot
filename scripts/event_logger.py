@@ -32,6 +32,7 @@ def log_event(event_type: str, data: dict, source: str = None) -> None:
         PRICE_UPDATE          - Significant price move (ticker, old, new)
         STATE_UPDATE          - Cycle state snapshot (traded_tickers, mode)
         TRADE_FAILED          - Trade execution failed (ticker, side, error)
+        DEPOSIT_ADDED         - Capital deposit requested (date, amount, note)
     """
     event = {
         'ts': datetime.now().isoformat(),

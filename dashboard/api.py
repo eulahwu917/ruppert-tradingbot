@@ -29,8 +29,8 @@ def get_mode() -> str:
         pass
     return 'demo'
 
-def set_mode(mode: str):
-    MODE_FILE.write_text(json.dumps({"mode": mode}, indent=2), encoding='utf-8')
+# NOTE: set_mode() removed in Phase 4 — dashboard is read-only.
+# Mode is config-driven (mode.json); changes go through the Dev pipeline.
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -259,16 +259,18 @@ def get_deposits():
 
 @app.post("/api/deposits")
 async def add_deposit(request: Request):
+    # Phase 4: dashboard is read-only. Log deposit request as event;
+    # Data Scientist synthesizes it into deposits.json (truth file).
+    from scripts.event_logger import log_event
     body = await request.json()
     amount = float(body.get('amount', 0))
     note   = str(body.get('note', 'Manual deposit'))
     if amount <= 0:
         return {"error": "Amount must be positive"}
     entry = {"date": date.today().isoformat(), "amount": round(amount, 2), "note": note}
-    deposits_path = LOGS_DIR / "demo_deposits.jsonl"
-    with open(deposits_path, 'a', encoding='utf-8') as f:
-        f.write(json.dumps(entry) + '\n')
-    return {"ok": True, "entry": entry}
+    log_event('DEPOSIT_ADDED', entry, source='dashboard')
+    return {"ok": True, "pending": True, "entry": entry,
+            "note": "Deposit queued — Data Scientist will apply on next synthesis run."}
 
 
 @app.get("/api/trades")

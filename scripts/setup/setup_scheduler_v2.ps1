@@ -69,9 +69,10 @@ Register-ScheduledTask -TaskName "Ruppert-Econ-Prescan" -Action $actionEcon -Tri
 Write-Host "  Added: Ruppert-Econ-Prescan"
 
 # ADD post-trade monitor (every 30 min, 6am-11pm)
+# Phase 4: references agent module path directly, not root shim
 Write-Host "[4] Adding post-trade monitor..." -ForegroundColor Yellow
 
-$actionMonitor = New-ScheduledTaskAction -Execute $PythonExe -Argument "post_trade_monitor.py" -WorkingDirectory $ScriptDir
+$actionMonitor = New-ScheduledTaskAction -Execute $PythonExe -Argument "-m agents.trader.position_monitor" -WorkingDirectory $ScriptDir
 $triggerMonitor = New-ScheduledTaskTrigger -Daily -At 6:00AM
 $triggerMonitor.Repetition.Interval = [System.TimeSpan]::FromMinutes(30)
 $triggerMonitor.Repetition.Duration = [System.TimeSpan]::FromHours(17)
