@@ -565,11 +565,8 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                     except Exception:
                         pass
 
-                _spread = ya - na
-                _spread_score = min(1.0, max(0.0, 1.0 - (_spread / 20.0)))
-                _edge_score   = min(1.0, best_edge / 0.30)
-                _time_score   = min(1.0, _hours_left / 48.0)
-                _crypto_confidence = round(min(1.0, max(0.0, _edge_score * 0.5 + _spread_score * 0.3 + _time_score * 0.2)), 3)
+                from crypto_client import compute_composite_confidence
+                _crypto_confidence = compute_composite_confidence(best_edge, ya, m.get('yes_bid') or ya, _hours_left)
 
                 new_crypto.append({
                     'ticker': ticker, 'title': m.get('title', ticker),

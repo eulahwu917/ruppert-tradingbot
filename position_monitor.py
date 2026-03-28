@@ -22,6 +22,7 @@ import os
 import json
 import uuid
 import asyncio
+import argparse
 import logging
 import math
 from pathlib import Path
@@ -245,7 +246,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     """
     from crypto_client import (
         get_btc_signal, get_eth_signal, get_xrp_signal, get_doge_signal,
-        _band_probability, _t_cdf, ASSET_CONFIG
+        _band_probability, _t_cdf, ASSET_CONFIG, compute_composite_confidence
     )
     from bot.strategy import should_enter, calculate_position_size
     from capital import get_capital
@@ -349,7 +350,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
         return
     
     # Build opportunity dict
-    confidence = 0.60 if abs(edge) >= 0.20 else 0.50
+    confidence = compute_composite_confidence(edge, yes_ask, yes_bid, hours_left)
     
     opp = {
         'ticker': ticker,
@@ -627,6 +628,137 @@ async def run_ws_mode(client: KalshiClient):
     print(f"\nWebSocket monitor complete. {ts()}")
 
 
+# ─────────────────────────────── Persistent WS Mode ──────────────────────────
+
+PERSISTENT_MARKET_HOUR_START = 6   # 6 AM local
+PERSISTENT_MARKET_HOUR_END   = 23  # 11 PM local
+PERSISTENT_RESUB_INTERVAL    = 900 # re-fetch crypto tickers every 15 min
+
+
+def _in_market_hours() -> bool:
+    """Return True if current local hour is within 6AM–11PM."""
+    return PERSISTENT_MARKET_HOUR_START <= datetime.now().hour < PERSISTENT_MARKET_HOUR_END
+
+
+async def run_persistent_ws_mode():
+    """
+    Persistent WebSocket session that runs continuously during market hours.
+    Separate from the 15-min polling task — this is the real-time crypto entry path.
+
+    Lifecycle:
+      - Connects WS and subscribes to active crypto markets
+      - Processes ticker events for real-time crypto entry
+      - Re-fetches ticker list every 15 min (markets open/close)
+      - Reconnects automatically on disconnect
+      - Exits cleanly outside market hours (6AM–11PM)
+    """
+    try:
+        from ws.connection import KalshiWebSocket, WS_AVAILABLE
+        if not WS_AVAILABLE:
+            print("  [Persistent WS] websockets package not installed — exiting")
+            return
+    except ImportError as e:
+        print(f"  [Persistent WS] Import failed: {e}")
+        return
+
+    print(f"\n{'='*60}")
+    print(f"  PERSISTENT WS SESSION — {ts()}")
+    print(f"  Market hours: {PERSISTENT_MARKET_HOUR_START}:00–{PERSISTENT_MARKET_HOUR_END}:00")
+    print(f"{'='*60}\n")
+    log_activity('[WS] Persistent WebSocket session started')
+
+    client = KalshiClient()
+
+    while _in_market_hours():
+        # Build subscription list from active crypto markets
+        crypto_tickers = []
+        try:
+            for series in ['KXBTC', 'KXETH']:
+                markets = client.search_markets(series_ticker=series, status='open')
+                crypto_tickers.extend([m.get('ticker', '') for m in markets[:25]])
+        except Exception as e:
+            print(f"  [Persistent WS] Could not fetch crypto markets: {e}")
+
+        crypto_tickers = list(set(filter(None, crypto_tickers)))
+        if not crypto_tickers:
+            print(f"  [Persistent WS] No crypto tickers — sleeping 60s")
+            await asyncio.sleep(60)
+            continue
+
+        print(f"  [WS] Connecting ({len(crypto_tickers)} tickers)...")
+
+        ws = KalshiWebSocket(
+            api_key_id=config.get_api_key_id(),
+            private_key_path=config.get_private_key_path(),
+            environment=config.get_environment(),
+        )
+
+        connected = await ws.connect()
+        if not connected:
+            print(f"  [Persistent WS] Connection failed — retry in 30s")
+            log_activity('[WS] Connection failed, retrying in 30s')
+            await asyncio.sleep(30)
+            continue
+
+        await ws.subscribe_ticker(crypto_tickers)
+        print(f"  [WS] Connected and subscribed at {ts()}")
+        log_activity(f'[WS] Connected, subscribed to {len(crypto_tickers)} crypto tickers')
+
+        last_resub = asyncio.get_event_loop().time()
+
+        try:
+            async for msg in ws.messages():
+                # Exit outside market hours
+                if not _in_market_hours():
+                    print(f"  [Persistent WS] Outside market hours — shutting down")
+                    break
+
+                now = asyncio.get_event_loop().time()
+
+                # Periodically re-fetch ticker list
+                if now - last_resub >= PERSISTENT_RESUB_INTERVAL:
+                    new_tickers = []
+                    try:
+                        for series in ['KXBTC', 'KXETH']:
+                            markets = client.search_markets(series_ticker=series, status='open')
+                            new_tickers.extend([m.get('ticker', '') for m in markets[:25]])
+                    except Exception:
+                        pass
+                    new_tickers = list(set(filter(None, new_tickers)))
+                    added = set(new_tickers) - set(crypto_tickers)
+                    if added:
+                        await ws.subscribe_ticker(list(added))
+                        print(f"  [WS] Re-subscribed, added {len(added)} new tickers")
+                    crypto_tickers = new_tickers
+                    last_resub = now
+
+                # Handle ticker messages for crypto entry
+                msg_type = msg.get('type')
+                if msg_type == 'ticker':
+                    ticker = msg.get('market_ticker', '')
+                    yes_ask = msg.get('yes_ask')
+                    yes_bid = msg.get('yes_bid')
+                    close_time = msg.get('close_time')
+
+                    if any(ticker.upper().startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE')):
+                        if yes_ask and yes_bid:
+                            evaluate_crypto_entry(ticker, yes_ask, yes_bid, close_time)
+
+        except Exception as e:
+            print(f"  [Persistent WS] Error: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            await ws.close()
+
+        if _in_market_hours():
+            print(f"  [Persistent WS] Disconnected — reconnecting in 5s...")
+            await asyncio.sleep(5)
+
+    print(f"\n  [Persistent WS] Session ended at {ts()}")
+    log_activity('[WS] Persistent WebSocket session ended (outside market hours)')
+
+
 # ─────────────────────────────── Polling Mode (Fallback) ──────────────────────
 
 def run_polling_mode(client: KalshiClient):
@@ -651,10 +783,26 @@ def run_polling_mode(client: KalshiClient):
 def main():
     """
     Main entry point for position monitor.
-    Detects WebSocket availability and routes accordingly.
+
+    Modes:
+      --persistent   Continuous WS session during market hours (6AM-11PM).
+                     Separate from the polling task — run as its own scheduled task.
+      (default)      14-min WS event loop, used by the 15-min polling task.
     """
+    parser = argparse.ArgumentParser(description='Ruppert Position Monitor')
+    parser.add_argument('--persistent', action='store_true',
+                        help='Run persistent WS session (market hours only)')
+    args = parser.parse_args()
+
+    if args.persistent:
+        if not _in_market_hours():
+            print(f"  [Persistent WS] Outside market hours ({PERSISTENT_MARKET_HOUR_START}:00–{PERSISTENT_MARKET_HOUR_END}:00) — exiting")
+            return
+        asyncio.run(run_persistent_ws_mode())
+        return
+
     client = KalshiClient()
-    
+
     # Check if WebSocket is available and enabled
     ws_available = False
     if WS_ENABLED:
@@ -663,7 +811,7 @@ def main():
             ws_available = WS_AVAILABLE
         except ImportError:
             print("  [Monitor] WebSocket module not available — using polling mode")
-    
+
     if ws_available:
         # Run async WebSocket mode
         print("  [Monitor] Starting WebSocket mode...")

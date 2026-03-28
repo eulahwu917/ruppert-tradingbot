@@ -786,6 +786,19 @@ def _hours_to_settlement(close_time_str: str) -> float:
         return 6.0  # fallback
 
 
+def compute_composite_confidence(edge: float, yes_ask: int, yes_bid: int, hours_left: float) -> float:
+    """
+    Composite confidence score for crypto entries.
+    Weights: edge magnitude 50%, bid-ask spread tightness 30%, time to settlement 20%.
+    Returns float in [0, 1].
+    """
+    _spread = yes_ask - yes_bid
+    _spread_score = min(1.0, max(0.0, 1.0 - (_spread / 20.0)))
+    _edge_score = min(1.0, abs(edge) / 0.30)
+    _time_score = min(1.0, hours_left / 48.0)
+    return round(min(1.0, max(0.0, _edge_score * 0.5 + _spread_score * 0.3 + _time_score * 0.2)), 3)
+
+
 def get_crypto_edge(market: dict, all_event_markets: list | None = None) -> dict | None:
     """
     Compute model probability and edge for a Kalshi crypto price-band market.
