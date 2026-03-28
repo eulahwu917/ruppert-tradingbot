@@ -21,9 +21,9 @@ sys.stderr.reconfigure(encoding='utf-8')
 LOGS = Path(__file__).parent / 'logs'
 LOGS.mkdir(exist_ok=True)
 LOGS_DIR = LOGS  # alias used by settlement checker
-ALERTS_FILE = LOGS / 'pending_alerts.json'
 
 import config
+from scripts.event_logger import log_event
 DRY_RUN = getattr(config, 'DRY_RUN', True)
 
 from kalshi_client import KalshiClient
@@ -31,29 +31,6 @@ from logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock
 
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-
-def _update_pnl_cache(pnl_delta: float):
-    """Add pnl_delta to closed_pnl in pnl_cache.json. Uses exit lock for safe concurrent access."""
-    cache_path = LOGS_DIR / 'pnl_cache.json'
-    acquired = acquire_exit_lock()
-    try:
-        data = json.loads(cache_path.read_text(encoding='utf-8')) if cache_path.exists() else {}
-        current = float(data.get('closed_pnl', 0.0))
-        data['closed_pnl'] = round(current + pnl_delta, 2)
-        # Atomic write: write to temp file then replace
-        tmp_path = cache_path.with_suffix('.tmp')
-        try:
-            tmp_path.write_text(json.dumps(data), encoding='utf-8')
-            tmp_path.replace(cache_path)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
-    except Exception as e:
-        print(f"  [pnl_cache] Update failed (non-fatal): {e}")
-    finally:
-        if acquired:
-            release_exit_lock()
 
 
 def check_settlements(client, logs_dir: Path):
@@ -238,7 +215,15 @@ def check_settlements(client, logs_dir: Path):
             print(f"  [Settlement Checker] JSONL write error for {ticker}: {e}")
             continue
 
-        _update_pnl_cache(round(pnl, 2))
+        log_event('SETTLEMENT', {
+            'ticker': ticker,
+            'side': side,
+            'result': result,
+            'pnl': round(pnl, 2),
+            'entry_price': entry_price,
+            'exit_price': exit_price,
+            'contracts': contracts,
+        })
         print(f"  [Settlement] {ticker} {side.upper()} → {result.upper()} | P&L=${pnl:+.2f}")
         settled_count += 1
 
@@ -249,17 +234,13 @@ def check_settlements(client, logs_dir: Path):
 
 
 def push_alert(level, message, ticker=None, pnl=None):
-    """Write alert for heartbeat to pick up and forward."""
-    alerts = []
-    if ALERTS_FILE.exists():
-        try: alerts = json.loads(ALERTS_FILE.read_text(encoding='utf-8'))
-        except: pass
-    alerts.append({
-        'level': level, 'message': message,
-        'ticker': ticker, 'pnl': pnl,
-        'timestamp': ts(),
+    """Log alert candidate event. Data Scientist decides if it's alertworthy."""
+    log_event('ALERT_CANDIDATE', {
+        'level': level,
+        'message': message,
+        'ticker': ticker,
+        'pnl': pnl,
     })
-    ALERTS_FILE.write_text(json.dumps(alerts, indent=2), encoding='utf-8')
 
 
 def load_open_positions():
@@ -539,7 +520,14 @@ def run_monitor():
                         print(f"    EXIT ERROR: {e}")
                         continue
 
-                _update_pnl_cache(exit_pnl)
+                log_event('EXIT_TRIGGERED', {
+                    'ticker': ticker,
+                    'side': side,
+                    'rule': reason,
+                    'pnl': exit_pnl,
+                    'price': cur_price,
+                    'contracts': pos_contracts,
+                })
                 push_alert('exit', f'POST-MONITOR EXIT: {ticker} {side.upper()} — {reason}', ticker=ticker, pnl=pnl)
                 exits_executed += 1
             finally:

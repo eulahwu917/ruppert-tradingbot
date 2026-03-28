@@ -20,10 +20,10 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 LOGS = Path(__file__).parent / 'logs'
 LOGS.mkdir(exist_ok=True)
-ALERTS_FILE = LOGS / 'pending_alerts.json'
 ALERT_LOG   = LOGS / 'cycle_log.jsonl'
 
 import config
+from scripts.event_logger import log_event
 from kalshi_client import KalshiClient
 from logger import log_trade, log_activity, get_daily_exposure, get_computed_capital, send_telegram, rotate_logs, normalize_entry_price, acquire_exit_lock, release_exit_lock
 from bot.strategy import check_daily_cap, check_open_exposure, should_enter, check_loss_circuit_breaker
@@ -50,17 +50,13 @@ def ts():
 
 
 def push_alert(level, message, ticker=None, pnl=None):
-    """Write alert for heartbeat to pick up and forward to David."""
-    alerts = []
-    if ALERTS_FILE.exists():
-        try: alerts = json.loads(ALERTS_FILE.read_text(encoding='utf-8'))
-        except: pass
-    alerts.append({
-        'level': level, 'message': message,
-        'ticker': ticker, 'pnl': pnl,
-        'timestamp': ts(),
+    """Log alert candidate event. Data Scientist decides if it's alertworthy."""
+    log_event('ALERT_CANDIDATE', {
+        'level': level,
+        'message': message,
+        'ticker': ticker,
+        'pnl': pnl,
     })
-    ALERTS_FILE.write_text(json.dumps(alerts, indent=2), encoding='utf-8')
 
 
 def log_cycle(mode, event, data=None):
@@ -72,7 +68,9 @@ def log_cycle(mode, event, data=None):
 
 
 def save_state(logs_dir, traded_tickers, mode):
-    """Write traded_tickers + metadata to logs/state.json for cross-cycle persistence."""
+    """Write traded_tickers + metadata to logs/state.json for cross-cycle persistence.
+    Also logs a STATE_UPDATE event so Data Scientist can synthesize state.
+    """
     try:
         _state_path = logs_dir / 'state.json'
         _state_data = {
@@ -81,6 +79,10 @@ def save_state(logs_dir, traded_tickers, mode):
             'last_cycle_mode': mode,
         }
         _state_path.write_text(json.dumps(_state_data, indent=2), encoding='utf-8')
+        log_event('STATE_UPDATE', {
+            'traded_tickers': sorted(traded_tickers),
+            'mode': mode,
+        })
     except Exception as _e:
         print(f"  [State] Could not write state.json: {_e}")
 
@@ -167,6 +169,10 @@ def check_circuit_breaker(logs_dir, capital):
         _cb = check_loss_circuit_breaker(str(logs_dir), capital)
         if _cb['tripped']:
             print(f"  [CIRCUIT BREAKER] {_cb['reason']}")
+            log_event('CIRCUIT_BREAKER', {
+                'reason': _cb['reason'],
+                'loss_today': _cb.get('loss_today', 0),
+            })
             push_alert('warning', _cb['reason'])
             return _cb
         elif _cb['loss_today'] > 0:
@@ -223,6 +229,11 @@ def run_orphan_reconciliation(client, logs_dir):
                 _msg = (f"Orphan position detected: {_ticker} {_side} {_contracts} contracts"
                         " — not in trade log. Manual review required.")
                 print(f"  [WARNING] {_msg}")
+                log_event('ANOMALY_DETECTED', {
+                    'check': 'orphan_position',
+                    'ticker': _ticker,
+                    'detail': _msg,
+                })
                 push_alert('warning', _msg, ticker=_ticker)
 
         print(f"  Reconciliation complete — {len(_kalshi_positions)} Kalshi position(s),"
@@ -531,6 +542,11 @@ def run_weather_only_mode(state):
             f'{_weather_count} trade(s) placed\n\n'
             f'\U0001f4b0 Capital: {_cap_line}'
         )
+        log_event('SCAN_COMPLETE', {
+            'mode': 'weather_only',
+            'weather_trades': _weather_count,
+            'summary': _scan_msg,
+        })
         push_alert('warning', _scan_msg)
         send_telegram(_scan_msg)
         log_activity('[SCAN NOTIFY] weather_only summary sent via Telegram')
@@ -581,6 +597,11 @@ def run_crypto_only_mode(state):
             f'{_crypto_count} trade(s) placed\n\n'
             f'\U0001f4b0 Capital: {_cap_line}'
         )
+        log_event('SCAN_COMPLETE', {
+            'mode': 'crypto_only',
+            'crypto_trades': _crypto_count,
+            'summary': _scan_msg,
+        })
         push_alert('warning', _scan_msg)
         send_telegram(_scan_msg)
         log_activity('[SCAN NOTIFY] crypto_only summary sent via Telegram')
@@ -893,6 +914,15 @@ def run_full_mode(client, state):
             f"\U0001f4b0 Capital: {_cap_line}"
         )
 
+        log_event('SCAN_COMPLETE', {
+            'mode': 'full',
+            'weather_trades': summary['weather_trades'],
+            'crypto_trades': summary['crypto_trades'],
+            'long_horizon_trades': summary.get('long_horizon_trades', 0),
+            'fed_trades': summary['fed_trades'],
+            'smart_money': summary['smart_money'],
+            'summary': _scan_msg,
+        })
         push_alert('warning', _scan_msg)
         send_telegram(_scan_msg)
         log_activity('[SCAN NOTIFY] Cycle summary sent directly via Telegram')

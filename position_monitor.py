@@ -39,9 +39,9 @@ sys.stderr.reconfigure(encoding='utf-8')
 LOGS = Path(__file__).parent / 'logs'
 LOGS.mkdir(exist_ok=True)
 LOGS_DIR = LOGS
-ALERTS_FILE = LOGS / 'pending_alerts.json'
 
 import config
+from scripts.event_logger import log_event
 DRY_RUN = getattr(config, 'DRY_RUN', True)
 
 from kalshi_client import KalshiClient
@@ -67,42 +67,14 @@ def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
-def _update_pnl_cache(pnl_delta: float):
-    """Add pnl_delta to closed_pnl in pnl_cache.json."""
-    cache_path = LOGS_DIR / 'pnl_cache.json'
-    acquired = acquire_exit_lock()
-    try:
-        data = json.loads(cache_path.read_text(encoding='utf-8')) if cache_path.exists() else {}
-        current = float(data.get('closed_pnl', 0.0))
-        data['closed_pnl'] = round(current + pnl_delta, 2)
-        tmp_path = cache_path.with_suffix('.tmp')
-        try:
-            tmp_path.write_text(json.dumps(data), encoding='utf-8')
-            tmp_path.replace(cache_path)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
-    except Exception as e:
-        print(f"  [pnl_cache] Update failed (non-fatal): {e}")
-    finally:
-        if acquired:
-            release_exit_lock()
-
-
 def push_alert(level, message, ticker=None, pnl=None):
-    """Write alert for heartbeat to pick up and forward."""
-    alerts = []
-    if ALERTS_FILE.exists():
-        try:
-            alerts = json.loads(ALERTS_FILE.read_text(encoding='utf-8'))
-        except:
-            pass
-    alerts.append({
-        'level': level, 'message': message,
-        'ticker': ticker, 'pnl': pnl,
-        'timestamp': ts(),
+    """Log alert candidate event. Data Scientist decides if it's alertworthy."""
+    log_event('ALERT_CANDIDATE', {
+        'level': level,
+        'message': message,
+        'ticker': ticker,
+        'pnl': pnl,
     })
-    ALERTS_FILE.write_text(json.dumps(alerts, indent=2), encoding='utf-8')
 
 
 # ─────────────────────────────── Position Loading ─────────────────────────────
@@ -233,7 +205,15 @@ def _settle_single_ticker(ticker: str, result: str, pos: Optional[dict] = None):
         print(f"  [Settlement] JSONL write error for {ticker}: {e}")
         return
     
-    _update_pnl_cache(round(pnl, 2))
+    log_event('SETTLEMENT', {
+        'ticker': ticker,
+        'side': side,
+        'result': result,
+        'pnl': round(pnl, 2),
+        'entry_price': entry_price,
+        'exit_price': exit_price,
+        'contracts': contracts,
+    })
     print(f"  [Settlement] {ticker} {side.upper()} → {result.upper()} | P&L=${pnl:+.2f}")
     push_alert('settle', f'SETTLED: {ticker} {side.upper()} → {result.upper()} | P&L=${pnl:+.2f}', ticker=ticker, pnl=pnl)
 
@@ -415,6 +395,14 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     
     log_trade(opp, size, contracts, order_result)
     log_activity(f'[WS-CRYPTO] Entered {ticker} {side.upper()} @ {bet_price}c | edge={edge:+.1%}')
+    log_event('TRADE_EXECUTED', {
+        'ticker': ticker,
+        'side': side,
+        'size': size,
+        'contracts': contracts,
+        'price': bet_price,
+        'dry_run': DRY_RUN,
+    })
     push_alert('trade', f'WS Crypto Entry: {ticker} {side.upper()} @ {bet_price}c', ticker=ticker)
 
 

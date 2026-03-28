@@ -468,27 +468,41 @@ def get_trades():
 
 @app.post("/api/highconviction/approve")
 async def approve_highconviction(req: Request):
-    """Mark a best bet as approved — logs it for the next bot execution cycle."""
-    import json as _json
-    from datetime import datetime as _dt
+    """Mark a best bet as approved — logs event for Data Scientist to synthesize.
+    Also writes to highconviction_approved.jsonl (dual-write bridge until Phase 2 synthesizer).
+    """
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
+    from scripts.event_logger import log_event as _log_event
     body = await req.json()
     ticker = body.get('ticker', '')
-    log_path = LOGS_DIR / 'highconviction_approved.jsonl'
-    with open(log_path, 'a', encoding='utf-8') as f:
-        f.write(_json.dumps({'ticker': ticker, 'approved_at': _dt.utcnow().isoformat(), 'status': 'pending'}) + '\n')
-    return {'status': 'approved', 'ticker': ticker}
+    _log_event('HIGHCONVICTION_ACTION', {'ticker': ticker, 'action': 'approve'}, source='dashboard')
+    # Dual-write: keep dashboard filter working until Phase 2 synthesizer takes over
+    approve_path = LOGS_DIR / 'highconviction_approved.jsonl'
+    approve_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(approve_path, 'a', encoding='utf-8') as _f:
+        _f.write(json.dumps({'ticker': ticker, 'action': 'approve',
+                              'ts': datetime.utcnow().isoformat()}) + '\n')
+    return {'status': 'pending', 'ticker': ticker}
 
 @app.post("/api/highconviction/pass")
 async def pass_highconviction(req: Request):
-    """Dismiss a best bet."""
-    import json as _json
-    from datetime import datetime as _dt
+    """Dismiss a best bet — logs event for Data Scientist to synthesize.
+    Also writes to highconviction_passed.jsonl (dual-write bridge until Phase 2 synthesizer).
+    """
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
+    from scripts.event_logger import log_event as _log_event
     body = await req.json()
     ticker = body.get('ticker', '')
-    log_path = LOGS_DIR / 'highconviction_passed.jsonl'
-    with open(log_path, 'a', encoding='utf-8') as f:
-        f.write(_json.dumps({'ticker': ticker, 'passed_at': _dt.utcnow().isoformat()}) + '\n')
-    return {'status': 'passed', 'ticker': ticker}
+    _log_event('HIGHCONVICTION_ACTION', {'ticker': ticker, 'action': 'pass'}, source='dashboard')
+    # Dual-write: keep dashboard filter working until Phase 2 synthesizer takes over
+    pass_path = LOGS_DIR / 'highconviction_passed.jsonl'
+    pass_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(pass_path, 'a', encoding='utf-8') as _f:
+        _f.write(json.dumps({'ticker': ticker, 'action': 'pass',
+                              'ts': datetime.utcnow().isoformat()}) + '\n')
+    return {'status': 'pending', 'ticker': ticker}
 
 @app.get("/api/trades/today")
 def get_today_trades():
