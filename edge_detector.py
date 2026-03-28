@@ -232,6 +232,14 @@ def analyze_market(market: dict) -> dict | None:
     if not yes_ask or yes_ask <= 0:
         return None
 
+    # ── Ghost/penny market filter ─────────────────────────────────────────────
+    if yes_ask < config.MIN_YES_ASK:
+        logger.debug(
+            f"[Edge] {ticker}: skipping — yes_ask={yes_ask}c below "
+            f"MIN_YES_ASK={config.MIN_YES_ASK}c"
+        )
+        return None
+
     series  = get_series_from_ticker(ticker)
     market_prob = yes_ask / 100
 
@@ -322,6 +330,18 @@ def analyze_market(market: dict) -> dict | None:
         logger.info(
             f"[Edge] {ticker}: skipping — confidence {confidence:.2f} < "
             f"MIN_CONFIDENCE['weather'] {min_conf:.3f}"
+        )
+        return None
+
+    # ── Model/market divergence gate ─────────────────────────────────────────
+    # If |model_prob - market_prob| > MAX_MODEL_MARKET_DIVERGENCE, the market
+    # is telling us something our model doesn't know (ghost market, unvalidated city,
+    # warm bias error). Skip rather than fight the tape.
+    _divergence_gap = abs(model_prob - market_prob)
+    if _divergence_gap > config.MAX_MODEL_MARKET_DIVERGENCE:
+        logger.debug(
+            f"[Edge] {ticker}: skipping — model/market divergence "
+            f"{_divergence_gap:.0%} exceeds threshold"
         )
         return None
 

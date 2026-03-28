@@ -100,6 +100,13 @@ MIN_CONFIDENCE = {
     'geo':     0.50,
 }
 
+# Minimum yes_ask price to enter (skip penny markets with no orderbook)
+MIN_YES_ASK = 5  # cents — skip markets priced at 1-4c
+
+# Maximum model vs market divergence for unvalidated cities
+# If |model_prob - market_prob| > this threshold, skip (market is telling us something)
+MAX_MODEL_MARKET_DIVERGENCE = 0.70  # 70% gap = market likely knows better
+
 # Optimizer thresholds
 OPTIMIZER_MIN_TRADES         = 30    # minimum trades per module before optimizer runs
 OPTIMIZER_LOW_WIN_RATE       = 0.60  # flag if win rate below this
