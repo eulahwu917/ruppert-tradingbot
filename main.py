@@ -298,6 +298,23 @@ def run_weather_scan(dry_run=True):
         log_activity(f"[Weather] Filtered to {len(markets)} markets ({_all_before - len(markets)} removed, <{_min_hours}h to close)")
 
         opportunities = find_opportunities(markets)
+
+        # ── Dedup: keep only highest-edge opp per (city, settlement_date) pair ──
+        opportunities = sorted(opportunities, key=lambda o: o.get('edge', 0), reverse=True)
+        _seen_city_date = {}
+        _deduped_opps = []
+        for opp in opportunities:
+            _city = opp.get('city') or opp.get('ticker', '').split('-')[0]
+            _date = opp.get('target_date')
+            _key = (_city, _date)
+            if _key in _seen_city_date:
+                _winner_ticker = _seen_city_date[_key]
+                log_activity(f"[Weather] DEDUP skip {opp.get('ticker')} — city={_city} date={_date} already covered by {_winner_ticker}")
+            else:
+                _seen_city_date[_key] = opp.get('ticker')
+                _deduped_opps.append(opp)
+        opportunities = _deduped_opps
+
         log_activity(f"[Weather] Found {len(opportunities)} opportunities above {config.MIN_EDGE_THRESHOLD:.0%} threshold")
 
         for opp in opportunities:
@@ -549,10 +566,10 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                         pass
 
                 _spread = ya - na
-                _spread_score = max(0.0, 1.0 - (_spread / 20.0))
+                _spread_score = min(1.0, max(0.0, 1.0 - (_spread / 20.0)))
                 _edge_score   = min(1.0, best_edge / 0.30)
                 _time_score   = min(1.0, _hours_left / 48.0)
-                _crypto_confidence = round((_edge_score * 0.5 + _spread_score * 0.3 + _time_score * 0.2), 3)
+                _crypto_confidence = round(min(1.0, max(0.0, _edge_score * 0.5 + _spread_score * 0.3 + _time_score * 0.2)), 3)
 
                 new_crypto.append({
                     'ticker': ticker, 'title': m.get('title', ticker),
