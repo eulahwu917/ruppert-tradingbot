@@ -1,6 +1,6 @@
 # Ruppert Trading Bot — Development Pipeline
 
-**Version:** 2.0  
+**Version:** 3.0  
 **Date:** 2026-03-28  
 **Author:** Strategist (Opus)
 
@@ -8,27 +8,27 @@
 
 ## Overview
 
-This document defines how code changes flow through the Ruppert trading bot organization. No agent edits trading code directly — all changes go through the Dev/QA pipeline.
+This document defines how code changes flow through the Ruppert trading bot organization, as well as operational pipelines, data policies, and cadence rules. No agent edits trading code directly — all changes go through the Dev/QA pipeline.
 
 ---
 
 ## Agent Roles in the Pipeline
 
 ### CEO (Sonnet)
-- **Does:** Reviews proposals, presents to David for approval
-- **Does NOT:** Edit code, run tests, commit changes
+- **Does:** Reviews proposals, presents to David for approval, handles escalations, monitors circuit breakers
+- **Does NOT:** Edit code, run tests, commit changes, approve individual trades
 
 ### Strategist (Opus)
-- **Does:** Writes architecture specs, proposes parameter changes, reviews optimizer proposals
+- **Does:** Writes architecture specs, proposes parameter changes, reviews optimizer proposals, owns optimizer.py
 - **Does NOT:** Implement code changes
 
 ### Data Scientist (Sonnet)
-- **Does:** Identifies data bugs, proposes fixes
+- **Does:** Identifies data bugs, proposes fixes, validates signal potential, owns Researcher agent
 - **Does NOT:** Fix bugs directly
 
 ### Trader (Sonnet)
-- **Does:** Reports execution issues, proposes improvements
-- **Does NOT:** Modify execution code
+- **Does:** Executes trades autonomously on signals that pass thresholds, reports execution issues, proposes improvements
+- **Does NOT:** Modify execution code, wait for per-trade CEO approval
 
 ### Dev (Sonnet)
 - **Does:** Implements specs, writes code, creates PRs
@@ -40,7 +40,81 @@ This document defines how code changes flow through the Ruppert trading bot orga
 
 ---
 
-## Pipeline Flow
+## Operational Pipelines
+
+---
+
+### 1. Trade Execution Pipeline
+
+```
+Data Analyst fetches
+    → Data Scientist synthesizes signal
+    → Trader executes autonomously
+    → Data Scientist logs
+    → CEO briefs David
+```
+
+**Key rule:** CEO is NOT in the per-trade approval loop. Trader executes autonomously on every signal that passes edge + confidence thresholds. CEO designed the thresholds — Trader operates within them.
+
+#### CEO Involvement Triggers (exceptions only)
+
+CEO steps in only when:
+
+- Position size would exceed hard limit
+- Drawdown hits circuit breaker
+- Trade count anomaly spike
+- First trade of a new instrument or strategy
+
+---
+
+### 2. Optimization Pipeline
+
+```
+Strategist reviews performance data
+    (monthly, or after 30+ trades, or after 3+ losses in 7 days)
+    → Proposes parameter changes
+    → Data Scientist reviews (data integrity angle)
+    → Trader reviews (execution feasibility angle)
+    → CEO → David approves
+    → Dev builds → QA validates → commit
+```
+
+- **Owner:** Strategist owns optimizer.py (auto-researcher)
+- See also: [Auto-researcher / Optimizer Cadence](#9-auto-researcher--optimizer-cadence)
+
+---
+
+### 3. Market Discovery Pipeline
+
+```
+Researcher scans weekly (light, Sunday) + monthly (deep, first Sunday)
+    → Data Scientist validates signal potential
+    → CEO decides whether to pursue
+    → If yes → Dev builds new module → QA validates
+```
+
+- **Owner:** Data Scientist owns Researcher agent
+- See also: [Researcher Cadence](#8-researcher-cadence)
+
+---
+
+### 4. Live Flip Pipeline
+
+```
+David says go
+    → CEO runs preflight checklist
+    → CEO asks David to confirm (1st time)
+    → CEO asks David to confirm (2nd time)
+    → CEO asks David to confirm (3rd time)
+    → David confirms all 3
+    → mode.json enabled
+```
+
+**Rule:** CEO must ask David to confirm **three separate times** before enabling live trading. No exceptions. This is not a formality — each confirmation is a distinct, explicit check.
+
+---
+
+## Code Change Pipeline
 
 ```
 [Issue/Spec Created]
@@ -330,6 +404,74 @@ No full spec needed for config-only changes.
    - P0 gets expedited review, not skipped review
    - Document the urgency, still get approval
 
+6. **CEO approving individual trades**
+   - Trader executes autonomously within thresholds
+   - CEO designed the rules — Trader follows them
+
+---
+
+## Policies
+
+---
+
+### 5. Escalation Rule
+
+CEO handles autonomously unless genuinely uncertain.
+
+When uncertain → ask David **one clear question**.
+
+Do not ask multiple questions at once. Do not surface ambiguity as options. Resolve what you can, ask only what you cannot.
+
+---
+
+### 6. Data Retention Policy
+
+| Data Type | Retention |
+|---|---|
+| Trade logs | Forever |
+| Research reports | Forever |
+| Raw event logs | 1 year |
+| Audit logs | 1 year |
+| Activity logs | 1 year |
+| Daily briefs | 1 year |
+| Truth files | No rotation (live state) |
+| Price cache | No rotation (live state) |
+
+**Cleanup:** Weekly Sunday cron job auto-deletes files past their retention window. Logs all deletions to `logs/cleanup.log`. Cleanup log itself has a 30-day retention window.
+
+---
+
+### 7. Secrets Rotation
+
+- **Frequency:** Every 3 months
+- **Next due:** 2026-06-28
+- **Rotate:** GitHub token, Kalshi API key, any other API keys in `workspace/secrets/`
+- **Alert:** CEO alerts David 1 week before due date
+
+---
+
+### 8. Researcher Cadence
+
+| Trigger | Frequency | Notes |
+|---|---|---|
+| Weekly light scan | Every Sunday | Automated |
+| Monthly deep scan | First Sunday of month | Automated |
+| On-demand | As needed | When Strategist requests |
+
+**Owner:** Data Scientist owns the Researcher agent.
+
+---
+
+### 9. Auto-researcher / Optimizer Cadence
+
+| Trigger | Condition |
+|---|---|
+| Monthly (default) | End of month |
+| Early trigger | 30+ new trades since last run |
+| Early trigger | 3+ losses in any 7-day window |
+
+**Owner:** Strategist owns optimizer.py.
+
 ---
 
 ## Task Scheduler Integration
@@ -474,6 +616,7 @@ Delete new files, remove from Task Scheduler.
 |---------|------|---------|
 | 1.0 | 2026-03-26 | Initial pipeline definition |
 | 2.0 | 2026-03-28 | Updated for new agent structure, added spec format |
+| 3.0 | 2026-03-28 | Added operational pipelines (trade execution, optimization, market discovery, live flip), escalation rule, data retention policy, secrets rotation, researcher cadence, optimizer cadence |
 
 ---
 
