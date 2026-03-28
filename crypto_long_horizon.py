@@ -226,8 +226,12 @@ def scan_long_horizon_markets(client) -> list[dict]:
                 # REST fallback
                 try:
                     raw = client.get_market(ticker)
-                    yes_ask = round(float(raw.get('yes_ask_dollars', 0.5)) * 100)
-                    yes_bid = round(float(raw.get('yes_bid_dollars', 0.4)) * 100)
+                    yes_ask = raw.get('yes_ask')   # cents integer
+                    yes_bid = raw.get('yes_bid')   # cents integer
+                    if yes_ask is None:
+                        yes_ask = round(0.5 * 100)
+                    if yes_bid is None:
+                        yes_bid = round(0.4 * 100)
                 except Exception:
                     log_decision({
                         'ticker': ticker, 'asset': asset, 'strike': strike,
