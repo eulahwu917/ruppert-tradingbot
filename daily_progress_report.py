@@ -24,7 +24,7 @@ import sys
 import os
 from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
-from capital import get_capital
+from agents.data_scientist.capital import get_capital
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -282,7 +282,7 @@ def main():
 
     # Send via Telegram
     sys.path.insert(0, str(BASE_DIR))
-    from logger import send_telegram
+    from agents.data_scientist.logger import send_telegram
 
     ok = send_telegram(report)
     if ok:

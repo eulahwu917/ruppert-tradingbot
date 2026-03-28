@@ -12,9 +12,9 @@ import json
 import time
 from datetime import date, datetime
 from pathlib import Path
-from capital import get_capital, get_buying_power
-from logger import classify_module
-import market_cache
+from agents.data_scientist.capital import get_capital, get_buying_power
+from agents.data_scientist.logger import classify_module
+import agents.data_analyst.market_cache as market_cache
 
 app = FastAPI(title="Ruppert Trading Dashboard")
 LOGS_DIR = Path(__file__).parent.parent / "logs"
@@ -173,7 +173,7 @@ def get_account():
 
     ── LIVE MODE (switch when David approves going live) ────────────────────
     Replace the STARTING_CAPITAL line below with a real Kalshi API call:
-        from kalshi_client import KalshiClient
+        from agents.data_analyst.kalshi_client import KalshiClient
         balance_dollars = KalshiClient().get_balance()  # already returns dollars
     Then update frontend: remove open_pnl addition from Account Value formula —
     Kalshi balance already reflects open positions in live mode.
@@ -414,7 +414,7 @@ def get_active_positions():
         # LIVE mode: get real positions from Kalshi API
         try:
             sys.path.insert(0, str(Path(__file__).parent.parent))
-            from kalshi_client import KalshiClient
+            from agents.data_analyst.kalshi_client import KalshiClient
             kalshi_positions = KalshiClient().get_positions()
             positions = []
             total_cost = 0.0

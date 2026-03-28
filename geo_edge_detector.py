@@ -16,7 +16,7 @@ import json
 import sys
 import os
 from datetime import date
-from logger import log_activity
+from agents.data_scientist.logger import log_activity
 
 # Log file for LLM screening results
 GEO_EDGE_LOG = os.path.join(os.path.dirname(__file__), 'logs', 'geo_edge_detector.jsonl')

@@ -13,7 +13,7 @@ import json
 import os
 import time
 from datetime import datetime, date, timezone
-from logger import log_activity
+from agents.data_scientist.logger import log_activity
 from kalshi_market_search import find_series_by_keywords, get_markets_by_tickers
 
 # ── Search terms for GDELT + Kalshi discovery ────────────────────────────────

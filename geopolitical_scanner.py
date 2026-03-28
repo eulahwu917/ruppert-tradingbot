@@ -11,8 +11,8 @@ import os
 import re
 import time
 from datetime import datetime, date, timezone
-from logger import log_activity
-from kalshi_client import KalshiClient
+from agents.data_scientist.logger import log_activity
+from agents.data_analyst.kalshi_client import KalshiClient
 from kalshi_market_search import search_geo_markets
 from geo_client import get_gdelt_events, _days_to_expiry, _GdeltRequestFailed
 from geo_edge_detector import stage1_classify, stage2_estimate

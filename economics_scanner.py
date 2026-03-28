@@ -39,7 +39,7 @@ CONFIDENCE_FILTER = ['medium', 'high']  # Only include these confidence levels
 
 def fetch_open_markets(series_ticker: str, limit: int = 50) -> list:
     """Fetch open markets for a given series ticker with real orderbook prices."""
-    from kalshi_client import KalshiClient
+    from agents.data_analyst.kalshi_client import KalshiClient
     try:
         client = KalshiClient()
         return client.get_markets(series_ticker, status='open', limit=limit)

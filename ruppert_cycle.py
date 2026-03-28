@@ -24,10 +24,10 @@ ALERT_LOG   = LOGS / 'cycle_log.jsonl'
 
 import config
 from scripts.event_logger import log_event
-from kalshi_client import KalshiClient
-from logger import log_trade, log_activity, get_daily_exposure, get_computed_capital, send_telegram, rotate_logs, normalize_entry_price, acquire_exit_lock, release_exit_lock
-from bot.strategy import check_daily_cap, check_open_exposure, should_enter, check_loss_circuit_breaker
-from capital import get_capital, get_buying_power
+from agents.data_analyst.kalshi_client import KalshiClient
+from agents.data_scientist.logger import log_trade, log_activity, get_daily_exposure, get_computed_capital, send_telegram, rotate_logs, normalize_entry_price, acquire_exit_lock, release_exit_lock
+from agents.strategist.strategy import check_daily_cap, check_open_exposure, should_enter, check_loss_circuit_breaker
+from agents.data_scientist.capital import get_capital, get_buying_power
 
 
 @dataclass
@@ -201,7 +201,7 @@ def run_orphan_reconciliation(client, logs_dir):
     """
     print("\n[0] Orphan position reconciliation...")
     try:
-        from post_trade_monitor import load_open_positions as _load_log_positions
+        from agents.trader.post_trade_monitor import load_open_positions as _load_log_positions
         _kalshi_positions = client.get_positions()
         _logged_positions = _load_log_positions()
         _logged_keys = {(p.get('ticker', ''), p.get('side', '')) for p in _logged_positions}
@@ -273,8 +273,8 @@ def run_position_check(client, state):
     print("\n[1] Position check...")
     actions_taken = []
     try:
-        from openmeteo_client import get_full_weather_signal
-        from edge_detector import parse_date_from_ticker, parse_threshold_from_ticker
+        from agents.data_analyst.openmeteo_client import get_full_weather_signal
+        from agents.strategist.edge_detector import parse_date_from_ticker, parse_threshold_from_ticker
 
         trade_log = state.logs_dir / f"trades_{date.today().isoformat()}.jsonl"
         open_positions = []
@@ -398,7 +398,7 @@ def run_econ_prescan_mode(client, state):
     try:
         from economics_client import get_upcoming_releases as _get_upcoming
         from economics_scanner import find_econ_opportunities as _find_econ
-        from logger import get_computed_capital as _get_cap_econ
+        from agents.data_scientist.logger import get_computed_capital as _get_cap_econ
 
         _releases_today = [r for r in _get_upcoming() if r.get('days_away') == 0]
         if not _releases_today:
@@ -509,7 +509,7 @@ def run_weather_only_mode(state):
     print("\n[weather_only] Running weather scan...")
     _weather_count = 0
     try:
-        from main import run_weather_scan as _run_weather
+        from agents.trader.main import run_weather_scan as _run_weather
         _weather_results = _run_weather(dry_run=state.dry_run)
         _weather_count = len(_weather_results) if _weather_results else 0
         if _weather_count:
@@ -564,7 +564,7 @@ def run_crypto_only_mode(state):
     print("\n[crypto_only] Running crypto scan...")
     _crypto_count = 0
     try:
-        from main import run_crypto_scan as _run_crypto
+        from agents.trader.main import run_crypto_scan as _run_crypto
         _crypto_results = _run_crypto(dry_run=state.dry_run, direction=None, traded_tickers=state.traded_tickers, open_position_value=state.open_position_value)
         _crypto_count = len(_crypto_results) if _crypto_results else 0
         if _crypto_count:
@@ -727,7 +727,7 @@ def run_full_mode(client, state):
     # STEP 1b: WALLET LIST REFRESH
     print("\n[1b] Refreshing smart money wallet list from Polymarket leaderboard...")
     try:
-        from bot.wallet_updater import update_wallet_list as _update_wallets
+        from agents.data_analyst.wallet_updater import update_wallet_list as _update_wallets
         _wallets_updated = _update_wallets()
         if not _wallets_updated:
             print("  Wallet refresh skipped \u2014 API unavailable, using existing list")
@@ -761,7 +761,7 @@ def run_full_mode(client, state):
     print("\n[3] Scanning for new weather opportunities...")
     new_weather = []
     try:
-        from main import run_weather_scan
+        from agents.trader.main import run_weather_scan
         new_weather = run_weather_scan(dry_run=state.dry_run)
         if new_weather:
             print(f"  {len(new_weather)} new weather trade(s) executed")
@@ -779,7 +779,7 @@ def run_full_mode(client, state):
     print("\n[4] Scanning for new crypto opportunities...")
     new_crypto = []
     try:
-        from main import run_crypto_scan
+        from agents.trader.main import run_crypto_scan
         new_crypto = run_crypto_scan(dry_run=state.dry_run, direction=direction, traded_tickers=state.traded_tickers, open_position_value=state.open_position_value)
         if new_crypto:
             print(f"  {len(new_crypto)} crypto trade(s) executed")
@@ -798,7 +798,7 @@ def run_full_mode(client, state):
     print("\n[4a] Scanning for long-horizon crypto opportunities...")
     new_long_horizon = []
     try:
-        from crypto_long_horizon import run_long_horizon_scan
+        from agents.trader.crypto_long_horizon import run_long_horizon_scan
         new_long_horizon = run_long_horizon_scan(
             client, dry_run=state.dry_run,
             traded_tickers=state.traded_tickers,
@@ -820,7 +820,7 @@ def run_full_mode(client, state):
     print("\n[4b] Scanning for Fed rate decision opportunities...")
     new_fed = []
     try:
-        from main import run_fed_scan as _run_fed_scan_cycle
+        from agents.trader.main import run_fed_scan as _run_fed_scan_cycle
         new_fed = _run_fed_scan_cycle(dry_run=state.dry_run, traded_tickers=state.traded_tickers, open_position_value=state.open_position_value)
         if new_fed:
             print(f"  {len(new_fed)} Fed trade(s) executed")
@@ -987,7 +987,7 @@ def run_cycle(mode):
 
     # Data Agent: daily historical audit (once per day, non-fatal)
     try:
-        from data_agent import run_historical_audit
+        from agents.data_scientist.data_agent import run_historical_audit
         run_historical_audit(since_date='2026-03-26')
     except Exception as _ha_err:
         log_activity(f'[DataAgent] Historical audit failed: {_ha_err}')
@@ -1018,7 +1018,7 @@ def run_cycle(mode):
     # ── Data Agent: post-scan audit (non-fatal) ─────────────────────────────
     if mode in ('full', 'crypto_only', 'weather_only', 'econ_prescan'):
         try:
-            from data_agent import run_post_scan_audit
+            from agents.data_scientist.data_agent import run_post_scan_audit
             _audit = run_post_scan_audit(mode='post_cycle')
             _iss = _audit.get('issues_found', 0)
             if _iss:

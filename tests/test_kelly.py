@@ -3,7 +3,7 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from bot.strategy import calculate_position_size
+from agents.strategist.strategy import calculate_position_size
 
 
 def test_kelly_win_prob_1_0():

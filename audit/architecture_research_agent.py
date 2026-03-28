@@ -205,7 +205,7 @@ def send_telegram_summary(analysis: str, obsidian_path: Path):
 
         msg = f"\U0001f4d0 Weekly Architecture Research\n\n{summary}\n\n_Full report in Obsidian: {obsidian_path.name}_"
 
-        from logger import send_telegram
+        from agents.data_scientist.logger import send_telegram
         send_telegram(msg)
         logger.info("Telegram summary sent")
     except Exception as e:
