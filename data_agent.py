@@ -873,6 +873,16 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
 
     _save_state(state)
 
+    # ── Data Scientist synthesis ───────────────────────────────────────────
+    # Synthesizer reads today's event log and updates truth files.
+    # Must run after every scan cycle so truth files stay current.
+    try:
+        from agents.data_scientist.synthesizer import run_synthesis
+        synth_result = run_synthesis()
+        log_activity(f'[DataAgent] Synthesis complete: {synth_result}')
+    except Exception as e:
+        log_activity(f'[DataAgent] Synthesis failed: {e}')
+
     return {
         'issues_found': len(issues),
         'auto_fixed': auto_fixed,
