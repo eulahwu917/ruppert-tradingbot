@@ -15,10 +15,18 @@ import uuid
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
+# Ensure project root is on sys.path when running standalone
+# Resolve workspace root and add to path (agents.ruppert.* + config shim)
+_AGENTS_ROOT = Path(__file__).parent.parent.parent  # workspace/agents
+_WORKSPACE_ROOT = _AGENTS_ROOT.parent               # workspace/
+if str(_WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORKSPACE_ROOT))
+
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
-LOGS = Path(__file__).parent / 'logs'
+from agents.ruppert.env_config import get_paths as _get_paths
+LOGS = _get_paths()['logs']
 LOGS.mkdir(exist_ok=True)
 LOGS_DIR = LOGS  # alias used by settlement checker
 
@@ -26,8 +34,8 @@ import config
 from scripts.event_logger import log_event
 DRY_RUN = getattr(config, 'DRY_RUN', True)
 
-from kalshi_client import KalshiClient
-from logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock, normalize_entry_price
+from agents.ruppert.data_analyst.kalshi_client import KalshiClient
+from agents.ruppert.data_scientist.logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock, normalize_entry_price
 
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -312,6 +320,8 @@ def check_weather_position(pos, market):
     # 95c rule: guaranteed profit lock
     if side == 'no' and no_ask >= 95:
         return 'auto_exit', f'95c rule: no_ask={no_ask}c P&L=${pnl:+.2f}', cur_price, contracts, pnl
+    if side == 'yes' and yes_ask >= 95:
+        return 'auto_exit', f'95c rule: yes_ask={yes_ask}c P&L=${pnl:+.2f}', cur_price, contracts, pnl
 
     # 70% gain rule
     if entry_price and entry_price < 100:
@@ -321,8 +331,8 @@ def check_weather_position(pos, market):
 
     # Ensemble prob flip check (weather-specific)
     try:
-        from openmeteo_client import get_full_weather_signal
-        from edge_detector import parse_date_from_ticker, parse_threshold_from_ticker
+        from agents.ruppert.data_analyst.openmeteo_client import get_full_weather_signal
+        from agents.ruppert.strategist.edge_detector import parse_date_from_ticker, parse_threshold_from_ticker
 
         ticker = pos.get('ticker', '')
         if 'KXHIGH' in ticker:
@@ -367,6 +377,8 @@ def check_crypto_position(pos, market):
     # 95c rule
     if side == 'no' and no_ask >= 95:
         return 'auto_exit', f'95c rule: no_ask={no_ask}c P&L=${pnl:+.2f}', cur_price, contracts, pnl
+    if side == 'yes' and yes_ask >= 95:
+        return 'auto_exit', f'95c rule: yes_ask={yes_ask}c P&L=${pnl:+.2f}', cur_price, contracts, pnl
 
     # 70% gain rule
     if entry_price and entry_price < 100:

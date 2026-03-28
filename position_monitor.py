@@ -36,7 +36,15 @@ if sys.platform == 'win32':
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
-LOGS = Path(__file__).parent / 'logs'
+# Ensure project root is on sys.path when running standalone
+# Resolve workspace root and add to path (agents.ruppert.* + config shim)
+_AGENTS_ROOT = Path(__file__).parent.parent.parent  # workspace/agents
+_WORKSPACE_ROOT = _AGENTS_ROOT.parent               # workspace/
+if str(_WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORKSPACE_ROOT))
+
+from agents.ruppert.env_config import get_paths as _get_paths
+LOGS = _get_paths()['logs']
 LOGS.mkdir(exist_ok=True)
 LOGS_DIR = LOGS
 
@@ -44,8 +52,8 @@ import config
 from scripts.event_logger import log_event
 DRY_RUN = getattr(config, 'DRY_RUN', True)
 
-from kalshi_client import KalshiClient
-from logger import (
+from agents.ruppert.data_analyst.kalshi_client import KalshiClient
+from agents.ruppert.data_scientist.logger import (
     log_trade, log_activity, acquire_exit_lock, release_exit_lock,
     normalize_entry_price, get_daily_exposure
 )
@@ -227,12 +235,12 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     Called on each ticker update for crypto markets.
     Uses band_prob model to compute edge vs live price.
     """
-    from crypto_client import (
+    from agents.ruppert.trader.crypto_client import (
         get_btc_signal, get_eth_signal, get_xrp_signal, get_doge_signal,
         _band_probability, _t_cdf, ASSET_CONFIG, compute_composite_confidence
     )
-    from bot.strategy import should_enter, calculate_position_size
-    from capital import get_capital
+    from agents.ruppert.strategist.strategy import should_enter, calculate_position_size
+    from agents.ruppert.data_scientist.capital import get_capital
     
     # Parse series from ticker (KXBTC, KXETH, etc.)
     series = ticker.split('-')[0].upper()
@@ -588,7 +596,7 @@ async def run_ws_mode(client: KalshiClient):
                 if any(ticker.upper().startswith(s) for s in CRYPTO_15M_SERIES):
                     if yes_ask and yes_bid:
                         try:
-                            from crypto_15m import evaluate_crypto_15m_entry
+                            from agents.ruppert.trader.crypto_15m import evaluate_crypto_15m_entry
                             evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time)
                         except Exception as e:
                             logger.warning('[WS] 15m crypto eval error: %s', e)
@@ -745,7 +753,7 @@ async def run_persistent_ws_mode():
                     if any(ticker.upper().startswith(s) for s in CRYPTO_15M_SERIES):
                         if yes_ask and yes_bid:
                             try:
-                                from crypto_15m import evaluate_crypto_15m_entry
+                                from agents.ruppert.trader.crypto_15m import evaluate_crypto_15m_entry
                                 evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time)
                             except Exception as e:
                                 logger.warning('[Persistent WS] 15m crypto eval error: %s', e)
@@ -808,7 +816,7 @@ def main():
         # Delegate to ws_feed.py — the new persistent WS-first architecture.
         # ws_feed.py handles: market_cache, position_tracker, crypto entry routing.
         try:
-            from ws_feed import run
+            from agents.ruppert.data_analyst.ws_feed import run
             print("  [Monitor] Delegating to ws_feed.py (WS-first architecture)")
             run()
             return

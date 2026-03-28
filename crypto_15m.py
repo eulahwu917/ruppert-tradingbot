@@ -21,6 +21,7 @@ Created: 2026-03-28
 
 import json
 import math
+import sys
 import time
 import logging
 import statistics
@@ -30,6 +31,13 @@ from collections import deque
 from datetime import datetime, timezone, date, timedelta
 import pytz
 from pathlib import Path
+
+# Ensure project root is on sys.path when running standalone
+# Resolve workspace root and add to path (agents.ruppert.* + config shim)
+_AGENTS_ROOT = Path(__file__).parent.parent.parent  # workspace/agents
+_WORKSPACE_ROOT = _AGENTS_ROOT.parent               # workspace/
+if str(_WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORKSPACE_ROOT))
 
 import config
 
@@ -55,7 +63,8 @@ W_OBI  = 0.25
 W_MACD = 0.15
 W_OI   = 0.10
 
-LOGS_DIR = Path(__file__).parent / 'logs'
+from agents.ruppert.env_config import get_paths as _get_paths
+LOGS_DIR = _get_paths()['logs']
 LOGS_DIR.mkdir(exist_ok=True)
 DECISION_LOG = LOGS_DIR / 'decisions_15m.jsonl'
 
@@ -408,7 +417,7 @@ def fetch_okx_price(symbol: str) -> float | None:
 def get_funding_z(asset: str) -> float | None:
     """Get funding rate z-score from crypto_client (reuse existing infra)."""
     try:
-        from crypto_client import _compute_funding_z_scores
+        from agents.ruppert.trader.crypto_client import _compute_funding_z_scores
         fz = _compute_funding_z_scores()
         return fz.get(asset.lower())
     except Exception:
@@ -578,7 +587,7 @@ def check_risk_filters(
 
     # R8: Session drawdown
     session_pnl = _get_session_pnl_15m()
-    from capital import get_capital
+    from agents.ruppert.data_scientist.capital import get_capital
     capital = get_capital()
     daily_alloc = capital * getattr(config, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04)
     if session_pnl < -0.05 * daily_alloc:
@@ -680,9 +689,9 @@ def evaluate_crypto_15m_entry(
         open_time:      Window open time (ISO 8601)
         book_depth_usd: Estimated book depth in USD
     """
-    from capital import get_capital
-    from logger import log_trade, log_activity, get_daily_exposure
-    from kalshi_client import KalshiClient
+    from agents.ruppert.data_scientist.capital import get_capital
+    from agents.ruppert.data_scientist.logger import log_trade, log_activity, get_daily_exposure
+    from agents.ruppert.data_analyst.kalshi_client import KalshiClient
     from position_monitor import load_traded_tickers, push_alert
 
     asset = _parse_asset_from_ticker(ticker)
@@ -878,7 +887,7 @@ def evaluate_crypto_15m_entry(
     # ── Daily cap check ──
     capital = get_capital()
     daily_cap = capital * getattr(config, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04)
-    current_exposure = get_daily_exposure('crypto_15m')
+    current_exposure = get_daily_exposure()
 
     if current_exposure >= daily_cap:
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,

@@ -11,20 +11,30 @@ DEMO only — $50 hard cap per trade, 1/6 Kelly sizing.
 import json
 import math
 import re
+import sys
 import logging
 import requests
 from datetime import datetime, timezone, date
 from pathlib import Path
 from scipy.stats import norm
 
+# Ensure project root is on sys.path when running standalone
+# Resolve workspace root and add to path (agents.ruppert.* + config shim)
+_AGENTS_ROOT = Path(__file__).parent.parent.parent  # workspace/agents
+_WORKSPACE_ROOT = _AGENTS_ROOT.parent               # workspace/
+if str(_WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORKSPACE_ROOT))
+
 import config
-import market_cache
-from capital import get_capital
-from logger import log_trade, log_activity, get_daily_exposure
+import agents.ruppert.data_analyst.market_cache as market_cache
+from agents.ruppert.data_scientist.capital import get_capital
+from agents.ruppert.data_scientist.logger import log_trade, log_activity, get_daily_exposure
+
+from agents.ruppert.env_config import get_paths as _get_paths
 
 logger = logging.getLogger(__name__)
 
-LOGS_DIR = Path(__file__).parent / 'logs'
+LOGS_DIR = _get_paths()['logs']
 DECISION_LOG = LOGS_DIR / 'decisions_long_horizon.jsonl'
 
 TARGET_SERIES = [
@@ -163,7 +173,7 @@ def scan_long_horizon_markets(client) -> list[dict]:
     regime = classify_regime(fg)
 
     # Get spot prices (reuse existing crypto_client signals)
-    from crypto_client import get_btc_signal, get_eth_signal
+    from agents.ruppert.trader.crypto_client import get_btc_signal, get_eth_signal
     btc_signal = get_btc_signal()
     eth_signal = get_eth_signal()
     spot_prices = {'BTC': btc_signal['price'], 'ETH': eth_signal['price']}
@@ -392,7 +402,7 @@ def run_long_horizon_scan(client, dry_run: bool = True, traded_tickers: set = No
 
         # Track position with long_horizon holding_type (skips 70% gain exit)
         try:
-            import position_tracker
+            from agents.ruppert.trader import position_tracker
             position_tracker.add_position(
                 ticker, contracts, side,
                 entry_price=bet_price,

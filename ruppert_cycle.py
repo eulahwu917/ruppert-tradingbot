@@ -10,7 +10,7 @@ Modes:
   crypto_only   — position check + crypto scan only (10am, 6pm)
   report        — 7am P&L summary + loss detection
 """
-import sys, json, time, math, requests
+import sys, json
 from pathlib import Path
 from datetime import date, datetime, timezone, timedelta
 from dataclasses import dataclass, field
@@ -140,8 +140,7 @@ def load_traded_tickers(logs_dir):
                     continue
                 if _action in ('buy', 'open'):
                     traded_tickers.add(_tk)
-                elif _action in ('exit', 'settle'):
-                    traded_tickers.discard(_tk)
+                # Note: exits do NOT remove from dedup — once traded, blocked for the day
             if traded_tickers:
                 print(f"  [Init] Loaded {len(traded_tickers)} open ticker(s) from today's log: {traded_tickers}")
         except Exception as _tl_err:
@@ -997,7 +996,7 @@ def run_cycle(mode):
     # Data Agent: daily historical audit (once per day, non-fatal)
     try:
         from agents.ruppert.data_scientist.data_agent import run_historical_audit
-        run_historical_audit(since_date='2026-03-26')
+        run_historical_audit(since_date=(date.today() - timedelta(days=30)).isoformat())
     except Exception as _ha_err:
         log_activity(f'[DataAgent] Historical audit failed: {_ha_err}')
 
@@ -1025,7 +1024,8 @@ def run_cycle(mode):
         raise ValueError(f'Unknown mode: {mode}')
 
     # ── Data Agent: post-scan audit (non-fatal) ─────────────────────────────
-    if mode in ('full', 'crypto_only', 'weather_only', 'econ_prescan'):
+    # Note: 'smart' mode triggers lighter synthesis (pnl_cache + positions only)
+    if mode in ('full', 'smart', 'crypto_only', 'weather_only', 'econ_prescan'):
         try:
             from agents.ruppert.data_scientist.data_agent import run_post_scan_audit
             _audit = run_post_scan_audit(mode='post_cycle')
