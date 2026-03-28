@@ -240,7 +240,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
         _band_probability, _t_cdf, ASSET_CONFIG, compute_composite_confidence
     )
     from agents.ruppert.strategist.strategy import should_enter, calculate_position_size
-    from agents.ruppert.data_scientist.capital import get_capital
+    from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
     
     # Parse series from ticker (KXBTC, KXETH, etc.)
     series = ticker.split('-')[0].upper()
@@ -360,9 +360,16 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
         'hours_to_settlement': hours_left,
     }
     
+    # Compute open_position_value for strategy gate (same pattern as main.py)
+    _total = get_capital()
+    _bp = get_buying_power()
+    opp['open_position_value'] = max(0.0, _total - _bp)
+
     # Check entry via strategy
-    can_enter, reason = should_enter(opp, capital)
-    if not can_enter:
+    deployed_today = get_daily_exposure()
+    decision = should_enter(opp, capital, deployed_today)
+    if not decision['enter']:
+        reason = decision['reason']
         logger.debug(f"[WS Crypto] {ticker}: entry blocked — {reason}")
         return
     
