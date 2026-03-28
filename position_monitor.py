@@ -533,8 +533,8 @@ async def run_ws_mode(client: KalshiClient):
     crypto_tickers = []
     try:
         for series in ['KXBTC', 'KXETH'] + CRYPTO_15M_SERIES:
-            markets = client.search_markets(series_ticker=series, status='open')
-            crypto_tickers.extend([m.get('ticker', '') for m in markets[:5 if series in CRYPTO_15M_SERIES else 25]])
+            markets = client.get_markets(series_ticker=series, status='open', limit=5 if series in CRYPTO_15M_SERIES else 25)
+            crypto_tickers.extend([m.get('ticker', '') for m in markets])
     except Exception as e:
         print(f"  [WS] Could not fetch crypto markets: {e}")
 
@@ -686,8 +686,8 @@ async def run_persistent_ws_mode():
         crypto_tickers = []
         try:
             for series in ['KXBTC', 'KXETH'] + CRYPTO_15M_SERIES:
-                markets = client.search_markets(series_ticker=series, status='open')
-                crypto_tickers.extend([m.get('ticker', '') for m in markets[:5 if series in CRYPTO_15M_SERIES else 25]])
+                markets = client.get_markets(series_ticker=series, status='open', limit=5 if series in CRYPTO_15M_SERIES else 25)
+                crypto_tickers.extend([m.get('ticker', '') for m in markets])
         except Exception as e:
             print(f"  [Persistent WS] Could not fetch crypto markets: {e}")
 
@@ -732,8 +732,8 @@ async def run_persistent_ws_mode():
                     new_tickers = []
                     try:
                         for series in ['KXBTC', 'KXETH'] + CRYPTO_15M_SERIES:
-                            markets = client.search_markets(series_ticker=series, status='open')
-                            new_tickers.extend([m.get('ticker', '') for m in markets[:5 if series in CRYPTO_15M_SERIES else 25]])
+                            markets = client.get_markets(series_ticker=series, status='open', limit=5 if series in CRYPTO_15M_SERIES else 25)
+                            new_tickers.extend([m.get('ticker', '') for m in markets])
                     except Exception:
                         pass
                     new_tickers = list(set(filter(None, new_tickers)))

@@ -30,8 +30,8 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 # Kalshi WebSocket endpoints
-WS_URL_DEMO = "wss://demo-api.kalshi.co/trade-api/ws/v2"
-WS_URL_PROD = "wss://api.kalshi.co/trade-api/ws/v2"
+WS_URL_DEMO = "wss://api.elections.kalshi.com/trade-api/ws/v2"
+WS_URL_PROD = "wss://api.elections.kalshi.com/trade-api/ws/v2"
 
 # Reconnection settings
 RECONNECT_DELAY_INITIAL = 1.0   # seconds
@@ -94,11 +94,14 @@ class KalshiWebSocket:
         key_data = Path(self.private_key_path).read_bytes()
         private_key = serialization.load_pem_private_key(key_data, password=None)
         
-        # Sign: timestamp + method + path
+        # Sign: timestamp + method + path (RSA-PSS required by Kalshi API)
         msg = f"{timestamp}{method}{path}".encode()
         signature = private_key.sign(
             msg,
-            padding.PKCS1v15(),
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.DIGEST_LENGTH
+            ),
             hashes.SHA256()
         )
         sig_b64 = base64.b64encode(signature).decode()
