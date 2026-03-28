@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -108,28 +108,6 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 .more-btn { width: calc(100% - 32px); margin: 10px 16px; padding: 8px; background: #141414; border: 1px solid #1e1e1e; color: #333; border-radius: 6px; font-size: 11px; cursor: pointer; }
 .more-btn:hover { color: #888; background: #181818; }
 
-/* Best Bets */
-/* High Conviction Bets grid */
-.hcb-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; padding:4px 0 12px; }
-@media(max-width:900px){ .hcb-grid { grid-template-columns:repeat(2,1fr); } }
-@media(max-width:560px){ .hcb-grid { grid-template-columns:1fr; } }
-.hcb-card { background:#0d0d0d; border:1px solid #1e1e1e; border-radius:8px; padding:14px; display:flex; flex-direction:column; gap:9px; }
-.hcb-badges { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-.hcb-title { font-size:12px; font-weight:600; color:#ccc; line-height:1.4; cursor:pointer; }
-.hcb-title:hover { color:#fff; }
-.hcb-rationale { font-size:10px; color:#555; line-height:1.4; flex:1; }
-.hcb-stats { display:flex; border:1px solid #1e1e1e; border-radius:6px; overflow:hidden; }
-.hcb-stat { flex:1; display:flex; flex-direction:column; align-items:center; padding:7px 4px; border-right:1px solid #1e1e1e; }
-.hcb-stat:last-child { border-right:none; }
-.hcb-val { font-size:14px; font-weight:700; }
-.hcb-lbl { font-size:9px; color:#444; text-transform:uppercase; letter-spacing:.04em; margin-top:2px; }
-.hcb-bar-wrap { background:#1a1a1a; border-radius:3px; height:3px; overflow:hidden; }
-.hcb-bar { height:100%; border-radius:3px; }
-.hcb-actions { display:flex; gap:8px; margin-top:2px; }
-.hcb-approve { flex:1; background:#1a2e1a; border:1px solid #2d5a2d; color:#4ade80; padding:7px; border-radius:5px; font-size:11px; font-weight:700; cursor:pointer; }
-.hcb-approve:hover { background:#22401a; }
-.hcb-pass { flex:1; background:#1e1e1e; border:1px solid #2a2a2a; color:#555; padding:7px; border-radius:5px; font-size:11px; cursor:pointer; }
-.hcb-pass:hover { color:#888; }
 .bb-item { padding: 12px 16px; border-bottom: 1px solid #141414; cursor: pointer; }
 .bb-item:last-child { border-bottom: none; }
 .bb-item:hover { background: #141414; }
@@ -192,7 +170,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
   .header h1 { font-size: 13px; }
   .pill { display: none; }
 
-  /* Account bar — stack vertically */
+  /* Account bar - stack vertically */
   .acct-bar { flex-direction: column; gap: 0; padding: 14px 16px; }
   .acct-item { padding: 10px 0; min-height: unset; border-bottom: 1px solid #1a1a1a; justify-content: space-between; }
   .acct-item:last-child { border-bottom: none; }
@@ -202,23 +180,22 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
   .acct-label { max-width: none; font-size: 9px; }
   .mode-badge { margin-left: 0; }
 
-  /* Main grid — single column */
+  /* Main grid - single column */
   .main-grid { grid-template-columns: 1fr; gap: 10px; }
 
-  /* Module cards — stack vertically on mobile */
+  /* Module cards - stack vertically on mobile */
   #module-cards-row { grid-template-columns: 1fr !important; }
 
-  /* Tabs — scroll horizontally */
+  /* Tabs - scroll horizontally */
   .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; gap: 0; padding: 0 10px; }
   .tabs::-webkit-scrollbar { display: none; }
   .tab { padding: 10px 12px; font-size: 11px; flex-shrink: 0; }
 
-  /* Tables — horizontal scroll */
+  /* Tables - horizontal scroll */
   .t-scroll { max-height: none; overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .tbl { font-size: 11px; min-width: 480px; }
   .tbl th, .tbl td { padding: 7px 8px; }
 
-  /* Scout / Best Bets */
   .sc-scroll { max-height: none; }
   .bb-item { padding: 10px 12px; }
   .bb-title { font-size: 12px; }
@@ -226,7 +203,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
   /* Sidebar full-width on mobile */
   .sb { width: 100%; max-width: 100%; }
 
-  /* Chart area — full width */
+  /* Chart area - full width */
   canvas { max-width: 100%; }
 
   /* Win rate / stat numbers */
@@ -530,16 +507,6 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 
   </div>
 
-  <!-- Best Bets -->
-  <!-- High Conviction Bets: disabled 2026-03-11 pending validation
-  <div class="card" style="margin-bottom:14px;">
-    <div class="card-head">
-      <div style="display:flex;flex-direction:column;gap:2px;"><div class="sec">⭐ High Conviction Bets</div><div style="font-size:10px;color:#444;padding-left:2px;">Ranked by Total Confidence</div></div>
-      <button class="ref" onclick="loadHighConviction()">&#x21BB; Refresh</button>
-    </div>
-    <div id="hc-list" style="padding:14px 14px 14px;"><div class="loading" style="color:#555;padding:24px 0;">Loading best bets...</div></div>
-  </div>
-  -->
 
 </div>
 
@@ -566,7 +533,7 @@ function renderModuleCard(mod) {
   const pfx     = MODULE_ID[mod] || mod;
   const pnl     = period === 'month' ? d.closed_pnl_month  : period === 'year' ? d.closed_pnl_year  : d.closed_pnl;
 
-  // Open P&L (always current, not period-filtered — from live Kalshi prices)
+  // Open P&L (always current, not period-filtered - from live Kalshi prices)
   const openPnlEl = document.getElementById(pfx + '-open-pnl');
   if (openPnlEl) {
     const opnl = d.open_pnl != null ? d.open_pnl : 0;
@@ -657,17 +624,17 @@ async function openDepositSB() {
 
     <div style="font-size:12px;font-weight:600;color:#888;margin-bottom:8px;">ADD CAPITAL</div>
     <div style="display:flex;gap:8px;margin-bottom:8px;">
-      <input id="dep-amt" type="number" min="1" step="1" placeholder="Amount ($)" 
+      <input id="dep-amt" type="number" min="1" step="1" placeholder="Amount ($)"
         style="flex:1;background:#111;border:1px solid #222;border-radius:6px;color:#fff;padding:8px 10px;font-size:13px;outline:none;" />
     </div>
-    <input id="dep-note" type="text" placeholder="Note (e.g. Economics module)" 
+    <input id="dep-note" type="text" placeholder="Note (e.g. Economics module)"
       style="width:100%;box-sizing:border-box;background:#111;border:1px solid #222;border-radius:6px;color:#fff;padding:8px 10px;font-size:12px;outline:none;margin-bottom:12px;" />
     <div style="display:flex;gap:8px;margin-bottom:8px;">
       <button onclick="quickDeposit(100)" style="flex:1;background:#111;border:1px solid #222;border-radius:6px;color:#aaa;padding:7px;font-size:12px;cursor:pointer;">+$100</button>
       <button onclick="quickDeposit(200)" style="flex:1;background:#111;border:1px solid #222;border-radius:6px;color:#aaa;padding:7px;font-size:12px;cursor:pointer;">+$200</button>
       <button onclick="quickDeposit(500)" style="flex:1;background:#111;border:1px solid #222;border-radius:6px;color:#aaa;padding:7px;font-size:12px;cursor:pointer;">+$500</button>
     </div>
-    <button onclick="submitDeposit()" 
+    <button onclick="submitDeposit()"
       style="width:100%;background:#22c55e;border:none;border-radius:6px;color:#000;font-weight:700;padding:10px;font-size:13px;cursor:pointer;margin-bottom:20px;">
       Deposit
     </button>
@@ -715,8 +682,8 @@ function applyMode(mode) {
   if (banner) { banner.style.display = isLive ? 'block' : 'none'; }
   if (avLabel) { avLabel.textContent = 'Account Value'; }
   if (footer) { footer.textContent = isLive
-    ? 'Ruppert v1.4 — LIVE MODE — Real money at risk — Auto-refreshes 30s'
-    : 'Ruppert v1.4 — Demo Mode — No real money at risk — Auto-refreshes 30s'; }
+    ? 'Ruppert v1.4 - LIVE MODE - Real money at risk - Auto-refreshes 30s'
+    : 'Ruppert v1.4 - Demo Mode - No real money at risk - Auto-refreshes 30s'; }
 }
 
 // Mode is config-driven (always DEMO on this dashboard). Toggle removed.
@@ -791,23 +758,23 @@ async function loadPositions() {
     return;
   }
 
-  // If same tickers as before, skip rebuild — just refresh prices in-place
+  // If same tickers as before, skip rebuild - just refresh prices in-place
   const newKeys = positions.map(p=>p.ticker).sort().join(',');
   const oldKeys = window._cachedPositions ? window._cachedPositions.map(p=>p.ticker).sort().join(',') : null;
   if (oldKeys === newKeys) {
-    // Positions unchanged — update prices silently in background
+    // Positions unchanged - update prices silently in background
     loadLivePrices(positions);
     window._cachedPositions = positions;
     return;
   }
 
-  // Positions changed — rebuild table
+  // Positions changed - rebuild table
   window._cachedPositions = positions;
   tb.innerHTML = positions.map(p => {
     const name  = (p.title||p.ticker||'');
     const side  = p.side?.toLowerCase()==='yes' ? '<span class="b-yes">YES</span>' : '<span class="b-no">NO</span>';
     const cur   = '<span style="color:#555;font-size:10px;">live↓</span>';
-    const _s = (p.ticker||"").split("-")[0].toLowerCase(); const url = `https://kalshi.com/markets/${_s}`; 
+    const _s = (p.ticker||"").split("-")[0].toLowerCase(); const url = `https://kalshi.com/markets/${_s}`;
     const pnlH  = v => v!=null ? `<span class="${pcls(v)}">${sign(v)}${dollar(v)}</span>` : '<span style="color:#333">--</span>';
 
     // Signal: weather=NOAA vs mkt, crypto=smart money, economics=model vs mkt, default=--
@@ -852,7 +819,7 @@ async function loadPositions() {
 async function loadLivePrices(positions) {
   const prices = await api('/api/positions/prices');
   if (!prices) {
-    // API failed — ensure Open P&L shows $0.00 rather than dashes
+    // API failed - ensure Open P&L shows $0.00 rather than dashes
     window._openPnl = 0;
     updateAccountValue();
     setPnl('opnl', 'opnl-pct', 0, 0);
@@ -992,49 +959,6 @@ function renderWeather(){
   $('w-b').innerHTML = rows.join('')+btn;
 }
 
-// ── Best Bets ──────────────────────────────────────────────────────────────────
-let hcAll=[], hcShow=10;
-async function loadHighConviction(){
-  const d = await api('/api/highconviction');
-  const el=$('hc-list');
-  if(!d||!d.length){
-    el.innerHTML='<div class="loading" style="color:#888;padding:32px;">No high conviction bets right now.<br><span style="color:#555;font-size:10px;">Bets appear when Ruppert finds 60%+ confidence + 15%+ edge on economics or geopolitical markets.</span></div>';
-    return;
-  }
-  hcAll=d; renderHighConviction();
-}
-function renderHighConviction(){
-  const el=$('hc-list');
-  const items=hcAll.slice(0,hcShow);
-  const catMap = {Economics:'<span class="b-econ">Economics</span>', Geopolitical:'<span class="b-geo">Geo</span>', Weather:'<span class="b-bot">Weather</span>', Crypto:'<span class="b-manual">Crypto</span>'};
-  const cards=items.map(b=>{
-    const catBadge = catMap[b.category] || '<span class="b-geo">'+b.category+'</span>';
-    const conf=b.confidence||0;
-    const side = b.recommended_side==='YES'?'<span class="b-yes">BET YES</span>':'<span class="b-no">BET NO</span>';
-    const edge = b.edge ? (b.edge*100).toFixed(0)+'%' : '?';
-    const confColor = conf>=80?'#4ade80':conf>=65?'#facc15':'#f87171';
-    const bStr = JSON.stringify(b).replace(/'/g,"&#39;");
-    return `<div class="hcb-card">
-      <div class="hcb-badges">${catBadge} ${side}${isWatched(b.ticker||'')?'<span style="font-size:9px;padding:2px 7px;border-radius:4px;background:#1e1a3a;color:#818cf8;font-weight:700;cursor:pointer;" onclick="toggleWatch(\''+( b.ticker||'')+'\')" title="Click to un-watch">👁 Watching</span>':''}</div>
-      <div class="hcb-title" onclick='openHCSidebar(${bStr})'>${b.title||''}</div>
-      <div class="hcb-rationale">${(b.rationale||'').substring(0,100)}...</div>
-      <div class="hcb-stats">
-        <div class="hcb-stat"><span class="hcb-val" style="color:#fff">${(b.ruppert_prob*100||0).toFixed(0)}%</span><span class="hcb-lbl">Ruppert Analysis</span></div>
-        <div class="hcb-stat"><span class="hcb-val" style="color:#888">${(b.market_prob*100||0).toFixed(0)}%</span><span class="hcb-lbl">Market Price-In</span></div>
-        <div class="hcb-stat"><span class="hcb-val" style="color:#4ade80">+${edge}</span><span class="hcb-lbl">Edge</span></div>
-        <div class="hcb-stat"><span class="hcb-val" style="color:${confColor}">${conf}%</span><span class="hcb-lbl">Total Confidence</span></div>
-      </div>
-      <div class="hcb-bar-wrap"><div class="hcb-bar" style="width:${conf}%;background:${confColor};"></div></div>
-      <div class="hcb-actions">
-        <button class="hcb-approve" onclick='approveHCBet(${bStr})'>Approve</button>
-        <button class="hcb-pass" onclick='passHCBet(${bStr})'>Pass</button>
-      </div>
-    </div>`;
-  }).join('');
-  const more=hcAll.length>hcShow
-    ?`<div style="text-align:center;padding:12px;"><button class="more-btn" onclick="hcShow+=9;renderHighConviction()">Load ${Math.min(9,hcAll.length-hcShow)} More</button></div>`:'';
-  el.innerHTML=`<div class="hcb-grid">${cards}</div>${more}`;
-}
 
 // ── Geo Scout ──────────────────────────────────────────────────────────────────
 let geoAll=[], geoShow=10;
@@ -1110,47 +1034,7 @@ function openGeoSidebar(m) {
     <div class="sb-sec"><a href="${url}" target="_blank" style="font-size:11px;color:#818cf8;">View on Kalshi &#x2197;</a></div>`);
 }
 
-function openHCSidebar(b) {
-  window._hcBetTitle = b.title || b.ticker || '';
-  const rPct=(b.ruppert_prob*100||0).toFixed(0);
-  const mPct=(b.market_prob*100||0).toFixed(0);
-  const edge=(b.edge*100||0).toFixed(0);
-  const yes=b.yes_price||0; const no=100-yes;
-  const uid='sb_'+Math.random().toString(36).slice(2,7);
-  const url=b.kalshi_url || ('https://kalshi.com/markets/'+(b.ticker||'').split('-').slice(0,-1).join('-').toLowerCase());
-  const catBadge=b.category==='Economics'?'<span class="b-econ">Economics</span>':'<span class="b-geo">Geopolitical</span>';
-  const rules=b.rules?`<div class="sb-sec"><div class="sb-lbl">Settlement Rules</div><div class="sb-rules">${b.rules}</div></div>`:'';
-  openSB(`
-    <button class="sb-x" onclick="closeSB()">&#x2715;</button>
-    <div class="sb-sec" style="margin-bottom:10px;">${catBadge}</div>
-    <div class="sb-title">${b.title||''}</div>
-    <div class="sb-sec">
-      <div class="sb-lbl">Ruppert's Probability vs Market</div>
-      <div style="display:flex;gap:24px;margin-top:6px;">
-        <div><div style="font-size:10px;color:#333">Ruppert</div><div class="sb-prob" style="color:#4ade80">${rPct}%</div></div>
-        <div><div style="font-size:10px;color:#333">Market</div><div class="sb-prob">${mPct}%</div></div>
-        <div><div style="font-size:10px;color:#333">Edge</div><div class="sb-prob" style="color:#fbbf24">+${edge}%</div></div>
-        <div><div style="font-size:10px;color:#333">Confidence</div><div class="sb-prob" style="color:#818cf8">${b.confidence||0}%</div></div>
-      </div>
-    </div>
-    <div class="sb-sec"><div class="sb-lbl">Ruppert's Rationale</div><div class="sb-ruppert"><b>Ruppert:</b> ${b.rationale||'No rationale available.'}</div></div>
-    ${rules}
-    <div class="sb-sec"><div class="sb-lbl">Recommendation</div>
-      <div style="font-size:13px;font-weight:700;color:${b.recommended_side==='YES'?'#4ade80':'#f87171'};">
-        ${b.recommended_side==='YES'?'&#x2191;':'&#x2193;'} ${b.recommended_side} @ ${b.recommended_price}¢
-      </div>
-    </div>
-    <div class="sb-sec"><div class="sb-lbl">Your Decision</div>
-      <div class="sb-actions" id="${uid}-r">
-        <button class="btn btn-yes" onclick="doAct('${uid}','BET YES')">&#x2191; YES (${yes}¢)</button>
-        <button class="btn btn-no"  onclick="doAct('${uid}','BET NO')">&#x2193; NO (${no}¢)</button>
-        <button class="btn btn-wch" onclick="doAct('${uid}','WATCH','${b.ticker||""}')"> ${isWatched(b.ticker||'')?'Un-watch':'&#x1F441; Watch'}</button>
-        <button class="btn btn-pas" onclick="doAct('${uid}','PASS')">Pass</button>
-      </div>
-      <div id="${uid}-d" style="display:none;margin-top:10px;font-size:12px;font-weight:600;"></div>
-    </div>
-    <div class="sb-sec"><a href="${b.kalshi_url||'#'}" target="_blank" style="font-size:11px;color:#818cf8;">View on Kalshi &#x2197;</a></div>`);
-}
+
 
 // Persistent watch state via localStorage
 function getWatched(){ try{ return new Set(JSON.parse(localStorage.getItem('hc_watched')||'[]')); }catch(e){ return new Set(); } }
@@ -1160,10 +1044,9 @@ function toggleWatch(ticker){
   const s = getWatched();
   if(s.has(ticker)){ s.delete(ticker); } else { s.add(ticker); }
   saveWatched(s);
-  renderHighConviction(); // refresh cards to show/hide badge
 }
 
-async function doAct(uid, action, ticker, priceCents) {
+function doAct(uid, action, ticker, priceCents) {
   if(action==='WATCH'){
     toggleWatch(ticker||'');
     const wBtn = document.querySelector('.btn-wch');
@@ -1171,37 +1054,13 @@ async function doAct(uid, action, ticker, priceCents) {
     return;
   }
   if(action==='PASS'){
-    document.getElementById(uid+'-r').querySelectorAll('.btn').forEach(b=>{b.disabled=true;b.style.opacity='.3';});
-    const done=document.getElementById(uid+'-d'); done.style.display='block';
-    done.style.color='#444'; done.textContent='✓ Passed';
-    await api('/api/highconviction/pass',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ticker})});
-    setTimeout(()=>{closeSB(); loadHighConviction();}, 800);
+    closeSB();
     return;
   }
-  // BET YES or BET NO — approve for bot cycle (no manual execution)
+  // BET YES or BET NO — open Kalshi directly
   const side = action==='BET YES' ? 'yes' : 'no';
-  const confirmed = confirm(`Approve ${action} on\n${ticker}\nat ${priceCents}¢?\n\nBot will execute on next cycle.`);
-  if(!confirmed) return;
-
-  document.getElementById(uid+'-r').querySelectorAll('.btn').forEach(b=>{b.disabled=true;b.style.opacity='.3';});
-  const done=document.getElementById(uid+'-d'); done.style.display='block';
-  done.style.color='#888'; done.textContent='Approving...';
-
-  try {
-    const res = await api('/api/highconviction/approve', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ticker, side})
-    });
-    if(res && res.status==='approved'){
-      done.style.color= '#4ade80';
-      done.textContent=`✓ ${action} approved — bot will execute next cycle`;
-      setTimeout(()=>{ closeSB(); loadHighConviction(); }, 1200);
-    } else {
-      done.style.color='#f87171'; done.textContent='Error: '+(res?.error||'Unknown');
-    }
-  } catch(e) {
-    done.style.color='#f87171'; done.textContent='Network error';
-  }
+  const url = 'https://kalshi.com/markets/' + (ticker||'').split('-').slice(0,-1).join('-').toLowerCase();
+  window.open(url, '_blank');
 }
 
 // ── Module Tags ───────────────────────────────────────────────────────────────
@@ -1221,7 +1080,7 @@ function moduleTag(module, ticker, source) {
   return '<span style="color:#666;padding:2px 7px;border-radius:3px;font-size:9px;flex-shrink:0;">Other</span>';
 }
 
-// ── renderState — single state response → full UI update ──────────────────────
+// ── renderState - single state response → full UI update ──────────────────────
 function renderState(state) {
   const acct      = state.account   || {};
   const positions = state.positions || [];
@@ -1369,7 +1228,7 @@ async function loadClosedPnl() {
     window._closedPnl = pnl.closed_pnl || 0;  // BOT-only (manual excluded)
     window._cpnlData  = {all: pnl.closed_pnl||0, day: pnl.closed_pnl_day||0, month: pnl.bot_closed_pnl_month||0, year: pnl.bot_closed_pnl_year||0};
 
-    // Account bar Closed P&L (now BOT-only — period selector still works)
+    // Account bar Closed P&L (now BOT-only - period selector still works)
     const cpnlVal = window._cpnlData[window._cpnlFrame || 'month'];
     setPnl('cpnl', 'cpnl-pct', cpnlVal, window._kalshiBalance || 400);
 
@@ -1380,7 +1239,7 @@ async function loadClosedPnl() {
       wrEl.style.color = pnl.closed_win_rate >= 50 ? '#4ade80' : '#f87171';
     }
 
-    // Module cards — all four modules
+    // Module cards - all four modules
     if (pnl.modules) {
       window._moduleData = pnl.modules;
       ['weather', 'crypto', 'fed', 'geo'].forEach(m => {
@@ -1395,7 +1254,7 @@ async function loadClosedPnl() {
 }
 
 
-// Lightweight crypto signal cache (no UI — just populates window._smartMoney for positions table)
+// Lightweight crypto signal cache (no UI - just populates window._smartMoney for positions table)
 async function loadCryptoSignal() {
   try {
     const d = await api('/api/crypto/scan');
@@ -1418,20 +1277,9 @@ async function loadCryptoSignal() {
 }
 
 
-function approveHCBet(b) {
-  if (!confirm('Approve bet: ' + (b.title||b.ticker) + '?')) return;
-  api('/api/highconviction/approve', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ticker: b.ticker})})
-    .then(() => { alert('Queued for execution. Review Open Positions after next bot cycle.'); loadHighConviction(); })
-    .catch(() => alert('Error approving bet.'));
-}
-function passHCBet(b) {
-  api('/api/highconviction/pass', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ticker: b.ticker})})
-    .then(() => loadHighConviction())
-    .catch(() => {});
-}
 
 async function loadScouts(){
-  await Promise.all([loadHighConviction(), loadCryptoSignal()]);
+  await Promise.all([loadCryptoSignal()]);
 }
 async function loadAll(){
   const state = await api('/api/state');
@@ -1478,7 +1326,7 @@ async function loadCrypto() {
     smBadge.style.color = colors[dir] || '#aaa';
     const active = sm.active_positions != null ? sm.active_positions : sm.traders_sampled;
     const note = sm.active_positions === 0 ? 'sidelines' : (Math.round((sm.bull_pct||0.5)*100) + '% bull');
-    smBadge.textContent = dir.toUpperCase() + ' — ' + note + ' (' + sm.traders_sampled + ' traders tracked)';
+    smBadge.textContent = dir.toUpperCase() + ' - ' + note + ' (' + sm.traders_sampled + ' traders tracked)';
   }
 
   // BTC/ETH prices
@@ -1517,7 +1365,7 @@ async function loadCrypto() {
       <td style="text-align:right;">${Math.round((o.model_prob||0)*100)}%</td>
       <td style="text-align:right;"><span class="${edgeCls}">${edgeTxt}</span></td>
       <td style="text-align:center;">${o.direction || '--'}</td>
-      <td style="text-align:center;"><button style="background:#1e1e1e;border:1px solid #333;color:#e0e0e0;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;" onclick="alert('Feature coming soon — manual approval flow')">Review</button></td>
+      <td style="text-align:center;"><button style="background:#1e1e1e;border:1px solid #333;color:#e0e0e0;padding:2px 8px;border-radius:3px;font-size:10px;cursor:pointer;" onclick="alert('Feature coming soon - manual approval flow')">Review</button></td>
     </tr>`;
   }).join('');
 }

@@ -30,7 +30,6 @@ def log_event(event_type: str, data: dict, source: str = None) -> None:
         ALERT_CANDIDATE       - Potential alert (level, message)
         POSITION_UPDATE       - Position state changed (ticker, side, action)
         PRICE_UPDATE          - Significant price move (ticker, old, new)
-        HIGHCONVICTION_ACTION - User approve/pass (ticker, action)
         STATE_UPDATE          - Cycle state snapshot (traded_tickers, mode)
         TRADE_FAILED          - Trade execution failed (ticker, side, error)
     """

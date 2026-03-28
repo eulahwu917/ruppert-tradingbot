@@ -70,79 +70,6 @@ def read_geo_log():
     return [e for e in entries if e.get('date') == today]
 
 
-def read_high_conviction():
-    log_path = LOGS_DIR / "best_bets.jsonl"
-    entries = []
-    if log_path.exists():
-        with open(log_path, encoding='utf-8') as f:
-            for line in f:
-                try: entries.append(json.loads(line))
-                except: pass
-
-    # Load passed tickers so we can exclude them
-    passed = set()
-    pass_path = LOGS_DIR / "highconviction_passed.jsonl"
-    if pass_path.exists():
-        with open(pass_path, encoding='utf-8') as f:
-            for line in f:
-                try: passed.add(json.loads(line).get('ticker', ''))
-                except: pass
-
-    # Load approved tickers so we can exclude them too
-    approved = set()
-    approve_path = LOGS_DIR / "highconviction_approved.jsonl"
-    if approve_path.exists():
-        with open(approve_path, encoding='utf-8') as f:
-            for line in f:
-                try: approved.add(json.loads(line).get('ticker', ''))
-                except: pass
-
-    # Deduplicate by ticker (keep most recent per ticker), exclude passed/approved, exclude expired
-    from datetime import datetime as _dt
-    now = _dt.utcnow()
-    seen_ticker = {}
-    for e in entries:
-        t = e.get('ticker', '')
-        seen_ticker[t] = e  # last entry per ticker wins
-
-    result = []
-    for t, e in seen_ticker.items():
-        if t in passed or t in approved:
-            continue
-        close_str = e.get('close_date', '')
-        if close_str:
-            try:
-                close_dt = _dt.fromisoformat(close_str.replace('Z', '+00:00')).replace(tzinfo=None)
-                if close_dt < now:
-                    continue
-            except: pass
-        result.append(e)
-
-    # Deduplicate by title — same question at multiple thresholds → keep highest edge × confidence
-    seen_title = {}
-    for e in result:
-        title = (e.get('title') or e.get('ticker', '')).strip()
-        score = (e.get('edge', 0) or 0) * (e.get('confidence', 0) or 0)
-        if title not in seen_title or score > seen_title[title][1]:
-            seen_title[title] = (e, score)
-
-    result = [v[0] for v in seen_title.values()]
-    # Sort by Total Confidence descending
-    result.sort(key=lambda x: x.get('confidence', 0) or 0, reverse=True)
-    return result
-
-
-SPORTS_EXCLUSIONS = [
-    'points scored','rebounds','assists','touchdowns','home runs','field goal',
-    'three-pointer','wins by','over 1.5','over 2.5','over 3.5','lakers','celtics',
-    'warriors','knicks','heat ','bulls','nets','nba','nfl','mlb','nhl','ncaa',
-    'soccer','basketball game','football game','baseball game','hockey game',
-    'tennis','golf tournament','mma','boxing','both teams','goals scored',
-    'rushing yards','strikeouts','shots on goal','super bowl','world series',
-    'nba finals','stanley cup','world cup','march madness',
-]
-
-
 # classify_module imported from logger — single source of truth
 
 
@@ -465,44 +392,6 @@ def get_trades():
     closed = [t for t in closed if t.get('source', 'bot') not in _MANUAL_EXCL]
     return closed
 
-
-@app.post("/api/highconviction/approve")
-async def approve_highconviction(req: Request):
-    """Mark a best bet as approved — logs event for Data Scientist to synthesize.
-    Also writes to highconviction_approved.jsonl (dual-write bridge until Phase 2 synthesizer).
-    """
-    import sys as _sys, os as _os
-    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
-    from scripts.event_logger import log_event as _log_event
-    body = await req.json()
-    ticker = body.get('ticker', '')
-    _log_event('HIGHCONVICTION_ACTION', {'ticker': ticker, 'action': 'approve'}, source='dashboard')
-    # Dual-write: keep dashboard filter working until Phase 2 synthesizer takes over
-    approve_path = LOGS_DIR / 'highconviction_approved.jsonl'
-    approve_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(approve_path, 'a', encoding='utf-8') as _f:
-        _f.write(json.dumps({'ticker': ticker, 'action': 'approve',
-                              'ts': datetime.utcnow().isoformat()}) + '\n')
-    return {'status': 'pending', 'ticker': ticker}
-
-@app.post("/api/highconviction/pass")
-async def pass_highconviction(req: Request):
-    """Dismiss a best bet — logs event for Data Scientist to synthesize.
-    Also writes to highconviction_passed.jsonl (dual-write bridge until Phase 2 synthesizer).
-    """
-    import sys as _sys, os as _os
-    _sys.path.insert(0, _os.path.dirname(_os.path.dirname(__file__)))
-    from scripts.event_logger import log_event as _log_event
-    body = await req.json()
-    ticker = body.get('ticker', '')
-    _log_event('HIGHCONVICTION_ACTION', {'ticker': ticker, 'action': 'pass'}, source='dashboard')
-    # Dual-write: keep dashboard filter working until Phase 2 synthesizer takes over
-    pass_path = LOGS_DIR / 'highconviction_passed.jsonl'
-    pass_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(pass_path, 'a', encoding='utf-8') as _f:
-        _f.write(json.dumps({'ticker': ticker, 'action': 'pass',
-                              'ts': datetime.utcnow().isoformat()}) + '\n')
-    return {'status': 'pending', 'ticker': ticker}
 
 @app.get("/api/trades/today")
 def get_today_trades():
@@ -834,12 +723,6 @@ def get_geo_scout():
         if not e.get('kalshi_url'):
             e['kalshi_url'] = f"https://kalshi.com/markets/{e.get('ticker','')}"
     return entries
-
-
-@app.get("/api/highconviction")
-def get_high_conviction():
-    """Best Bets — non-weather, 60%+ confidence, 15%+ edge, needs David's approval."""
-    return read_high_conviction()
 
 
 # ─── Dashboard ────────────────────────────────────────────────────────────────
