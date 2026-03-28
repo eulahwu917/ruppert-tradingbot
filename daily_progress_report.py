@@ -9,7 +9,7 @@ with any existing Task Scheduler entries.
 
 Windows Task Scheduler: Update the action to run brief_generator directly:
   Program: C:\\Users\\David Wu\\AppData\\Local\\Programs\\Python\\Python312\\python.exe
-  Arguments: -m agents.ceo.brief_generator
+  Arguments: -m agents.ruppert.ceo.brief_generator
   Start in: C:\\Users\\David Wu\\.openclaw\\workspace\\projects\\ruppert-tradingbot-demo
 
 Schedule: Daily at 8:00 PM PDT (03:00 UTC during DST, 04:00 UTC standard)
@@ -35,7 +35,7 @@ def main():
     print()
 
     try:
-        from agents.ceo.brief_generator import main as run_brief
+        from agents.ruppert.ceo.brief_generator import main as run_brief
         result = run_brief()
         print(f"[daily_progress_report] CEO brief completed: {result}")
     except Exception as e:
@@ -84,7 +84,7 @@ def _run_legacy_report():
     print(report)
 
     try:
-        from agents.data_scientist.logger import send_telegram
+        from agents.ruppert.data_scientist.logger import send_telegram
         send_telegram(report)
     except Exception as e:
         print(f"[Fallback] Telegram send failed: {e}")

@@ -1,7 +1,7 @@
 """Quick test to verify market price fields come through correctly."""
 import sys
 sys.path.insert(0, '.')
-from agents.data_analyst.kalshi_client import KalshiClient
+from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 
 client = KalshiClient()
 markets = client.get_markets('KXHIGHNY')

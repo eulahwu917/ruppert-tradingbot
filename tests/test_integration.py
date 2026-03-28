@@ -5,7 +5,7 @@ These require network access and valid API credentials.
 Do NOT include in pre-deploy gate.
 """
 import pytest
-from agents.data_analyst.kalshi_client import KalshiClient
+from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 
 pytestmark = pytest.mark.integration
 

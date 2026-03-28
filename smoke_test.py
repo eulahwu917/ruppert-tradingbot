@@ -194,7 +194,7 @@ except Exception as e:
 # ─── 10. kalshi_client basic import ──────────────────────────────────────────
 print("[10] kalshi_client")
 try:
-    from agents.data_analyst.kalshi_client import KalshiClient
+    from agents.ruppert.data_analyst.kalshi_client import KalshiClient
     ok("KalshiClient import")
 except Exception as e:
     fail("KalshiClient import", str(e))

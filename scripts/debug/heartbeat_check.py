@@ -40,7 +40,7 @@ def _count_trades_today():
 
 
 def main():
-    from agents.data_scientist.logger import send_telegram
+    from agents.ruppert.data_scientist.logger import send_telegram
     import config
 
     try:

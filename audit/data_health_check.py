@@ -12,15 +12,24 @@ Usage: python data_health_check.py
 
 import json
 import logging
+import sys
 import requests
 from datetime import datetime, timezone
 from pathlib import Path
 
+# Resolve workspace root for env_config import
+_AUDIT_DIR     = Path(__file__).parent
+_WORKSPACE_ROOT = _AUDIT_DIR.parent.parent.parent  # demo/audit -> demo -> environments -> workspace
+if str(_WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORKSPACE_ROOT))
+
+from agents.ruppert.env_config import get_paths as _get_paths  # noqa: E402
+from agents.ruppert.data_scientist.logger import log_activity   # noqa: E402
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-_LOGS_DIR      = Path(__file__).parent / "logs"
-_ALERTS_FILE   = _LOGS_DIR / "pending_alerts.json"
+_LOGS_DIR = _get_paths()['logs']
 
 # Seasonal temp bounds per month (rough sanity — not precise)
 _TEMP_BOUNDS = {
@@ -40,21 +49,9 @@ _TEMP_BOUNDS = {
 
 
 def _push_alert(message: str):
-    """Add warning alert to pending_alerts.json for heartbeat pickup."""
+    """Log a health check alert via the standard activity logger (ALERT_CANDIDATE)."""
     try:
-        _ALERTS_FILE.parent.mkdir(exist_ok=True)
-        alerts = []
-        if _ALERTS_FILE.exists():
-            try:
-                alerts = json.loads(_ALERTS_FILE.read_text(encoding="utf-8"))
-            except Exception:
-                alerts = []
-        alerts.append({
-            "level":   "warning",
-            "message": f"[HealthCheck] {message}",
-            "ts":      datetime.now(timezone.utc).isoformat(),
-        })
-        _ALERTS_FILE.write_text(json.dumps(alerts, indent=2), encoding="utf-8")
+        log_activity(f"[ALERT_CANDIDATE] [HealthCheck] {message}")
     except Exception as e:
         logger.error(f"Failed to push alert: {e}")
 
