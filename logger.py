@@ -299,7 +299,6 @@ def send_telegram(message: str) -> bool:
              '-t', '5003590611',
              '-m', message],
             capture_output=True, text=True, timeout=30,
-            shell=True,
         )
         if result.returncode != 0:
             print(f"[WARN] send_telegram failed: {result.stderr.strip()}")

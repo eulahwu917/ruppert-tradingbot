@@ -8,14 +8,16 @@ Usage: python post_trade_monitor.py
 """
 import sys
 import json
+import uuid
 from pathlib import Path
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
 LOGS = Path(__file__).parent / 'logs'
 LOGS.mkdir(exist_ok=True)
+LOGS_DIR = LOGS  # alias used by settlement checker
 ALERTS_FILE = LOGS / 'pending_alerts.json'
 
 import config
@@ -26,6 +28,218 @@ from logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock
 
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _update_pnl_cache(pnl_delta: float):
+    """Add pnl_delta to closed_pnl in pnl_cache.json. Uses exit lock for safe concurrent access."""
+    cache_path = LOGS_DIR / 'pnl_cache.json'
+    acquired = acquire_exit_lock()
+    try:
+        data = json.loads(cache_path.read_text(encoding='utf-8')) if cache_path.exists() else {}
+        current = float(data.get('closed_pnl', 0.0))
+        data['closed_pnl'] = round(current + pnl_delta, 2)
+        # Atomic write: write to temp file then replace
+        tmp_path = cache_path.with_suffix('.tmp')
+        tmp_path.write_text(json.dumps(data), encoding='utf-8')
+        tmp_path.replace(cache_path)
+    except Exception as e:
+        print(f"  [pnl_cache] Update failed (non-fatal): {e}")
+    finally:
+        if acquired:
+            release_exit_lock()
+
+
+def check_settlements(client, logs_dir: Path):
+    """Check for settled DEMO positions and compute simulated P&L.
+
+    Runs each monitor cycle before position checks. Loads open buys from
+    today's + yesterday's trade log, identifies markets past their target_date
+    or close_time, fetches resolution from Kalshi, logs a 'settle' action,
+    and updates pnl_cache.json.
+    """
+    print(f"\n  [Settlement Checker] running...")
+
+    today = date.today()
+    yesterday = today - timedelta(days=1)
+
+    logs_to_check = [
+        logs_dir / f"trades_{yesterday.isoformat()}.jsonl",
+        logs_dir / f"trades_{today.isoformat()}.jsonl",
+    ]
+
+    # Build open positions (same logic as load_open_positions)
+    entries_by_key = {}
+    exit_keys = set()
+    settle_keys = set()  # already settled this cycle — track from logs
+
+    for trade_log in logs_to_check:
+        if not trade_log.exists():
+            continue
+        for line in trade_log.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            ticker = rec.get('ticker', '')
+            side = rec.get('side', '')
+            action = rec.get('action', 'buy')
+            key = (ticker, side)
+            if action in ('exit', 'settle'):
+                exit_keys.add(key)
+                if action == 'settle':
+                    settle_keys.add(key)
+            else:
+                entries_by_key[key] = rec
+
+    open_positions = [rec for key, rec in entries_by_key.items() if key not in exit_keys]
+
+    if not open_positions:
+        print(f"  [Settlement Checker] no open positions to check")
+        return
+
+    settled_count = 0
+    for pos in open_positions:
+        ticker = pos.get('ticker', '')
+        side = pos.get('side', '')
+        key = (ticker, side)
+        if not ticker or not side:
+            continue
+
+        # Only check positions whose target date has passed or that look mature
+        target_date_str = pos.get('target_date') or pos.get('date', '')
+        try:
+            target_date = date.fromisoformat(str(target_date_str)) if target_date_str else None
+        except Exception:
+            target_date = None
+
+        # Skip if target_date is in the future (market still open)
+        if target_date and target_date > today:
+            continue
+
+        # Fetch market from Kalshi
+        try:
+            market = client.get_market(ticker)
+        except Exception as e:
+            print(f"  [Settlement Checker] API error for {ticker}: {e}")
+            continue
+
+        if not market:
+            continue
+
+        # Determine if market is resolved
+        result = market.get('result', '')
+        status = market.get('status', '')
+        yes_bid = market.get('yes_bid', 50)
+
+        if result in ('yes', 'no'):
+            pass  # resolved via result field
+        elif status == 'finalized':
+            # Infer result from yes_bid
+            result = 'yes' if yes_bid >= 99 else 'no'
+        elif yes_bid >= 99:
+            result = 'yes'
+        elif yes_bid <= 1:
+            result = 'no'
+        else:
+            # Not yet resolved — skip silently
+            continue
+
+        # Compute entry price
+        entry_price = None
+        fp = pos.get('fill_price')
+        sp = pos.get('scan_price')
+        mp = pos.get('market_prob')
+        if fp is not None:
+            try:
+                entry_price = float(fp)
+            except Exception:
+                pass
+        if entry_price is None and sp is not None:
+            try:
+                entry_price = float(sp)
+            except Exception:
+                pass
+        if entry_price is None and mp is not None:
+            try:
+                entry_price = float(mp) * 100
+            except Exception:
+                pass
+        if entry_price is None:
+            entry_price = 50.0  # fallback
+
+        contracts = int(pos.get('contracts', 1) or 1)
+
+        # Determine exit_price and P&L
+        if side == 'yes':
+            if result == 'yes':
+                exit_price = 99
+                pnl = (99 - entry_price) * contracts / 100
+            else:  # result == 'no'
+                exit_price = 1
+                pnl = -(entry_price * contracts / 100)
+        else:  # side == 'no'
+            if result == 'no':
+                exit_price = 99
+                pnl = (99 - entry_price) * contracts / 100
+            else:  # result == 'yes'
+                exit_price = 1
+                pnl = -(entry_price * contracts / 100)
+
+        # Parse entry datetime for hold_duration
+        try:
+            entry_dt = datetime.fromisoformat(pos.get('timestamp', '').replace('Z', '+00:00').split('+')[0])
+        except Exception:
+            entry_dt = None
+
+        # Write settle record directly to avoid build_trade_entry() schema stripping
+        log_path = logs_dir / f'trades_{date.today().isoformat()}.jsonl'
+        settle_record = {
+            "trade_id": str(uuid.uuid4()),
+            "timestamp": datetime.now().isoformat(),
+            "date": str(today),
+            "ticker": ticker,
+            "title": pos.get("title", ""),
+            "side": side,
+            "action": "settle",
+            "action_detail": f"SETTLE {'WIN' if pnl > 0 else 'LOSS'} @ {exit_price}c",
+            "source": "settlement_checker",
+            "module": pos.get("module", ""),
+            "settlement_result": result,
+            "pnl": round(pnl, 2),
+            "entry_price": entry_price,
+            "exit_price": exit_price,
+            "contracts": contracts,
+            "size_dollars": pos.get("size_dollars", 0),
+            "entry_edge": pos.get("edge", None),
+            "confidence": pos.get("confidence", None),
+            "hold_duration_hours": round((datetime.now() - entry_dt).total_seconds() / 3600, 2) if entry_dt else None,
+            "noaa_prob": None,
+            "market_prob": None,
+            "scan_contracts": None,
+            "fill_contracts": contracts,
+            "scan_price": entry_price,
+            "fill_price": exit_price,
+            "order_result": {"dry_run": True, "status": "settled"},
+        }
+        try:
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(settle_record) + '\n')
+        except Exception as e:
+            print(f"  [Settlement Checker] JSONL write error for {ticker}: {e}")
+            continue
+
+        _update_pnl_cache(round(pnl, 2))
+        print(f"  [Settlement] {ticker} {side.upper()} → {result.upper()} | P&L=${pnl:+.2f}")
+        settled_count += 1
+
+    if settled_count == 0:
+        print(f"  [Settlement Checker] no newly settled positions")
+    else:
+        print(f"  [Settlement Checker] settled {settled_count} position(s)")
+
 
 def push_alert(level, message, ticker=None, pnl=None):
     """Write alert for heartbeat to pick up and forward."""
@@ -207,6 +421,14 @@ def run_monitor():
     print(f"  POST-TRADE MONITOR  {ts()}")
     print(f"{'='*60}")
 
+    client = KalshiClient()
+
+    # Run settlement checker first — resolves DEMO positions that have expired
+    try:
+        check_settlements(client, LOGS_DIR)
+    except Exception as e:
+        print(f"  [Settlement Checker] ERROR (non-fatal): {e}")
+
     positions = load_open_positions()
     if not positions:
         print("  No open positions today.")
@@ -214,8 +436,6 @@ def run_monitor():
         return
 
     print(f"  {len(positions)} open position(s) to check\n")
-
-    client = KalshiClient()
     checked = 0
     skipped = 0
     exits_executed = 0
@@ -294,6 +514,10 @@ def run_monitor():
                     'timestamp': ts(), 'date': str(date.today()),
                 }
 
+                # Compute realized P&L for pnl_cache
+                ep = normalize_entry_price(pos)
+                exit_pnl = round((cur_price - ep) * pos_contracts / 100, 2)
+
                 if DRY_RUN:
                     log_trade(exit_opp, exit_opp['size_dollars'], pos_contracts, {'dry_run': True})
                     log_activity(f'[POST-MONITOR EXIT] {ticker} {side.upper()} @ {cur_price}c — {reason}')
@@ -308,6 +532,7 @@ def run_monitor():
                         print(f"    EXIT ERROR: {e}")
                         continue
 
+                _update_pnl_cache(exit_pnl)
                 push_alert('exit', f'POST-MONITOR EXIT: {ticker} {side.upper()} — {reason}', ticker=ticker, pnl=pnl)
                 exits_executed += 1
             finally:
