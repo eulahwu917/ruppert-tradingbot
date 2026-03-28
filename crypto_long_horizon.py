@@ -27,7 +27,7 @@ if str(_WORKSPACE_ROOT) not in sys.path:
 
 import config
 import agents.ruppert.data_analyst.market_cache as market_cache
-from agents.ruppert.data_scientist.capital import get_capital
+from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 from agents.ruppert.data_scientist.logger import log_trade, log_activity, get_daily_exposure
 
 from agents.ruppert.env_config import get_paths as _get_paths
@@ -326,6 +326,8 @@ def run_long_horizon_scan(client, dry_run: bool = True, traded_tickers: set = No
     Called by ruppert_cycle.py in 'full' mode at 7AM.
     Returns list of executed trade dicts.
     """
+    from agents.ruppert.strategist.strategy import should_enter
+
     if traded_tickers is None:
         traded_tickers = set()
 
@@ -363,6 +365,17 @@ def run_long_horizon_scan(client, dry_run: bool = True, traded_tickers: set = No
             continue
         if spent + pos_size > daily_cap:
             print(f"  SKIP {ticker}: would exceed daily cap (${spent:.2f} + ${pos_size:.2f} > ${daily_cap:.2f})")
+            continue
+
+        # Compute open_position_value and apply global 70% exposure gate
+        _total = get_capital()
+        _bp = get_buying_power()
+        opp['open_position_value'] = max(0.0, _total - _bp)
+        _deployed_today = get_daily_exposure()
+        se_decision = should_enter(opp, _total, _deployed_today)
+        if not se_decision['enter']:
+            print(f"  SKIP {ticker}: strategy gate — {se_decision['reason']}")
+            log_activity(f'[LongHorizon] SKIP {ticker}: {se_decision["reason"]}')
             continue
 
         side = opp['side']
