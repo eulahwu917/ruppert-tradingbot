@@ -18,17 +18,25 @@ import math
 import time
 import requests
 import schedule
+from pathlib import Path
 from datetime import date, datetime
 
-from kalshi_client import KalshiClient
-from edge_detector import find_opportunities
-from trader import Trader
-from logger import log_activity, log_trade, get_daily_summary, get_daily_exposure, get_computed_capital
-from capital import get_capital, get_buying_power
+# Ensure project root is on sys.path when running standalone
+# Resolve workspace root and add to path (agents.ruppert.* + config shim)
+_AGENTS_ROOT = Path(__file__).parent.parent.parent  # workspace/agents
+_WORKSPACE_ROOT = _AGENTS_ROOT.parent               # workspace/
+if str(_WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORKSPACE_ROOT))
+
+from agents.ruppert.data_analyst.kalshi_client import KalshiClient
+from agents.ruppert.strategist.edge_detector import find_opportunities
+from agents.ruppert.trader.trader import Trader
+from agents.ruppert.data_scientist.logger import log_activity, log_trade, get_daily_summary, get_daily_exposure, get_computed_capital
+from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 from economics_scanner import find_econ_opportunities
 from geopolitical_scanner import run_geo_scan, format_geo_brief
 import config
-from bot.strategy import (
+from agents.ruppert.strategist.strategy import (
     should_enter, should_add, should_exit,
     check_daily_cap, check_open_exposure, calculate_position_size,
     get_strategy_summary,
@@ -37,8 +45,10 @@ from bot.strategy import (
 
 # ─── STRATEGY HELPERS ────────────────────────────────────────────────────────
 
-_STRATEGY_EXITS_LOG = os.path.join(os.path.dirname(__file__), 'logs', 'strategy_exits.jsonl')
-_LOGS_DIR = os.path.join(os.path.dirname(__file__), 'logs')
+from agents.ruppert.env_config import get_paths as _get_paths
+_env_paths = _get_paths()
+_STRATEGY_EXITS_LOG = str(_env_paths['logs'] / 'strategy_exits.jsonl')
+_LOGS_DIR = str(_env_paths['logs'])
 
 
 def _load_trade_record(ticker: str) -> dict | None:
@@ -565,7 +575,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                     except Exception:
                         pass
 
-                from crypto_client import compute_composite_confidence
+                from agents.ruppert.trader.crypto_client import compute_composite_confidence
                 _crypto_confidence = compute_composite_confidence(best_edge, ya, m.get('yes_bid') or ya, _hours_left)
 
                 new_crypto.append({
@@ -605,6 +615,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
         except Exception:
             _open_exposure = open_position_value
 
+        trader = Trader(dry_run=dry_run)
         for t in new_crypto[:3]:
             if not check_open_exposure(_total_capital, _open_exposure):
                 print(f"  [GlobalCap] STOP: open exposure ${_open_exposure:.2f} >= 70% of capital")
@@ -654,17 +665,9 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'date': str(date.today()),
             }
-            if dry_run:
-                log_trade(opp, actual_cost, contracts, {'dry_run': True})
-                log_activity(f"[AUTO-CRYPTO] BUY {t['side'].upper()} {t['ticker']} {contracts}@{best_price}c ${actual_cost:.2f} edge={t['edge']*100:.0f}%")
-                print(f"  [DEMO] BUY {t['side'].upper()} {t['ticker']:38} {contracts:3}@{best_price:3}c ${actual_cost:.2f} edge={t['edge']*100:.0f}%")
-            else:
-                try:
-                    result = client.place_order(t['ticker'], t['side'], best_price, contracts)
-                    log_trade(opp, actual_cost, contracts, result)
-                    print(f"  [LIVE] EXECUTED {t['ticker']}")
-                except Exception as e:
-                    print(f"  ERROR {t['ticker']}: {e}")
+            opp['strategy_size'] = size
+            opp['module'] = 'crypto'
+            trader.execute_opportunity(opp)
 
             traded_tickers.add(t['ticker'])
             _crypto_deployed_this_cycle += actual_cost
@@ -779,29 +782,11 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
                         "timestamp":   datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                         "date":        str(date.today()),
                     }
-
-                    if dry_run:
-                        log_trade(opp, actual_cost, contracts, {"dry_run": True})
-                        log_activity(
-                            f"[AUTO-FED] BUY {side.upper()} {ticker} {contracts}@{bet_price}c "
-                            f"${actual_cost:.2f} edge={edge_pct:.0f}% conf={conf_pct:.0f}%"
-                        )
-                        print(
-                            f"  [DEMO] BUY {side.upper()} {ticker:38} "
-                            f"{contracts:3}@{bet_price:3}c ${actual_cost:.2f} "
-                            f"edge={edge_pct:.0f}% conf={conf_pct:.0f}% [{outcome}]"
-                        )
-                    else:
-                        try:
-                            result = client.place_order(ticker, side, bet_price, contracts)
-                            log_trade(opp, actual_cost, contracts, result)
-                            log_activity(
-                                f"[AUTO-FED] EXECUTED {ticker} {side.upper()} "
-                                f"{contracts}@{bet_price}c edge={edge_pct:.0f}%"
-                            )
-                            print(f"  [LIVE] EXECUTED Fed trade: {ticker}")
-                        except Exception as e:
-                            print(f"  ERROR executing Fed trade {ticker}: {e}")
+                    opp['strategy_size'] = size
+                    opp['module'] = 'fed'
+                    opp['scan_price'] = mkt_price
+                    opp['fill_price'] = mkt_price
+                    Trader(dry_run=dry_run).execute_opportunity(opp)
 
                     traded_tickers.add(ticker)
                     executed.append(opp)
@@ -859,8 +844,8 @@ def run_full_scan(dry_run=True):
     log_activity(f"Mode: {'DRY RUN (simulated)' if dry_run else 'LIVE TRADING'}")
     log_activity("=" * 60)
 
-    # ── Exit scan: check open positions before entering new ones ─────────────
-    run_exit_scan(dry_run=dry_run)
+    # Exit scan removed: exits are owned exclusively by post_trade_monitor + WS feed.
+    # run_exit_scan() has a # TODO: live mode stub and is dead code — do not call here.
 
     run_weather_scan(dry_run=dry_run)
     run_econ_scan(dry_run=dry_run)
