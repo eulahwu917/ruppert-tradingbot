@@ -510,6 +510,34 @@ def run_weather_only_mode(state):
         import traceback; traceback.print_exc()
 
     print(f"\nweather_only done — {_weather_count} trade(s). {ts()}")
+
+    # Scan summary notification
+    try:
+        import time as _time
+        _is_dst = _time.daylight and _time.localtime().tm_isdst > 0
+        _offset = -7 if _is_dst else -8
+        _tz_pdt = timezone(timedelta(hours=_offset))
+        _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
+        try:
+            _capital  = get_computed_capital()
+            _deployed = get_daily_exposure()
+            _bp       = max(0.0, round(_capital * 0.70 - _deployed, 2))
+            _cap_line = f'${_capital:.2f} | Deployed: ${_deployed:.2f} | BP: ${_bp:.2f}'
+        except Exception:
+            _cap_line = 'N/A'
+        _scan_msg = (
+            f'\U0001f4ca Ruppert Scan \u2014 {_time_str} PDT\n\n'
+            f'\U0001f324 Weather-only scan\n'
+            f'{_weather_count} trade(s) placed\n\n'
+            f'\U0001f4b0 Capital: {_cap_line}'
+        )
+        push_alert('warning', _scan_msg)
+        send_telegram(_scan_msg)
+        log_activity('[SCAN NOTIFY] weather_only summary sent via Telegram')
+        print('  Scan summary sent via Telegram.')
+    except Exception as _notify_ex:
+        print(f'  Scan notify error (non-fatal): {_notify_ex}')
+
     return {'weather_trades': _weather_count}
 
 
@@ -532,6 +560,34 @@ def run_crypto_only_mode(state):
         import traceback; traceback.print_exc()
 
     print(f"\ncrypto_only done — {_crypto_count} trade(s). {ts()}")
+
+    # Scan summary notification
+    try:
+        import time as _time
+        _is_dst = _time.daylight and _time.localtime().tm_isdst > 0
+        _offset = -7 if _is_dst else -8
+        _tz_pdt = timezone(timedelta(hours=_offset))
+        _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
+        try:
+            _capital  = get_computed_capital()
+            _deployed = get_daily_exposure()
+            _bp       = max(0.0, round(_capital * 0.70 - _deployed, 2))
+            _cap_line = f'${_capital:.2f} | Deployed: ${_deployed:.2f} | BP: ${_bp:.2f}'
+        except Exception:
+            _cap_line = 'N/A'
+        _scan_msg = (
+            f'\U0001f4ca Ruppert Scan \u2014 {_time_str} PDT\n\n'
+            f'\u20bf Crypto-only scan\n'
+            f'{_crypto_count} trade(s) placed\n\n'
+            f'\U0001f4b0 Capital: {_cap_line}'
+        )
+        push_alert('warning', _scan_msg)
+        send_telegram(_scan_msg)
+        log_activity('[SCAN NOTIFY] crypto_only summary sent via Telegram')
+        print('  Scan summary sent via Telegram.')
+    except Exception as _notify_ex:
+        print(f'  Scan notify error (non-fatal): {_notify_ex}')
+
     return {'crypto_trades': _crypto_count}
 
 

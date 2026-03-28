@@ -345,6 +345,14 @@ def analyze_market(market: dict) -> dict | None:
         )
         return None
 
+    # ── T_lower probability flip ──────────────────────────────────────────────
+    # The ensemble always computes P(high >= threshold_f).
+    # For T_lower markets ("Will high be <X°F?"), the Kalshi YES outcome is
+    # P(high < threshold), so we must flip: model_prob = 1 - P(high >= threshold).
+    if market_type == "T_lower":
+        model_prob = 1.0 - model_prob
+        logger.debug(f"[Edge] {ticker}: T_lower market — flipped model_prob to {model_prob:.4f}")
+
     # ── Edge calculation ──────────────────────────────────────────────────────
     edge = model_prob - market_prob
 
