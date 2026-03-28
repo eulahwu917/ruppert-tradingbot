@@ -21,5 +21,8 @@ __pycache__/
 *.pyo
 .env
 
+# Test cache
+.pytest_cache/
+
 # Dashboard cache
 dashboard/__pycache__/
