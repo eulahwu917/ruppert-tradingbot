@@ -111,13 +111,18 @@ async def handle_message(msg: dict):
     if not ticker or not is_relevant(ticker):
         return  # discard irrelevant markets
 
-    # Extract prices (WS sends cent values)
-    yes_bid = data.get('yes_bid')
-    yes_ask = data.get('yes_ask')
+    # Extract prices — WS sends dollar strings (e.g. "0.3400"), not cent ints
+    # yes_bid_dollars / yes_ask_dollars are the correct field names
+    yes_bid_d = data.get('yes_bid_dollars')
+    yes_ask_d = data.get('yes_ask_dollars')
 
-    # Update shared cache (convert cents to dollar fractions for cache)
+    # Convert to cent integers for downstream consumers
+    yes_bid = round(float(yes_bid_d) * 100) if yes_bid_d is not None else None
+    yes_ask = round(float(yes_ask_d) * 100) if yes_ask_d is not None else None
+
+    # Update shared cache (store as dollar fractions)
     if yes_bid is not None and yes_ask is not None:
-        market_cache.update(ticker, yes_bid / 100, yes_ask / 100)
+        market_cache.update(ticker, float(yes_bid_d), float(yes_ask_d))
 
     # Check exit triggers for tracked positions
     await position_tracker.check_exits(ticker, yes_bid, yes_ask)
