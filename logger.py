@@ -293,8 +293,10 @@ def send_telegram(message: str) -> bool:
     """Send a message to David via the openclaw CLI (routes through gateway)."""
     import subprocess
     try:
+        # On Windows, openclaw is a .cmd shim — must run via cmd.exe so it
+        # resolves correctly without shell=True (which mangles multiline args).
         result = subprocess.run(
-            ['openclaw', 'message', 'send',
+            ['cmd', '/c', 'openclaw', 'message', 'send',
              '--channel', 'telegram',
              '-t', '5003590611',
              '-m', message],
