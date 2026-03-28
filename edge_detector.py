@@ -38,6 +38,14 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _safe_int(val, default=0):
+    """Safely cast API numeric fields that may arrive as float strings (e.g. '2563.00')."""
+    try:
+        return int(float(val)) if val is not None else default
+    except (ValueError, TypeError):
+        return default
+
+
 def _shadow_log_yes_signal(signal: dict):
     """Log YES weather signals as counterfactuals -- never executed, observation only."""
     import json
@@ -378,7 +386,7 @@ def analyze_market(market: dict) -> dict | None:
     # ── Volume-tier edge discounting ──────────────────────────────────────────
     # Discount edge for thin markets before divergence gate and threshold check.
     # Thin markets need higher raw edge to pass. Uses volume_24h_fp from market data.
-    _volume = int(market.get('volume_24h_fp', 0) or 0)
+    _volume = _safe_int(market.get('volume_24h_fp', 0))
     _raw_edge = model_prob - market_prob
     _adj_edge, _volume_tier = apply_volume_tier(_raw_edge, _volume)
     if _volume_tier != 'thick':
