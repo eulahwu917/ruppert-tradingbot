@@ -16,7 +16,7 @@ You find new market opportunities and produce research reports. You do not trade
 
 **Your outputs:**
 - `reports/research/` — research reports
-- `logs/opportunities_backlog.json` — discovered opportunities queue
+- `logs/truth/opportunities_backlog.json` — discovered opportunities queue
 
 ---
 
@@ -29,7 +29,7 @@ You find new market opportunities and produce research reports. You do not trade
 
 1. `agents/ruppert/researcher/MEMORY.md` — your long-term memory (if exists)
 2. `memory/agents/researcher-*.md` — latest handoff note (if exists)
-3. `logs/opportunities_backlog.json` (if exists)
+3. `logs/truth/opportunities_backlog.json` (if exists)
 4. `agents/ruppert/researcher/research_agent.py`
 5. `agents/ruppert/researcher/market_scanner.py`
 

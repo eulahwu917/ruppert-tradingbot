@@ -6,6 +6,8 @@ Scans Kalshi API for market categories not currently traded by Ruppert,
 checks for coverage gaps, and surfaces hypotheses about new signal sources.
 
 Called by research_agent.py — not run standalone.
+
+    Requires Python 3.10+ (uses PEP 604 union type syntax: dict | None, list[str] | None).
 """
 
 import sys
@@ -19,6 +21,16 @@ _AGENTS_ROOT = Path(__file__).parent.parent.parent  # workspace/agents
 _WORKSPACE_ROOT = _AGENTS_ROOT.parent               # workspace/
 if str(_WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKSPACE_ROOT))
+
+
+# California-restricted series: sports and election prediction markets
+# Geo restriction applies to all California-based participants.
+CA_RESTRICTED_SERIES = {
+    # Sports
+    'KXNBA', 'KXNHL', 'KXMLB', 'KXNFL',
+    # Elections
+    'KXPRES', 'KXSEC', 'KXHOUSE', 'KXSENATE',
+}
 
 # -----------------------------------------------------------------------
 # Categories currently traded by Ruppert
@@ -170,6 +182,19 @@ def classify_opportunity(result: dict) -> dict:
             'recommendation': 'SKIP',
             'reason': 'No open markets found',
             'priority': 0,
+        }
+
+    # California geo restriction: reject before scoring
+    if series in CA_RESTRICTED_SERIES:
+        return {
+            'series': series,
+            'count': count,
+            'volume': volume,
+            'sample_titles': titles,
+            'recommendation': 'RESTRICTED',
+            'score': 0,
+            'reasons': ['California geo restriction — sports/election markets not legally tradeable from CA'],
+            'priority': -1,
         }
 
     # Heuristic scoring

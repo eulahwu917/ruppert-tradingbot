@@ -56,9 +56,6 @@ def _write_opportunities_backlog(opportunities: list[dict]) -> None:
         except Exception:
             existing = []
 
-    # Build set of existing series for dedup
-    existing_series = {e.get('series') for e in existing}
-
     # Merge: update existing entries, add new ones
     updated = {e['series']: e for e in existing}
     for opp in opportunities:
@@ -187,6 +184,13 @@ def _write_markdown_report(
             f"- **Signals:** {', '.join(h.get('signal_sources', []))}",
             f"",
         ]
+
+    # RESTRICTED section
+    restricted = [o for o in opportunities if o.get('recommendation') == 'RESTRICTED']
+    if restricted:
+        lines.append('\n## 🚫 RESTRICTED — California Geo\n')
+        for opp in restricted:
+            lines.append(f"- **{opp['series']}** — {', '.join(opp.get('reasons', []))}")
 
     lines += [
         f"---",

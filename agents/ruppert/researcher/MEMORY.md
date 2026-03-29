@@ -12,7 +12,7 @@ _Owned by: Researcher agent. Updated after scans, discoveries, or pattern findin
 - Geo markets: high edge variance, manual approval required
 
 ## Discovered Opportunities
-- See `logs/opportunities_backlog.json` for active queue
+- See `logs/truth/opportunities_backlog.json` for active queue
 
 ## Lessons Learned
 - (populate after first real scan cycle)
