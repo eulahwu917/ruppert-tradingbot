@@ -55,10 +55,11 @@ def check_settlements(client):
 
     today = date.today()
 
-    # Scan a rolling 30-day window to catch long-horizon positions (monthly/annual).
-    # We read all available log files from the last 30 days; most will be empty/missing.
+    # Scan a rolling 365-day window to catch long-horizon positions (monthly/annual).
+    # Extended from 30 days — positions entered more than 30 days ago were silently
+    # skipped by the settlement checker. Most files don't exist; skipped via exists().
     logs_to_check = []
-    for days_back in range(30):
+    for days_back in range(365):
         log_date = today - timedelta(days=days_back)
         logs_to_check.append(TRADES_DIR / f"trades_{log_date.isoformat()}.jsonl")
 
@@ -257,14 +258,18 @@ def push_alert(level, message, ticker=None, pnl=None):
 def load_open_positions():
     """Load open positions from trade logs, filtering out exits.
 
-    Reads today's log AND yesterday's log so multi-day positions entered
-    yesterday are not missed. Today's entries/exits take precedence.
+    Scans a 365-day rolling window to capture long-horizon positions
+    (monthly, quarterly, annual markets). Most files will not exist and
+    are skipped cheaply via exists() check.
     """
     today = date.today()
 
-    # Scan rolling 30-day window to include long-horizon positions (monthly/annual).
+    # Scan rolling 365-day window to capture long-horizon positions (monthly/annual).
+    # Extended from 30 days — a 30-day window silently dropped positions entered
+    # more than 30 days ago (e.g. annual markets). Most files don't exist; the
+    # exists() check is cheap.
     logs_to_check = []
-    for days_back in range(30):
+    for days_back in range(365):
         log_date = today - timedelta(days=days_back)
         logs_to_check.append(TRADES_DIR / f"trades_{log_date.isoformat()}.jsonl")
 

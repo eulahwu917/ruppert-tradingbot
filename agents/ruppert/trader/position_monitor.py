@@ -96,12 +96,20 @@ def push_alert(level, message, ticker=None, pnl=None):
 # ─────────────────────────────── Position Loading ─────────────────────────────
 
 def load_open_positions():
-    """Load open positions from trade logs, filtering out exits/settlements."""
+    """Load open positions from trade logs, filtering out exits/settlements.
+
+    Scans a 365-day rolling window to capture long-horizon positions
+    (monthly, quarterly, annual markets). Most files will not exist and
+    are skipped cheaply via exists() check.
+    """
     today = date.today()
 
-    # Scan rolling 30-day window to include long-horizon positions (monthly/annual).
+    # Scan rolling 365-day window to capture long-horizon positions (monthly/annual).
+    # Extended from 30 days — a 30-day window silently dropped positions entered
+    # more than 30 days ago (e.g. annual markets). Most files don't exist; the
+    # exists() check is cheap.
     logs_to_check = []
-    for days_back in range(30):
+    for days_back in range(365):
         log_date = today - timedelta(days=days_back)
         logs_to_check.append(TRADES_DIR / f"trades_{log_date.isoformat()}.jsonl")
 
