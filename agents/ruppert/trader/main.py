@@ -962,6 +962,8 @@ def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
                 break
 
             side = opp.get('side', opp.get('direction', 'yes')).lower()
+            _estimated_prob = opp.get('estimated_prob', 0.5)
+            _geo_win_prob = _estimated_prob if side == 'yes' else (1.0 - _estimated_prob)
             yes_ask = int(opp.get('yes_ask', 50))
             yes_bid = int(opp.get('yes_bid', yes_ask))
             bet_price = yes_ask if side == 'yes' else 100 - yes_ask
@@ -972,7 +974,7 @@ def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
 
             signal = {
                 'edge':                opp.get('edge', 0.0),
-                'win_prob':            opp.get('win_prob', opp.get('estimated_prob', 0.5)),
+                'win_prob':            _geo_win_prob,
                 'confidence':          min(opp.get('confidence', 0.0),
                                           getattr(config, 'GEO_MAX_CONFIDENCE', 0.85)),
                 'hours_to_settlement': _geo_hours,
@@ -1035,7 +1037,7 @@ def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
                 log_prediction(
                     domain='geo',
                     ticker=ticker,
-                    predicted_prob=opp.get('win_prob', opp.get('estimated_prob', 0.5)),
+                    predicted_prob=_geo_win_prob,
                     market_price=yes_ask / 100,
                     edge=opp.get('edge', 0.0),
                     side=side,
@@ -1043,8 +1045,21 @@ def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
             except Exception:
                 pass
 
+            try:
+                from baselines import log_uniform_sizing
+                log_uniform_sizing(
+                    ticker=ticker,
+                    domain='geo',
+                    actual_action=side,
+                    actual_price=bet_price / 100,
+                    actual_size=actual_cost,
+                )
+            except Exception:
+                pass
+
             traded_tickers.add(ticker)
             _geo_deployed_this_cycle += actual_cost
+            _geo_deployed += actual_cost
             _geo_open_exposure += actual_cost
             executed.append(trade_opp)
             log_activity(f"  [Geo] ENTERED {ticker} {side.upper()} {contracts}@{bet_price}c ${actual_cost:.2f}")

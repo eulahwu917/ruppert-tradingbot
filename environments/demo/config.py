@@ -105,10 +105,12 @@ MIN_HOURS_TO_CLOSE = 4.0
 
 # Minimum confidence thresholds per module
 MIN_CONFIDENCE = {
-    'weather': 0.25,
-    'crypto':  0.50,
-    'fed':     0.55,
-    'geo':     0.50,
+    'weather':    0.25,
+    'crypto':     0.50,
+    'fed':        0.55,
+    'geo':        0.50,
+    'crypto_15m': 0.50,
+    'econ':       0.55,
 }
 
 # ── Volume-Tier Edge Discounting ──────────────────────────────────────────────

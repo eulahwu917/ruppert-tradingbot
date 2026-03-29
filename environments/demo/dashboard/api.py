@@ -24,6 +24,10 @@ app = FastAPI(title="Ruppert Trading Dashboard")
 LOGS_DIR = Path(__file__).parent.parent / "logs"
 MODE_FILE = Path(__file__).parent.parent / "mode.json"
 
+_state_cache: dict = {"ts": 0.0, "data": None}
+_pnl_cache: dict = {"ts": 0.0, "data": None}
+_positions_cache: dict = {"ts": 0.0, "data": None}
+
 
 def _cache_reload_loop() -> None:
     """Background daemon thread: reloads price_cache.json from disk every 60s."""
@@ -494,6 +498,8 @@ def get_active_positions():
             # Recompute pos_ratio with total_cost
             for p in positions:
                 p['pos_ratio'] = round(p['cost'] / total_cost * 100) if total_cost else 0
+            _positions_cache["ts"] = time.time()
+            _positions_cache["data"] = positions
             return positions
         except Exception:
             pass  # Fall through to log-based approach if Kalshi API fails
@@ -1061,10 +1067,6 @@ def get_pnl_history():
 
 
 # ─── /api/state — single snapshot endpoint ────────────────────────────────────
-
-_state_cache: dict = {"ts": 0.0, "data": None}
-_pnl_cache: dict = {"ts": 0.0, "data": None}
-_positions_cache: dict = {"ts": 0.0, "data": None}
 
 
 def _build_state():

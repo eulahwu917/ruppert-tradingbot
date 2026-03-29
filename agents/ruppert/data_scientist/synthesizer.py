@@ -83,14 +83,14 @@ def read_today_events(event_date: date = None) -> list:
 
 # ── Core synthesizers ──────────────────────────────────────────────────────────
 
-def synthesize_alerts(events: list = None) -> list:
+def synthesize_alerts(events: list = None, event_date=None) -> list:
     """
     Process ALERT_CANDIDATE events from today's log.
     Appends genuinely new alerts to logs/truth/pending_alerts.json.
     Returns list of newly added alerts.
     """
     if events is None:
-        events = read_today_events()
+        events = read_today_events(event_date)
 
     alert_events = [e for e in events if e.get('type') == 'ALERT_CANDIDATE']
 
@@ -167,14 +167,14 @@ def synthesize_pnl_cache(events: list = None) -> dict:
     return cache
 
 
-def synthesize_state(events: list = None) -> dict | None:
+def synthesize_state(events: list = None, event_date=None) -> dict | None:
     """
     Build state.json from the most recent STATE_UPDATE event today.
     No-ops if no STATE_UPDATE events exist.
     Returns new state dict, or None if no updates.
     """
     if events is None:
-        events = read_today_events()
+        events = read_today_events(event_date)
 
     state_events = [e for e in events if e.get('type') == 'STATE_UPDATE']
     if not state_events:

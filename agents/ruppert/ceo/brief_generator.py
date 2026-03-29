@@ -471,8 +471,8 @@ def build_brief() -> str:
 def _is_live_mode() -> bool:
     """Check if running in live mode."""
     try:
-        import config
-        return not config.DRY_RUN
+        from agents.ruppert.env_config import is_live_enabled
+        return is_live_enabled()
     except Exception:
         return False
 

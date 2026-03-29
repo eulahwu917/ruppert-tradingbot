@@ -436,8 +436,8 @@ def run_econ_prescan_mode(client, state):
                 continue
 
             side = opp.get('bet_direction', 'yes').lower()
-            mkt_price = int(opp.get('yes_ask', 50) if side == 'yes' else opp.get('no_ask', 50))
-            bet_price = mkt_price if side == 'yes' else 100 - mkt_price
+            bet_price = int(opp.get('bet_price_cents',
+                opp.get('yes_ask', 50) if side == 'yes' else (100 - opp.get('yes_ask', 50))))
             hours_left = max(1.0, opp.get('hours_to_settlement', 48))
 
             if not check_open_exposure(_econ_capital, state.open_position_value):
@@ -449,10 +449,14 @@ def run_econ_prescan_mode(client, state):
                 print(f"  [DailyCap] Daily cap reached — stopping econ trades")
                 break
 
+            _CONF_MAP = {'high': 0.75, 'medium': 0.55, 'low': 0.30}
+            _raw_conf = opp.get('confidence', 0)
+            _conf_float = _CONF_MAP.get(str(_raw_conf).lower(), 0.0) if isinstance(_raw_conf, str) else float(_raw_conf or 0.0)
+
             signal = {
                 'edge': opp.get('edge', 0),
                 'win_prob': opp.get('model_prob', 0.5),
-                'confidence': opp.get('confidence', 0),
+                'confidence': _conf_float,
                 'hours_to_settlement': hours_left,
                 'module': 'econ',
                 'vol_ratio': 1.0,
@@ -487,7 +491,7 @@ def run_econ_prescan_mode(client, state):
                 'market_prob': opp.get('market_prob', 0.5),
                 'noaa_prob': None,
                 'edge': opp.get('edge'),
-                'confidence': opp.get('confidence'),
+                'confidence': _conf_float,
                 'size_dollars': actual_cost,
                 'contracts': contracts,
                 'source': 'econ',

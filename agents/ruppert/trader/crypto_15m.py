@@ -913,7 +913,7 @@ def evaluate_crypto_15m_entry(
     }
     _se_decision = should_enter(
         _signal_dict, capital, _deployed_today,
-        module='crypto',
+        module='crypto_15m',
         module_deployed_pct=_module_deployed_pct,
         traded_tickers=None,
     )

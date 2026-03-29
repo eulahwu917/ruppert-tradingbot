@@ -166,14 +166,15 @@ async def _rest_refresh_stale() -> None:
         logger.warning('[WS Feed] _rest_refresh_stale: could not get tracked: %s', e)
         return
 
+    kalshi_client = None
     for ticker in tracked:
         try:
             _, _, is_stale = market_cache.get_with_staleness(ticker)
             if not is_stale:
                 continue
-            # Lazy import — only instantiate when a stale ticker is found
-            from agents.ruppert.data_analyst.kalshi_client import KalshiClient
-            kalshi_client = KalshiClient()
+            if kalshi_client is None:
+                from agents.ruppert.data_analyst.kalshi_client import KalshiClient
+                kalshi_client = KalshiClient()
             result = kalshi_client.get_market(ticker)
             if result and result.get('yes_bid') is not None and result.get('yes_ask') is not None:
                 bid_d = result['yes_bid'] / 100

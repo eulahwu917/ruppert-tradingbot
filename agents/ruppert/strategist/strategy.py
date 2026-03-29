@@ -571,7 +571,8 @@ def check_loss_circuit_breaker(logs_dir: str, capital: float) -> dict:
     threshold_dollars = capital * threshold_pct
     loss_today = 0.0
 
-    trade_log = Path(logs_dir) / f'trades_{date.today().isoformat()}.jsonl'
+    from agents.ruppert.env_config import get_paths as _get_paths_cb
+    trade_log = _get_paths_cb()['trades'] / f'trades_{date.today().isoformat()}.jsonl'
     if not trade_log.exists():
         return {'tripped': False, 'reason': 'no_trade_log', 'loss_today': 0.0}
 

@@ -276,6 +276,7 @@ def check_daily_cap_violations(trades_today: list[dict]) -> list[dict]:
         'fed': capital * getattr(cfg, 'FED_DAILY_CAP_PCT', 0.03),
         'crypto_15m': capital * getattr(cfg, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04),
         'crypto_long': capital * getattr(cfg, 'LONG_HORIZON_DAILY_CAP_PCT', 0.10),
+        'geo': capital * getattr(cfg, 'GEO_DAILY_CAP_PCT', 0.04),
     }
 
     by_module = {}

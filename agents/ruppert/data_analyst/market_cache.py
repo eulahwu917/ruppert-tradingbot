@@ -126,34 +126,34 @@ def get_market_price(ticker: str, fallback_client=None) -> dict | None:
             'source': 'ws_cache',
         }
     # Stale or missing — fall back to REST
+    orig_bid_d, orig_ask_d = bid_d, ask_d   # preserve before REST block
     if fallback_client:
         try:
             market = fallback_client.get_market(ticker)
             if market:
                 bid = market.get('yes_bid')
                 ask = market.get('yes_ask')
-                bid_d = float(bid) / 100.0 if bid is not None else None
-                ask_d = float(ask) / 100.0 if ask is not None else None
-                if bid_d is not None and ask_d is not None:
-                    update(ticker, bid_d, ask_d, source='rest')
-                return {
-                    'yes_bid': bid if bid is not None else None,
-                    'yes_ask': ask if ask is not None else None,
-                    'no_bid':  round((1 - ask_d) * 100) if ask_d is not None else None,
-                    'no_ask':  round((1 - bid_d) * 100) if bid_d is not None else None,
-                    'source': 'rest',
-                }
+                rest_bid_d = float(bid) / 100.0 if bid is not None else None
+                rest_ask_d = float(ask) / 100.0 if ask is not None else None
+                if rest_bid_d is not None and rest_ask_d is not None:
+                    update(ticker, rest_bid_d, rest_ask_d, source='rest')
+                    return {
+                        'yes_bid': bid,
+                        'yes_ask': ask,
+                        'no_bid':  round((1 - rest_ask_d) * 100),
+                        'no_ask':  round((1 - rest_bid_d) * 100),
+                        'source': 'rest',
+                    }
+                # REST returned market but null prices — fall through to stale
         except Exception:
             pass
-    # P0-3 fix: No silent internal REST fallback when fallback_client=None.
-    # Return None immediately — let the caller decide whether to do REST.
-    # If we have stale data, return it rather than nothing.
-    if bid_d is not None and ask_d is not None:
+    # Use original stale values
+    if orig_bid_d is not None and orig_ask_d is not None:
         return {
-            'yes_bid': round(bid_d * 100),
-            'yes_ask': round(ask_d * 100),
-            'no_bid':  round((1 - ask_d) * 100),
-            'no_ask':  round((1 - bid_d) * 100),
+            'yes_bid': round(orig_bid_d * 100),
+            'yes_ask': round(orig_ask_d * 100),
+            'no_bid':  round((1 - orig_ask_d) * 100),
+            'no_ask':  round((1 - orig_bid_d) * 100),
             'source': 'ws_cache_stale',
         }
     return None
