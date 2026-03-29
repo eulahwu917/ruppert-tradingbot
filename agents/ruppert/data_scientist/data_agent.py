@@ -607,7 +607,7 @@ def _regenerate_pnl_cache():
 
 
 def _format_single_alert(issue_type: str, ticker: str, detail: str, action: str) -> str:
-    lines = [f'\u26a0\ufe0f Data Agent: {issue_type}']
+    lines = [f'\u26a0\ufe0f Data Scientist: {issue_type}']
     if ticker:
         lines.append(f'Ticker: {ticker}')
     lines.append(f'Detail: {detail}')
@@ -616,7 +616,7 @@ def _format_single_alert(issue_type: str, ticker: str, detail: str, action: str)
 
 
 def _format_batch_alert(issues: list[dict], audit_file: str = '') -> str:
-    lines = [f'\u26a0\ufe0f Data Agent: {len(issues)} issues found in post-scan audit']
+    lines = [f'\u26a0\ufe0f Data Scientist: {len(issues)} issues found in post-scan audit']
     # Group by type, tracking first-seen action per type
     by_type = {}
     by_action = {}
@@ -635,7 +635,7 @@ def _format_batch_alert(issues: list[dict], audit_file: str = '') -> str:
 
 def _format_escalation_alert(issue_type: str, ticker: str, detail: str) -> str:
     lines = [
-        '\U0001f50d Data Agent: Needs your review (not auto-fixed)',
+        '\U0001f50d Data Scientist: Needs your review (not auto-fixed)',
         f'Issue: {issue_type}',
     ]
     if ticker:

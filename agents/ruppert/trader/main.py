@@ -448,6 +448,29 @@ def run_weather_scan(dry_run=True):
                         )
                     except Exception:
                         pass
+                    # Register position in tracker so data_agent drift check sees it
+                    try:
+                        from agents.ruppert.trader import position_tracker
+                        _wx_entry_price = (
+                            opp.get('fill_price')
+                            or opp.get('scan_price')
+                            or opp.get('yes_price', 50)
+                        )
+                        _wx_contracts = (
+                            opp.get('fill_contracts')
+                            or opp.get('scan_contracts')
+                            or max(1, int(opp.get('strategy_size', 10) / max(_wx_entry_price, 1) * 100))
+                        )
+                        position_tracker.add_position(
+                            ticker=opp['ticker'],
+                            quantity=_wx_contracts,
+                            side=opp['side'],
+                            entry_price=_wx_entry_price,
+                            module='weather',
+                            title=opp.get('title', opp['ticker']),
+                        )
+                    except Exception as _pt_err:
+                        print(f"  [Weather] Tracker registration failed (non-fatal): {_pt_err}")
             except Exception as exec_err:
                 log_activity(f"[Weather] Execution error (trades may be partially logged): {exec_err}")
                 import traceback
