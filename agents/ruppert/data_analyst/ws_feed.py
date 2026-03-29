@@ -10,7 +10,7 @@ Architecture:
   1. Loads price cache from disk
   2. Connects WS, subscribes to all tickers (no market_tickers filter)
   3. Routes messages: cache updates, exit checks, crypto entry evaluation
-  4. Runs until shutdown (Ctrl+C or outside market hours)
+  4. Runs until shutdown (Ctrl+C)
 """
 
 import sys
@@ -52,17 +52,8 @@ CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M']
 # Crypto hourly band prefixes
 CRYPTO_HOURLY_PREFIXES = ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE', 'KXSOL')
 
-# Market hours (local time)
-MARKET_HOUR_START = 6   # 6 AM
-MARKET_HOUR_END = 23    # 11 PM
-
-
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-
-def _in_market_hours() -> bool:
-    return MARKET_HOUR_START <= datetime.now().hour < MARKET_HOUR_END
 
 
 def is_relevant(ticker: str) -> bool:
@@ -165,7 +156,7 @@ async def handle_message(msg: dict):
 # ─────────────────────────────── Main WS Loop ────────────────────────────────
 
 async def run_ws_feed():
-    """Main WS feed loop. Connects once, runs indefinitely during market hours."""
+    """Main WS feed loop. Connects once, runs indefinitely until shutdown."""
     try:
         import websockets
     except ImportError:
@@ -176,7 +167,7 @@ async def run_ws_feed():
 
     print(f"\n{'='*60}")
     print(f"  WS FEED — {ts()}")
-    print(f"  Market hours: {MARKET_HOUR_START}:00-{MARKET_HOUR_END}:00")
+    print(f"  Mode: 24/7 (no market-hour restriction)")
     print(f"  Active series: {len(ACTIVE_SERIES_PREFIXES)} prefixes")
     print(f"  Tracked positions: {len(position_tracker.get_tracked())}")
     print(f"  Mode: {'DRY RUN' if DRY_RUN else 'LIVE'}")
@@ -187,15 +178,15 @@ async def run_ws_feed():
 
     reconnect_delay = 1
 
-    while _in_market_hours():
+    while True:
         try:
             headers = _build_auth_headers()
 
             async with websockets.connect(
                 'wss://api.elections.kalshi.com/trade-api/ws/v2',
                 additional_headers=headers,
-                ping_interval=30,
-                ping_timeout=30,
+                ping_interval=None,
+                ping_timeout=None,
             ) as ws:
                 reconnect_delay = 1  # reset on successful connect
                 print(f'  [WS Feed] Connected at {ts()}')
@@ -212,10 +203,6 @@ async def run_ws_feed():
                 msg_count = 0
 
                 async for raw in ws:
-                    if not _in_market_hours():
-                        print(f'  [WS Feed] Outside market hours — shutting down')
-                        break
-
                     msg = json.loads(raw)
                     await handle_message(msg)
                     msg_count += 1
@@ -234,8 +221,8 @@ async def run_ws_feed():
                         last_purge = now
 
         except Exception as e:
-            print(f'  [WS Feed] Disconnected: {e} (ping_interval=30, ping_timeout=30) — reconnecting in {reconnect_delay}s')
-            log_activity(f'[WS Feed] Disconnected: {e} (ping_interval=30, ping_timeout=30)')
+            print(f'  [WS Feed] Disconnected: {e} (client pings disabled) — reconnecting in {reconnect_delay}s')
+            log_activity(f'[WS Feed] Disconnected: {e} (client pings disabled)')
 
             # On disconnect: REST-poll tracked positions to catch missed moves
             try:
@@ -250,7 +237,7 @@ async def run_ws_feed():
             market_cache.persist()
 
     print(f'\n  [WS Feed] Session ended at {ts()}')
-    log_activity('[WS Feed] Session ended (outside market hours)')
+    log_activity('[WS Feed] Session ended')
     market_cache.persist()
 
 
