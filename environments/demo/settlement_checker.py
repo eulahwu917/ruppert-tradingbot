@@ -45,7 +45,16 @@ def load_all_unsettled():
     """Read all trade logs and return unsettled buy positions.
 
     Returns:
-        dict: {(ticker, side): record} for buys without a matching settle/exit
+        dict: {(ticker, side): record} for buys without a matching settle/exit.
+              When multiple buy legs exist for the same (ticker, side), each leg
+              is included as its own entry using a unique index suffix key
+              (ticker, side, idx). The consumer in check_settlements() handles
+              both 2-tuple and 3-tuple keys by extracting ticker/side from the
+              record directly.
+
+    NOTE (DS-SETTLE-AUDIT-2026-03-29): Fixed overwrite bug — previously only
+    the last buy leg for a given (ticker, side) was retained. Now all legs are
+    accumulated and each becomes its own unsettled entry.
     """
     entries_by_key = {}
     closed_keys = set()
@@ -66,9 +75,21 @@ def load_all_unsettled():
             if action in ('exit', 'settle'):
                 closed_keys.add(key)
             elif action in ('buy', 'open'):
-                entries_by_key[key] = rec
+                # Accumulate all buy legs instead of overwriting
+                if key not in entries_by_key:
+                    entries_by_key[key] = []
+                entries_by_key[key].append(rec)
 
-    return {k: v for k, v in entries_by_key.items() if k not in closed_keys}
+    # Flatten: each buy leg becomes its own entry in the result dict.
+    # Use (ticker, side, idx) as key so multiple legs don't collide.
+    # check_settlements() reads ticker/side from the record, not the key.
+    result = {}
+    for key, recs in entries_by_key.items():
+        if key in closed_keys:
+            continue
+        for idx, rec in enumerate(recs):
+            result[(key[0], key[1], idx)] = rec
+    return result
 
 
 def compute_pnl(pos, result, side):
@@ -137,7 +158,10 @@ def check_settlements():
     skipped_count = 0
     error_count = 0
 
-    for (ticker, side), pos in unsettled.items():
+    for _key, pos in unsettled.items():
+        # Keys are (ticker, side, idx) — read ticker/side from the record itself
+        ticker = pos.get('ticker', '')
+        side = pos.get('side', '')
         if not ticker or not side:
             skipped_count += 1
             continue

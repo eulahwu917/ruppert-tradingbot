@@ -468,6 +468,11 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                         mins_left = (ct - datetime.now(timezone.utc)).total_seconds() / 60
                         if mins_left < 120:
                             continue
+                        # DS-SETTLE-AUDIT-2026-03-29: skip markets expiring today or already closed
+                        from datetime import date as _date
+                        if ct.date() <= _date.today():
+                            log_activity(f"  [Crypto] Skipping {ticker}: expires today or already closed")
+                            continue
                     except Exception:
                         pass
 
