@@ -576,13 +576,28 @@ def get_live_prices():
         ticker = t.get('ticker','')
         if not ticker or ticker in prices:
             continue
+        bid, ask, is_stale = market_cache.get_with_staleness(ticker)
         _cached = market_cache.get_market_price(ticker, fallback_client=None)
         if _cached:
+            entry = market_cache.get(ticker)
+            updated_at = entry['updated_at'] if entry else None
+            source = entry.get('source', 'websocket') if entry else 'websocket'
             prices[ticker] = {
-                'yes_ask': _cached['yes_ask'],
-                'yes_bid': _cached['yes_bid'],
-                'no_ask':  _cached['no_ask'],
-                'no_bid':  _cached['no_bid'],
+                'yes_ask':    _cached['yes_ask'],
+                'yes_bid':    _cached['yes_bid'],
+                'no_ask':     _cached['no_ask'],
+                'no_bid':     _cached['no_bid'],
+                'source':     source,
+                'updated_at': updated_at,
+            }
+        else:
+            prices[ticker] = {
+                'yes_ask':    None,
+                'yes_bid':    None,
+                'no_ask':     None,
+                'no_bid':     None,
+                'source':     None,
+                'updated_at': None,
             }
     return prices
 

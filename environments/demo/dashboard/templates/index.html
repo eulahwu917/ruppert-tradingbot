@@ -834,7 +834,11 @@ async function loadLivePrices(positions) {
     let cp = p.side?.toLowerCase()==='yes'
       ? (lv.yes_bid ?? lv.yes_ask ?? null)
       : (lv.no_bid != null ? lv.no_bid : (lv.yes_ask != null ? 100 - lv.yes_ask : null));
-    if(cp==null) continue;
+    if(cp==null || (lv.updated_at == null && lv.yes_bid == null && lv.yes_ask == null)) {
+      const el=document.getElementById('cp-'+p.ticker);
+      if(el) el.innerHTML = '\u2014';
+      continue;
+    }
     const open = ((cp - p.entry_price)*p.contracts)/100;
     const pcost = p.total_cost || p.cost || 0;
     const opc  = pcost ? open/pcost*100 : 0;
@@ -844,7 +848,15 @@ async function loadLivePrices(positions) {
     const nearLoss = cp <= 5;
     const settling = nearWin || nearLoss;
     const el=document.getElementById('cp-'+p.ticker);
-    if(el) el.textContent = cp+'c';
+    if(el) {
+      const now = Date.now() / 1000;
+      const updatedAt = lv.updated_at;
+      if (updatedAt != null && (now - updatedAt) > 60) {
+        el.textContent = cp + 'c ⚠️';
+      } else {
+        el.textContent = cp + 'c';
+      }
+    }
     // Populate Status column
     const stEl = document.getElementById('st-'+p.ticker);
     if (stEl) {

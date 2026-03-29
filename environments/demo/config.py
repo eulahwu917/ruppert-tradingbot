@@ -165,7 +165,7 @@ WS_ACTIVE_SERIES = [
     'KXNATO', 'KXCHINA', 'KXNKOREA', 'KXCEASEFIRE',
 ]
 WS_CACHE_STALE_SECONDS = 60      # trigger REST fallback after this many seconds
-WS_CACHE_PURGE_SECONDS = 300     # purge dead entries after this many seconds
+WS_CACHE_PURGE_SECONDS = 86400   # purge dead entries after this many seconds (24h)
 
 # ── Long-Horizon Crypto (KXBTCMAXY, KXBTCMAXM, etc.) ────────────────────────
 LONG_HORIZON_MIN_EDGE = 0.08        # 8c minimum edge
