@@ -17,9 +17,12 @@ Signal dict contract (produced by each module):
 """
 
 import json
+import logging
 import sys
 from datetime import date
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Ensure project root is on sys.path when running standalone
 # Resolve workspace root and add to path (agents.ruppert.* + config shim)
@@ -237,7 +240,15 @@ def check_open_exposure(total_capital: float, open_position_value: float) -> boo
 # 3. Entry Decision
 # ---------------------------------------------------------------------------
 
-def should_enter(signal: dict, capital: float, deployed_today: float) -> dict:
+def should_enter(
+    signal: dict,
+    capital: float,
+    deployed_today: float,
+    *,
+    module: str = None,
+    module_deployed_pct: float = 0.0,
+    traded_tickers: set = None,
+) -> dict:
     """
     Decide whether to open a new position.
 
@@ -246,14 +257,17 @@ def should_enter(signal: dict, capital: float, deployed_today: float) -> dict:
     only the signal.
 
     Args:
-        signal:         Signal dict (see module contract at top of file).
-        capital:        Total available capital in dollars.
-        deployed_today: Dollars already deployed today.
+        signal:              Signal dict (see module contract at top of file).
+        capital:             Total available capital in dollars.
+        deployed_today:      Dollars already deployed today.
+        module:              Optional module name for per-module cap check.
+        module_deployed_pct: Fraction of capital already deployed by this module today.
+        traded_tickers:      Optional set of tickers already traded today (same-day re-entry block).
 
     Returns:
         {'enter': bool, 'size': float, 'reason': str}
     """
-    module            = signal.get('module', 'unknown')
+    signal_module     = signal.get('module', 'unknown')
     edge              = signal.get('edge', 0.0)
     win_prob          = signal.get('win_prob', 0.0)
     confidence        = signal.get('confidence', 0.0)
@@ -271,16 +285,48 @@ def should_enter(signal: dict, capital: float, deployed_today: float) -> dict:
                 'reason': f'low_confidence ({confidence:.2f} < {MIN_CONFIDENCE})'}
 
     # --- Edge gate (module-specific) ---
-    min_edge = MIN_EDGE.get(module, MIN_EDGE['weather'])
+    min_edge = MIN_EDGE.get(signal_module, MIN_EDGE['weather'])
     if edge < min_edge:
         return {'enter': False, 'size': 0.0,
-                'reason': f'insufficient_edge ({edge:.3f} < {min_edge} for {module})'}
+                'reason': f'insufficient_edge ({edge:.3f} < {min_edge} for {signal_module})'}
 
     # --- Global open exposure cap (real-time 70% check) ---
     open_position_value = signal.get('open_position_value', 0.0)
     if not check_open_exposure(capital, open_position_value):
         return {'enter': False, 'size': 0.0,
                 'reason': 'global_exposure_cap_reached (70% of capital)'}
+
+    # --- Per-module daily cap ---
+    if module is not None:
+        _module_key = module.upper() + '_DAILY_CAP_PCT'
+        _module_cap = getattr(config, _module_key, None)
+        if _module_cap is not None:
+            # NOTE: Setting MODULE_DAILY_CAP_PCT = 0.0 will ALWAYS block the module (0.0 >= 0.0 is True).
+            # To disable a module, set it to a very high value (e.g. 99.0) or remove the config key entirely.
+            # cap=0 does NOT mean "unlimited" — it means "never trade".
+            if module_deployed_pct >= _module_cap:
+                return {
+                    'enter': False,
+                    'size': 0.0,
+                    'reason': f'module_cap_exceeded ({module}: {module_deployed_pct:.1%} >= {_module_cap:.1%})'
+                }
+        else:
+            logger.warning(f'should_enter: no daily cap config for module "{module}" ({_module_key} not in config). Allowing through.')
+            try:
+                from agents.ruppert.data_scientist.logger import send_telegram
+                send_telegram(f'[Strategy] WARNING: No daily cap configured for module "{module}" ({_module_key} missing from config). Trade allowed through.')
+            except Exception:
+                pass
+
+    # --- Same-day re-entry block ---
+    if traded_tickers is not None:
+        _ticker = signal.get('ticker')
+        if _ticker and _ticker in traded_tickers:
+            return {
+                'enter': False,
+                'size': 0.0,
+                'reason': f'same_day_reentry ({_ticker})'
+            }
 
     # --- Daily cap gate ---
     room = check_daily_cap(capital, deployed_today)

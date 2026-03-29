@@ -1,0 +1,186 @@
+# QA REPORT — Dashboard Module Cards Redesign
+_SA-4 QA Review | 2026-03-12_
+_Files reviewed: `kalshi-bot/dashboard/api.py`, `kalshi-bot/dashboard/templates/index.html`_
+_Developer summary: `memory/agents/developer_module_cards_2026-03-12.md`_
+
+---
+
+## Status: PASS WITH WARNINGS
+
+---
+
+## ✅ Checks Passed
+
+### Backend (api.py)
+
+**1. classify_module() — crypto bucket**
+Correctly implemented:
+```python
+if src == 'crypto' or (src == 'bot' and (
+    t.startswith('KXBTC') or t.startswith('KXETH') or
+    t.startswith('KXXRP') or t.startswith('KXDOGE')
+)):
+    return 'crypto'
+```
+Matches spec exactly. ✅
+
+**2. classify_module() — fed bucket**
+```python
+if src == 'fed' or t.startswith('KXFED') or t.startswith('KXFEDDECISION'):
+    return 'fed'
+```
+Matches spec intent. ✅ (see Warning W-2 below for redundancy note)
+
+**3. Per-module stats dict initialized correctly**
+`module_stats` tracks all required fields:
+`closed_pnl`, `closed_pnl_month`, `closed_pnl_year`, `trade_count`, `trade_count_month`, `trade_count_year`, `wins` — all present. `win_rate` computed in `modules_out` before return. ✅
+
+**4. "modules" key present in /api/pnl response**
+`pnl_result` dict includes `"modules": modules_out`. ✅
+
+**5. /api/trades — manual trades filtered**
+```python
+_MANUAL_EXCL = ('manual', 'economics', 'geo')
+closed = [t for t in closed if t.get('source', 'bot') not in _MANUAL_EXCL]
+```
+Applied at end of `get_trades()`. Correct tuple, correct placement, correct default of `'bot'` for missing source. ✅
+
+**6. No existing /api/pnl return fields removed**
+Verified all previously existing keys are intact: `open_pnl`, `closed_pnl`, `total_pnl`, `bot_closed_pnl`, `manual_closed_pnl`, `bot_open_pnl`, `manual_open_pnl`, `bot_deployed`, `man_deployed`, `closed_pnl_day`, `bot_closed_month`, `bot_closed_year`, `bot_closed_all`, `manual_closed_month`, `manual_closed_year`, `manual_closed_all`, `closed_pnl_month`, `closed_pnl_year`, `closed_win_rate`, `bot_trades`, `man_trades`, `points`, `total`, `bot_cost_basis`, `man_cost_basis`. All present. ✅
+
+**7. Module accumulation — only bot (non-manual) trades counted**
+`classify_module()` is called only inside `if not is_manual:` block. Manual trades (economics, geo, manual) are excluded from all module stats. ✅
+
+**8. Period bucketing logic correct**
+Month: `sdate.year == _today.year and sdate.month == _today.month`
+Year: `sdate.year == _today.year`
+All-time: accumulated via `closed_pnl` top-level counter.
+Consistent with how `closed_by_src_period` is bucketed. ✅
+
+---
+
+### Frontend (index.html)
+
+**9. Manual Trades card fully removed from HTML**
+Only one `split-card` div remains. No dead HTML. `split-side-label` reads "Bot Performance". ✅
+
+**10. Bot Trades card renamed to "Bot Performance"**
+`<div class="split-side-label">Bot Performance</div>` confirmed. ✅
+
+**11. Three module cards present with correct colors**
+- 🌤 Weather: `border-top:3px solid #4ade80` (green) ✅
+- ₿ Crypto: `border-top:3px solid #a78bfa` (purple) ✅
+- 🏛 Fed: `border-top:3px solid #60a5fa` (blue) ✅
+
+**12. Period selector on each card**
+All three cards have `<select>` with options: This Month, This Year, All Time. Default: This Month. ✅
+
+**13. Period selector updates P&L and trade count correctly**
+`renderModuleCard()` correctly maps period to data fields:
+```javascript
+const pnl   = period === 'month' ? d.closed_pnl_month  : period === 'year' ? d.closed_pnl_year  : d.closed_pnl;
+const count = period === 'month' ? d.trade_count_month : period === 'year' ? d.trade_count_year : d.trade_count;
+```
+Both P&L value and trade count update per period. ✅
+
+**14. Win rate stays all-time regardless of period**
+`renderModuleCard()` always reads `d.win_rate` (not period-filtered). No period condition on win rate logic. ✅
+
+**15. crypto-module-* prefix used throughout**
+`MODULE_ID = { weather: 'weather', crypto: 'crypto-module', fed: 'fed' }` maps correctly.
+Crypto element IDs confirmed: `crypto-module-period`, `crypto-module-pnl`, `crypto-module-pnl-pct`, `crypto-module-winrate`, `crypto-module-trades`. No collision with existing `crypto-b`, `crypto-btc-price`, `crypto-eth-price`, `crypto-sm-badge` etc. ✅
+
+**16. Module cards positioned above positions table**
+DOM order: Account bar → Bot Performance row → `#module-cards-row` → `.main-grid` (positions/trades). ✅
+
+**17. No manual references in stats area HTML**
+No Manual label, no manual P&L display in the split-row or module cards. ✅
+
+**18. loadClosedPnl() reads pnl.modules and renders all three cards**
+```javascript
+if (pnl.modules) {
+  window._moduleData = pnl.modules;
+  ['weather', 'crypto', 'fed'].forEach(m => {
+    if (window._moduleData[m]) renderModuleCard(m);
+  });
+}
+```
+Correct. All three modules rendered on load. ✅
+
+---
+
+## ⚠️ Warnings (Discretionary)
+
+**W-1 — classify_module() weather rule diverges from spec**
+- **Spec says:** `source in ('weather','bot') AND ticker starts with 'KXHIGH'`
+- **Code does:** `source == 'weather' OR (source == 'bot' AND ticker starts with 'KXHIGH')`
+- **Difference:** With the code, `source='weather'` trades are always classified as weather regardless of ticker. The spec requires KXHIGH ticker check even for `source='weather'`.
+- **Practical impact:** Near-zero. All weather bot trades use KXHIGH tickers. If a weather trade were somehow logged with a non-KXHIGH ticker, it would be incorrectly bucketed under 'weather' instead of 'other'.
+- **Recommendation:** Align to spec if strict correctness is required:
+  ```python
+  if (src in ('weather', 'bot')) and t.startswith('KXHIGH'):
+  ```
+  Otherwise acceptable as-is given real-world data patterns.
+
+**W-2 — Redundant ticker check in fed classification**
+```python
+if src == 'fed' or t.startswith('KXFED') or t.startswith('KXFEDDECISION'):
+```
+`'KXFEDDECISION'.startswith('KXFED')` is always True, so `t.startswith('KXFEDDECISION')` is dead code — it can never match without `t.startswith('KXFED')` already matching. No functional impact. Can be cleaned up.
+
+**W-3 — Dead JS code references to removed Manual Trades card**
+`loadClosedPnl()` still calls:
+```javascript
+setSplitPnl('man-pnl', 'man-pnl-pct', ...)  // man-pnl element doesn't exist
+$('man-dep').textContent = ...                // guarded with if(), no crash
+$('man-cnt').textContent = ...                // guarded with if(), no crash
+```
+Also remaining dead code:
+- `window._manCpnlData`, `window._manCpnlFrame` global vars
+- `setManCpnlFrame()` function definition
+
+All are guarded (null checks present, `setSplitPnl` has `if (!el) return;`). No runtime errors. But it's orphaned code that should be cleaned up in a future pass.
+
+---
+
+## ❌ Issues (Must Fix)
+
+None. No blocking issues found.
+
+---
+
+## Summary
+
+| Area | Result |
+|------|--------|
+| classify_module() weather | ✅ functional, ⚠️ minor spec divergence |
+| classify_module() crypto | ✅ exact match |
+| classify_module() fed | ✅ correct, ⚠️ redundant check |
+| Per-module stat fields | ✅ all required fields present |
+| "modules" in /api/pnl | ✅ present |
+| /api/trades manual filter | ✅ correct |
+| Existing fields preserved | ✅ all intact |
+| Manual card removed (HTML) | ✅ clean removal |
+| Bot Performance rename | ✅ |
+| Three module cards + colors | ✅ |
+| Period selectors | ✅ |
+| P&L + count update by period | ✅ |
+| Win rate all-time | ✅ |
+| crypto-module-* IDs | ✅ no collisions |
+| Cards above positions table | ✅ |
+| No manual refs in stats area | ✅ HTML clean, ⚠️ dead JS refs |
+
+**3 warnings, 0 blocking issues.**
+CEO may approve for EOD push at discretion.
+
+---
+
+## Re-Verification � SA-4 QA | 2026-03-12 (second pass)
+
+**W1 (weather AND fix):** CONFIRMED FIXED. pi.py line 931 now reads if (src in ('weather', 'bot')) and t.startswith('KXHIGH'): � the correct AND logic per spec. No OR branching present.
+
+**W2 (KXFEDDECISION removal):** CONFIRMED FIXED. pi.py line 938 reads if src == 'fed' or t.startswith('KXFED'): � 	.startswith('KXFEDDECISION') has been removed. Fed classification is clean.
+
+**W3 (dead manual JS refs):** CONFIRMED FIXED. A full pattern search across index.html for man-pnl, man-dep, man-cnt, _manCpnlData, _manCpnlFrame, and setManCpnlFrame returned zero functional code matches. The single hit (line 745) is a developer comment noting element IDs for documentation purposes only � not DOM manipulation. All orphaned code has been removed.
+
+**No other trading logic changes detected.** classify_module() crypto and fed branches are identical to the original reviewed code. All three warnings from the initial pass are resolved. **Re-verification result: PASS � all 3 warnings cleared, no new issues introduced.**

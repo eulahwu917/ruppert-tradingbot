@@ -31,7 +31,7 @@ if str(_WORKSPACE_ROOT) not in sys.path:
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from agents.ruppert.strategist.edge_detector import find_opportunities
 from agents.ruppert.trader.trader import Trader
-from agents.ruppert.data_scientist.logger import log_activity, log_trade, get_daily_summary, get_daily_exposure, get_computed_capital
+from agents.ruppert.data_scientist.logger import log_activity, log_trade, get_daily_summary, get_daily_exposure
 from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 from economics_scanner import find_econ_opportunities
 from geopolitical_scanner import run_geo_scan, format_geo_brief
@@ -372,7 +372,12 @@ def run_weather_scan(dry_run=True):
 
             signal = _opp_to_signal(opp, module='weather')
             signal['open_position_value'] = _open_exposure
-            decision = should_enter(signal, total_capital, deployed_today)
+            decision = should_enter(
+                signal, total_capital, deployed_today,
+                module='weather',
+                module_deployed_pct=_weather_deployed_this_cycle / total_capital if total_capital > 0 else 0.0,
+                traded_tickers=None,
+            )
             if decision['enter']:
                 # Check weather-specific budget before approving
                 if _weather_deployed_this_cycle + decision['size'] > _weather_daily_cap:
@@ -525,9 +530,13 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
 
             print(f"  [{series}] {len(near_price)} markets near spot (${spot:,.2f}), enriching orderbooks...")
 
-            # Enrich only the near-price markets with orderbook data
-            for m in near_price:
-                client.enrich_orderbook(m)
+            # Enrich near-price markets in parallel (10 workers → ~15-20s vs ~2min serial)
+            import concurrent.futures
+            def _enrich_market(m, _client=client):
+                _client.enrich_orderbook(m)
+                return m
+            with concurrent.futures.ThreadPoolExecutor(max_workers=10) as _pool:
+                list(_pool.map(_enrich_market, near_price, timeout=30))
 
             from datetime import timezone
             for m in near_price:
@@ -594,7 +603,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
 
         # Daily cap check before executing
         try:
-            _total_capital  = get_computed_capital()
+            _total_capital  = get_capital()
             _deployed_today = get_daily_exposure()
             _cap_remaining  = check_daily_cap(_total_capital, _deployed_today)
             if _cap_remaining <= 0:
@@ -637,7 +646,12 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 'yes_bid': t.get('yes_bid', t['yes_ask']),
                 'open_position_value': _open_exposure,
             }
-            decision = should_enter(signal, _total_capital, _deployed_today)
+            decision = should_enter(
+                signal, _total_capital, _deployed_today,
+                module='crypto',
+                module_deployed_pct=_crypto_deployed_this_cycle / _total_capital if _total_capital > 0 else 0.0,
+                traded_tickers=traded_tickers,
+            )
             if not decision['enter']:
                 print(f"  [Strategy] SKIP {t['ticker']}: {decision['reason']}")
                 continue
@@ -701,6 +715,7 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
             return []
 
         fed_signal = _run_fed_scan_inner()
+        _fed_deployed_this_cycle = 0.0
 
         if fed_signal and not fed_signal.get("skip_reason"):
             ticker    = fed_signal.get("ticker", "KXFEDDECISION-?")
@@ -712,7 +727,7 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
             bet_price = mkt_price if side == "yes" else 100 - mkt_price
 
             try:
-                _fed_capital  = get_computed_capital()
+                _fed_capital  = get_capital()
                 _fed_deployed = get_daily_exposure()
                 _fed_cap_ok   = check_daily_cap(_fed_capital, _fed_deployed)
             except Exception:
@@ -720,7 +735,7 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
                 _fed_deployed = 0.0
                 _fed_cap_ok   = 25.0
 
-            _fed_daily_cap   = _fed_capital * getattr(config, 'ECON_DAILY_CAP_PCT', 0.04)
+            _fed_daily_cap   = _fed_capital * getattr(config, 'FED_DAILY_CAP_PCT', 0.03)
             _days_to_meeting = fed_signal.get('days_to_meeting', 5)
             _fed_hours       = max(1.0, _days_to_meeting * 24)
 
@@ -748,7 +763,13 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
                     'yes_bid': mkt_price,
                     'open_position_value': _fed_open_exposure,
                 }
-                _fed_decision = should_enter(_fed_signal_dict, _fed_capital, _fed_deployed)
+                _fed_deployed_pct = _fed_deployed_this_cycle / _fed_capital if _fed_capital > 0 else 0.0
+                _fed_decision = should_enter(
+                    _fed_signal_dict, _fed_capital, _fed_deployed,
+                    module='fed',
+                    module_deployed_pct=_fed_deployed_pct,
+                    traded_tickers=traded_tickers,
+                )
                 if not _fed_decision['enter']:
                     print(f"  [Strategy] SKIP {ticker}: {_fed_decision['reason']}")
                 elif _fed_decision['size'] > _fed_daily_cap:
@@ -786,7 +807,9 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
                     opp['module'] = 'fed'
                     opp['scan_price'] = mkt_price
                     opp['fill_price'] = mkt_price
-                    Trader(dry_run=dry_run).execute_opportunity(opp)
+                    result = Trader(dry_run=dry_run).execute_opportunity(opp)
+                    if result:
+                        _fed_deployed_this_cycle += _fed_decision.get('size', 0)
 
                     traded_tickers.add(ticker)
                     executed.append(opp)

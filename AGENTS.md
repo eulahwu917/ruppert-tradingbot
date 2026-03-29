@@ -6,6 +6,17 @@ This folder is home. Treat it that way.
 
 If `BOOTSTRAP.md` exists, that's your birth certificate. Follow it, figure out who you are, then delete it. You won't need it again.
 
+## ⚠️ Context Window Warning
+
+**Check context usage on every response during long work sessions.**
+- Use `session_status` to check `📚 Context: X%` periodically
+- At **70%**: warn David — "⚠️ Context at 70% — compaction may be coming soon. Should I save a handoff note?"
+- At **80%**: alert David immediately — "🚨 Context at 80% — save handoff now before compaction hits"
+- Save a handoff note to `memory/YYYY-MM-DD-handoff.md` with: what we were doing, what's done, what's next, any open questions
+- After saving, tell David so he can start a fresh session if needed
+
+Never let compaction happen silently during active work.
+
 ## Session Startup
 
 Before doing anything else:

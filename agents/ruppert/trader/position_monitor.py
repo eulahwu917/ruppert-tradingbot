@@ -43,6 +43,12 @@ _WORKSPACE_ROOT = _AGENTS_ROOT.parent               # workspace/
 if str(_WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKSPACE_ROOT))
 
+# Ensure environments/demo is on sys.path so ws.connection is importable
+# regardless of the working directory (ws/ lives at environments/demo/ws/)
+_DEMO_ENV_ROOT = _WORKSPACE_ROOT / 'environments' / 'demo'
+if str(_DEMO_ENV_ROOT) not in sys.path:
+    sys.path.insert(0, str(_DEMO_ENV_ROOT))
+
 from agents.ruppert.env_config import get_paths as _get_paths
 LOGS = _get_paths()['logs']
 LOGS.mkdir(exist_ok=True)
@@ -334,7 +340,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     # Check daily cap
     capital = get_capital()
     daily_cap = capital * config.CRYPTO_DAILY_CAP_PCT
-    current_exposure = get_daily_exposure('crypto')
+    current_exposure = get_daily_exposure()
     
     if current_exposure >= daily_cap:
         logger.debug(f"Crypto daily cap reached: ${current_exposure:.2f} >= ${daily_cap:.2f}")
@@ -367,7 +373,9 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
 
     # Check entry via strategy
     deployed_today = get_daily_exposure()
-    decision = should_enter(opp, capital, deployed_today)
+    _total_deployed = get_daily_exposure()
+    module_deployed_pct = _total_deployed / capital if capital > 0 else 0.0
+    decision = should_enter(opp, capital, deployed_today, module='crypto', module_deployed_pct=module_deployed_pct, traded_tickers=None)
     if not decision['enter']:
         reason = decision['reason']
         logger.debug(f"[WS Crypto] {ticker}: entry blocked — {reason}")
@@ -420,6 +428,19 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     })
     push_alert('trade', f'WS Crypto Entry: {ticker} {side.upper()} @ {bet_price}c', ticker=ticker)
 
+    # ── Track position for WS exit monitoring ──
+    try:
+        from agents.ruppert.trader import position_tracker
+        fill_price = bet_price
+        fill_contracts = contracts
+        if not DRY_RUN and order_result and isinstance(order_result, dict):
+            fill_price = int(order_result.get('price', order_result.get('yes_price', bet_price)) or bet_price)
+            fill_contracts = int(order_result.get('contracts', order_result.get('count', contracts)) or contracts)
+        position_tracker.add_position(ticker, fill_contracts, side, fill_price,
+                                      module='crypto', title=opp.get('title', ''))
+    except Exception as _pt_err:
+        logger.warning('[WS-CRYPTO] position_tracker.add_position failed: %s', _pt_err)
+
 
 # ─────────────────────────────── Polling Logic ────────────────────────────────
 
@@ -439,7 +460,7 @@ def run_polling_scan(client: KalshiClient, run_settlement_check: bool = True):
     Reuses check logic from post_trade_monitor.
     """
     # Import position check functions from existing module
-    from post_trade_monitor import (
+    from agents.ruppert.trader.post_trade_monitor import (
         check_settlements, check_weather_position, check_crypto_position,
         check_alert_only_position
     )
@@ -791,7 +812,7 @@ def run_polling_mode(client: KalshiClient):
     Thin wrapper around existing polling logic.
     Used when WebSocket is disabled or unavailable.
     """
-    from post_trade_monitor import run_monitor
+    from agents.ruppert.trader.post_trade_monitor import run_monitor
     
     print(f"\n{'='*60}")
     print(f"  POSITION MONITOR (Polling Mode)  {ts()}")

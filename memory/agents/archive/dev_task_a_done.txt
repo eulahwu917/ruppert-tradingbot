@@ -1,0 +1,1 @@
+DONE: MIN_EDGE crypto 0.10→0.12 in strategy.py

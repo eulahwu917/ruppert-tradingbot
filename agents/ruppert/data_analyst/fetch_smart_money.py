@@ -66,7 +66,7 @@ if not WALLETS:
         'timestamp':        int(time.time()),
         'note':             'Neutral — no wallet list available',
     }
-    out = _get_paths()['logs'] / 'crypto_smart_money.json'
+    out = _get_paths()['truth'] / 'crypto_smart_money.json'
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
     print(f'Saved neutral to {out}')
@@ -147,7 +147,7 @@ result = {
     'note':             f'{signal.capitalize()} — ${up_value:.0f} up vs ${down_value:.0f} down across top traders',
 }
 
-out = _get_paths()['logs'] / 'crypto_smart_money.json'
+out = _get_paths()['truth'] / 'crypto_smart_money.json'
 out.parent.mkdir(exist_ok=True)
 out.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
 print(f'Saved to {out}')

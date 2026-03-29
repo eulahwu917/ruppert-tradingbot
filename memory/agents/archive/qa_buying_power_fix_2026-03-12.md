@@ -1,0 +1,7 @@
+# QA Report — Buying Power Double-Count Fix
+**Date:** 2026-03-12
+**Reviewer:** SA-4 (QA)
+**File reviewed:** `kalshi-bot/dashboard/api.py`
+**Status: PASS**
+
+In `get_account()` demo branch, STARTING_CAPITAL is now correctly computed as the sum of `demo_deposits.jsonl` entries only (deposits = $400), with no realized P&L added — confirmed by direct code inspection. The fallback `if STARTING_CAPITAL == 0: STARTING_CAPITAL = 400.0` is present and correct for the case where the deposits file is missing or empty. The explanatory comment — "DO NOT add realized P&L here — frontend JS adds window._closedPnl (from /api/pnl which correctly accounts for both exits AND settled positions) Adding it here would double-count it." — is present, accurate, and clearly states the rationale. The `buying_power = max(STARTING_CAPITAL - total_deployed, 0)` formula is unchanged. No double-counting risk from the `starting_capital` field returned to the frontend: it is now deposits-only ($400), and the frontend's `acct.starting_capital || 400` fallback is harmless — it only fires if the API response is null/undefined. Account Value on the frontend = deposits + open_pnl + closed_pnl (via `window._closedPnl`), which is arithmetically correct. The live mode branch is untouched. No trading thresholds, no scan loop timing, no identity files, and no files outside `kalshi-bot/` were modified. No new bugs detected.

@@ -372,7 +372,9 @@ def run_long_horizon_scan(client, dry_run: bool = True, traded_tickers: set = No
         _bp = get_buying_power()
         opp['open_position_value'] = max(0.0, _total - _bp)
         _deployed_today = get_daily_exposure()
-        se_decision = should_enter(opp, _total, _deployed_today)
+        _crypto_deployed = get_daily_exposure('crypto')
+        _module_deployed_pct = _crypto_deployed / _total if _total > 0 else 0.0
+        se_decision = should_enter(opp, _total, _deployed_today, module='crypto', module_deployed_pct=_module_deployed_pct, traded_tickers=None)
         if not se_decision['enter']:
             print(f"  SKIP {ticker}: strategy gate — {se_decision['reason']}")
             log_activity(f'[LongHorizon] SKIP {ticker}: {se_decision["reason"]}')

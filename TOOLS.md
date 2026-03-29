@@ -13,6 +13,11 @@ Things like:
 - Device nicknames
 - Anything environment-specific
 
+## PowerShell Version
+- David's machine runs **PowerShell 5.1** — does NOT support `&&`
+- Always give commands as **separate lines**, never chained with `&&`
+- Use `;` only if truly needed (doesn't stop on failure)
+
 ## Examples
 
 ```markdown

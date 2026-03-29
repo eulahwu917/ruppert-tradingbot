@@ -440,7 +440,7 @@ def get_polymarket_yes_prob(asset: str) -> float | None:
 def _get_session_pnl_15m() -> float:
     """Sum realized P&L from today's 15m trades."""
     today = date.today().isoformat()
-    log_path = LOGS_DIR / f'trades_{today}.jsonl'
+    log_path = _get_paths()['trades'] / f'trades_{today}.jsonl'
     if not log_path.exists():
         return 0.0
 
@@ -963,6 +963,20 @@ def evaluate_crypto_15m_entry(
     log_trade(opp, position_usd, contracts, order_result)
     log_activity(f'[15M-CRYPTO] Entered {ticker} {direction.upper()} @ {entry_price}c | edge={edge:+.1%} P={P_final:.2f}')
     push_alert('trade', f'15M Crypto: {ticker} {direction.upper()} @ {entry_price}c', ticker=ticker)
+
+    # ── Track position for WS exit monitoring ──
+    try:
+        from agents.ruppert.trader import position_tracker
+        fill_price = entry_price
+        fill_contracts = contracts
+        if not DRY_RUN and order_result and isinstance(order_result, dict):
+            fill_price = int(order_result.get('price', order_result.get('yes_price', entry_price)) or entry_price)
+            fill_contracts = int(order_result.get('contracts', order_result.get('count', contracts)) or contracts)
+        fill_price_pt = fill_price if fill_price else entry_price
+        fill_contracts_pt = fill_contracts if fill_contracts else contracts
+        position_tracker.add_position(ticker, fill_contracts_pt, direction, fill_price_pt)
+    except Exception as _pt_err:
+        logger.warning(f'[15m] position_tracker.add_position failed: {_pt_err}')
 
     # ── Log decision ──
     _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,

@@ -1,0 +1,1 @@
+DONE: last_price populated for 1050/1050 markets
