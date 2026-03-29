@@ -25,6 +25,7 @@ PRICE SOURCES:
 
 import json
 import requests
+import sys
 import statistics
 import math
 import time
@@ -32,6 +33,16 @@ import logging
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
+
+# Ensure environments/demo is on sys.path for bare `import config`
+_CRYPTO_CLIENT_WORKSPACE = Path(__file__).parent.parent.parent.parent  # workspace/
+_CRYPTO_CLIENT_ENV = _CRYPTO_CLIENT_WORKSPACE / 'environments' / 'demo'
+if str(_CRYPTO_CLIENT_ENV) not in sys.path:
+    sys.path.insert(0, str(_CRYPTO_CLIENT_ENV))
+if str(_CRYPTO_CLIENT_WORKSPACE) not in sys.path:
+    sys.path.insert(0, str(_CRYPTO_CLIENT_WORKSPACE))
+
+import config
 
 try:
     from scipy.stats import t as scipy_t

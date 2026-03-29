@@ -28,6 +28,12 @@ _WORKSPACE_ROOT = _AGENTS_ROOT.parent               # workspace/
 if str(_WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKSPACE_ROOT))
 
+# Also add environments/demo so bare `import config` resolves when ws_feed
+# is the entry point (Task Scheduler runs it directly, not via ruppert_cycle)
+_DEMO_ENV_ROOT = _WORKSPACE_ROOT / 'environments' / 'demo'
+if str(_DEMO_ENV_ROOT) not in sys.path:
+    sys.path.insert(0, str(_DEMO_ENV_ROOT))
+
 # Windows asyncio fix
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
