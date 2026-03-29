@@ -141,7 +141,7 @@ _LOGS_DIR   = Path(__file__).parent / "logs"
 _SCAN_FILE  = _LOGS_DIR / "fed_scan_latest.json"
 
 # Kalshi market access via KalshiClient (handles retries, orderbook enrichment, DEMO/LIVE)
-from kalshi_client import KalshiClient as _KalshiClient
+from agents.ruppert.data_analyst.kalshi_client import KalshiClient as _KalshiClient
 
 
 # ── FOMC Date Utilities ───────────────────────────────────────────────────────

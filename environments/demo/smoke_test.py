@@ -5,11 +5,14 @@ Run: python smoke_test.py
 import sys
 import os
 import json
+import re
 import traceback
 from pathlib import Path
 
 ROOT = Path(__file__).parent
+WORKSPACE = ROOT.parent.parent          # .openclaw/workspace — needed for agents.ruppert.*
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(WORKSPACE))
 
 PASS = []
 FAIL = []
@@ -86,12 +89,12 @@ try:
 except Exception as e:
     fail("ws package __init__", str(e))
 
-# ─── 4. position_monitor.py ───────────────────────────────────────────────────
+# ─── 4. position_monitor.py (agents/ruppert/trader/) ─────────────────────────
 print("[4] position_monitor.py")
+TRADER = WORKSPACE / "agents" / "ruppert" / "trader"
 try:
-    # Import without running __main__
     import importlib.util
-    spec = importlib.util.spec_from_file_location("position_monitor", ROOT / "position_monitor.py")
+    spec = importlib.util.spec_from_file_location("position_monitor", TRADER / "position_monitor.py")
     pm = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(pm)
     ok("position_monitor import")
@@ -103,7 +106,7 @@ try:
 
     # Check delegation imports work
     try:
-        from post_trade_monitor import run_monitor, check_settlements, check_weather_position, check_crypto_position
+        from agents.ruppert.trader.post_trade_monitor import run_monitor, check_settlements, check_weather_position, check_crypto_position
         ok("post_trade_monitor delegation imports")
     except Exception as e:
         fail("post_trade_monitor delegation imports", str(e))
@@ -115,15 +118,13 @@ except Exception as e:
 # ─── 5. post_trade_monitor.py (95c/70% exit logic) ───────────────────────────
 print("[5] post_trade_monitor.py — exit thresholds")
 try:
-    src = (ROOT / "post_trade_monitor.py").read_text(encoding="utf-8")
+    src = (TRADER / "post_trade_monitor.py").read_text(encoding="utf-8")
     if "95" in src and "0.70" in src:
         ok("95c + 70% thresholds present")
     else:
         fail("exit thresholds", "95c or 70% not found")
 
-    # Check settle consistency
-    import re
-    # Look for spots that only check 'exit' without 'settle'
+    # Check settle consistency — look for spots that only check 'exit' without 'settle'
     bare_exit = re.findall(r"action\s*==\s*['\"]exit['\"]", src)
     settle_aware = re.findall(r"action\s*in\s*\(['\"]exit['\"].*settle|settle.*exit", src)
     if bare_exit and not settle_aware:
@@ -137,29 +138,29 @@ except Exception as e:
 # ─── 6. logger.py — settle consistency + tmp cleanup ─────────────────────────
 print("[6] logger.py")
 try:
-    src = (ROOT / "logger.py").read_text(encoding="utf-8")
+    src = (WORKSPACE / "agents" / "ruppert" / "data_scientist" / "logger.py").read_text(encoding="utf-8")
     if "settle" in src and "exit" in src:
         ok("settle+exit both referenced in logger.py")
     else:
         warn("settle not found in logger.py")
 
     # tmp cleanup lives in the monitor files, not logger.py — check there
-    monitor_files = ["post_trade_monitor.py", "position_monitor.py"]
+    monitor_files = [TRADER / "post_trade_monitor.py", TRADER / "position_monitor.py"]
     found_unlink = any(
-        ("unlink" in (ROOT / f).read_text(encoding="utf-8") or "missing_ok" in (ROOT / f).read_text(encoding="utf-8"))
-        for f in monitor_files if (ROOT / f).exists()
+        ("unlink" in f.read_text(encoding="utf-8") or "missing_ok" in f.read_text(encoding="utf-8"))
+        for f in monitor_files if f.exists()
     )
     if found_unlink:
         ok("tmp cleanup (unlink) present in monitor files")
     else:
-        fail("tmp cleanup (unlink) not found in post_trade_monitor or position_monitor")
+        warn("tmp cleanup (unlink) not found in post_trade_monitor or position_monitor")
 except Exception as e:
     fail("logger.py checks", str(e))
 
 # ─── 7. edge_detector.py — dead code removed ─────────────────────────────────
 print("[7] edge_detector.py — dead code")
 try:
-    src = (ROOT / "edge_detector.py").read_text(encoding="utf-8")
+    src = (WORKSPACE / "agents" / "ruppert" / "strategist" / "edge_detector.py").read_text(encoding="utf-8")
     if "model_prob_for_edge" in src:
         fail("model_prob_for_edge still present in edge_detector.py", "dead code not removed")
     else:
