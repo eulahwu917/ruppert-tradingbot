@@ -31,7 +31,7 @@ if str(_WORKSPACE_ROOT) not in sys.path:
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
-from agents.ruppert.env_config import get_paths as _get_paths
+from agents.ruppert.env_config import get_paths as _get_paths, is_live_enabled as _is_live_enabled
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from scripts.event_logger import log_event
 
@@ -219,7 +219,7 @@ def check_settlements():
             "entry_edge": pos.get("edge"),
             "confidence": pos.get("confidence"),
             "hold_duration_hours": hold_hours,
-            "order_result": {"dry_run": True, "status": "settled"},
+            "order_result": {"dry_run": not _is_live_enabled(), "status": "settled"},
         }
 
         # Write to original trade date's log file

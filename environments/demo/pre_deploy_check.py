@@ -18,6 +18,7 @@ def main():
     result = subprocess.run(
         [sys.executable, '-m', 'pytest', 'tests/',
          '--ignore=tests/test_integration.py', '-v', '--tb=short'],
+        cwd=str(Path(__file__).parent),
     )
 
     if result.returncode != 0:
