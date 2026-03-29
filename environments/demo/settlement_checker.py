@@ -265,6 +265,16 @@ def check_settlements():
     print(f"  Settlement Checker: {settled_count} settled, {skipped_count} skipped, {error_count} errors")
     print(f"  Done. {datetime.now(_PDT).strftime('%Y-%m-%d %H:%M:%S PDT')}")
 
+    # Trigger PnL cache refresh after settlements
+    # Only synthesize_pnl_cache() — not full run_synthesis() (alerts/state belong to scan cycle)
+    if settled_count > 0:
+        try:
+            from agents.ruppert.data_scientist.synthesizer import synthesize_pnl_cache
+            pnl_cache = synthesize_pnl_cache()
+            print(f"  [SYNTH] pnl_cache updated: closed_pnl=${pnl_cache.get('closed_pnl', 0):+.2f}")
+        except Exception as e:
+            print(f"  [WARN] synthesize_pnl_cache failed (cache may be stale): {e}")
+
 
 if __name__ == '__main__':
     check_settlements()
