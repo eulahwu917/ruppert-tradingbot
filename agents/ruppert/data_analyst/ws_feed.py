@@ -167,7 +167,8 @@ async def _rest_refresh_stale() -> None:
         return
 
     kalshi_client = None
-    for ticker in tracked:
+    for key_str in tracked:
+        ticker = key_str.split('::')[0]  # get_tracked() returns 'ticker::side' keys
         try:
             _, _, is_stale = market_cache.get_with_staleness(ticker)
             if not is_stale:
