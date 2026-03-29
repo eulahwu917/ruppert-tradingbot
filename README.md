@@ -1,66 +1,113 @@
-# Ruppert Kalshi Weather Trading Bot
+# Ruppert — Autonomous Kalshi Trading Bot
 
-Automated weather market trading bot for Kalshi prediction markets.
-Uses NOAA/NWS forecast data to find mispriced weather contracts.
+Ruppert is a fully automated multi-module prediction market trading system built on [Kalshi](https://kalshi.com). It runs continuous scan cycles, evaluates edges across multiple market types, manages risk, and executes trades autonomously in DEMO mode.
+
+---
+
+## Architecture
+
+### Agent Org Chart
+```
+CEO (Ruppert) — ruppert_cycle.py
+├── Strategist — strategy.py, edge_detector.py, optimizer.py
+├── Data Scientist — capital.py, logger.py, data_agent.py, dashboard
+├── Data Analyst — market_cache.py, kalshi_client.py, ws_feed.py, wallet_updater.py
+├── Trader — trader.py, position_monitor.py, position_tracker.py
+└── Researcher — autoresearch.py (backlog)
+```
+
+### Trading Modules
+| Module | Markets | Signal Source |
+|--------|---------|---------------|
+| **Weather** | Temperature markets (KXHIGH*) | NOAA + Open-Meteo ensemble |
+| **Crypto** | BTC/ETH/XRP/SOL/DOGE hourly | WS feed + Kraken prices + smart money wallets |
+| **Crypto 15m** | BTC/ETH/XRP/DOGE 15-min | TFI + OBI + MACD + OI delta |
+| **Economics** | CPI, PCE, Jobs, GDP, Unemployment | FRED data |
+| **Fed** | Fed rate decisions | CME FedWatch + signal window |
+| **Geo** | Geopolitical markets | GDELT + LLM pipeline |
+
+---
+
+## Infrastructure
+
+- **Scan schedule**: 7AM, 3PM full cycles + crypto-only scans throughout the day (Task Scheduler)
+- **WS feed**: Persistent Kalshi WebSocket for real-time price monitoring and sub-second exits
+- **Dashboard**: FastAPI at `http://localhost:8765` — live P&L, trade history, positions
+- **Exit system**: 95c rule + 70% gain exit, WS-driven (<1s latency)
+- **Environment**: `DEMO` (paper trading) — LIVE requires explicit David approval
+
+## Risk Controls
+- Global 70% daily deployment cap
+- Per-module daily caps (weather 7%, crypto 7%, geo 4%, econ 4%, fed 3%)
+- Per-trade max: 1% of capital
+- OI cap: max 5% of market open interest
+- Quarter-Kelly sizing (25%)
+- Same-day re-entry block per ticker
+- Loss circuit breaker
+
+---
+
+## Project Structure
+
+```
+environments/
+  demo/              ← Active trading environment
+    ruppert_cycle.py ← Main orchestrator
+    config.py        ← Config shim (reads from agents/)
+    dashboard/       ← FastAPI dashboard
+    audit/           ← Health checks, code audit, QA tooling
+    logs/            ← Trade logs, price cache, cycle logs
+agents/
+  ruppert/
+    strategist/      ← strategy.py, edge_detector.py, optimizer.py
+    data_scientist/  ← capital.py, logger.py, data_agent.py
+    data_analyst/    ← market_cache.py, ws_feed.py, kalshi_client.py
+    trader/          ← trader.py, position_monitor.py, position_tracker.py
+secrets/             ← API keys (not committed in production)
+scripts/             ← ws_feed_watchdog.py, utilities
+```
+
+---
 
 ## Setup
 
-### 1. Install Python dependencies
+### Prerequisites
+- Python 3.12+
+- Windows (Task Scheduler used for scheduling)
+- Kalshi API credentials in `secrets/kalshi_config.json`
+
+### Install dependencies
 ```bash
-cd kalshi-bot
-pip install -r requirements.txt
+pip install -r environments/demo/requirements.txt
 ```
 
-### 2. Credentials (already configured)
-- API key: stored in `../secrets/kalshi_config.json`
-- Private key: stored in `../secrets/kalshi_private_key.pem`
-
-### 3. Test the connection
-```bash
-python main.py --test
+### Run a cycle manually
+```powershell
+$env:PYTHONPATH = "C:\path\to\workspace"
+cd environments/demo
+python ruppert_cycle.py check        # position check only (no trades)
+python ruppert_cycle.py crypto_only  # crypto scan
+python ruppert_cycle.py full         # full scan (all modules)
 ```
 
-### 4. Run a single scan (dry run — no real trades)
-```bash
-python main.py
+### Start dashboard
+```powershell
+$env:PYTHONPATH = "C:\path\to\workspace"
+$env:RUPPERT_ENV = "demo"
+cd environments/demo
+python -m uvicorn dashboard.api:app --port 8765 --host 0.0.0.0
 ```
 
-### 5. Run continuously (dry run)
-```bash
-python main.py --loop
-```
+---
 
-### 6. Run with real trades on demo account
-```bash
-python main.py --live
-```
+## Current Status
+**DEMO** — all trades execute in Kalshi's paper trading environment. Capital: ~$10,000.
 
-## Risk Controls
-- Max position size: $25 per trade
-- Max daily exposure: $200
-- Minimum edge threshold: 15%
-- Kelly criterion position sizing (25% fractional)
+LIVE mode requires David's explicit approval and a passing pre-flight scorecard.
 
-## Files
-- `main.py` — Entry point, run modes
-- `kalshi_client.py` — Kalshi API wrapper
-- `noaa_client.py` — NOAA weather data fetcher
-- `edge_detector.py` — Compares NOAA vs Kalshi, finds edges
-- `trader.py` — Order placement with risk checks
-- `risk.py` — Kelly sizing and exposure limits
-- `logger.py` — Trade and activity logging
-- `config.py` — Configuration and risk settings
-- `logs/` — Trade logs (created automatically)
+---
 
-## How It Works
-1. Fetches active weather markets from Kalshi
-2. For each market, gets NOAA forecast for the same city/date
-3. Calculates probability from NOAA data
-4. Compares to Kalshi market price
-5. If gap > 15%, places a trade in the direction of NOAA's forecast
-6. Logs everything to `logs/` folder
+## Pipeline
+All code changes follow: **CEO spec → Data Scientist/Strategist spec → Dev → QA → CEO → David**
 
-## Current Mode
-**DEMO** — all trades go to Kalshi's paper trading environment.
-To switch to live: change `environment` in `../secrets/kalshi_config.json` to `"production"`
-(Only do this after validating the bot works correctly in demo!)
+LIVE trading requires 3 explicit David confirmations. See `environments/demo/docs/PIPELINE.md`.
