@@ -57,11 +57,11 @@ ASSET_SYMBOLS = {
     'DOGE': 'DOGE-USDT-SWAP',
 }
 
-# Signal weights — sum to 1.0
-W_TFI  = 0.40
+# Signal weights — must sum to 1.0
+W_TFI  = 0.42
 W_OBI  = 0.25
-W_MACD = 0.20   # raised from 0.15 to 0.20
-W_OI   = 0.15   # raised from 0.10 to 0.15
+W_MACD = 0.15
+W_OI   = 0.18
 
 from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.strategist.strategy import should_enter

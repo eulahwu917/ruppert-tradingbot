@@ -51,6 +51,10 @@ MIN_HOURS_ADD    = 2.0           # must be ≥ 2 h from settlement to add
 DAILY_CAP_RATIO  = 0.70          # max fraction of total capital deployable per day
 # MAX_POSITION_CAP = 50.0        # removed: replaced by MAX_POSITION_PCT in config.py
 # PCT_CAPITAL_CAP  = 0.025       # removed: replaced by MAX_POSITION_PCT in config.py
+# NOTE: KELLY_FRACTION is currently NOT wired into kelly_fraction_for_confidence().
+# The tier table below runs actual sizing independently of this constant.
+# When the Optimizer is built, wire this as the ceiling of the tier table.
+# Until then, this serves as an audit-log anchor only.
 KELLY_FRACTION   = 0.16          # max fractional Kelly multiplier (80%+ confidence tier)
 
 
@@ -75,6 +79,9 @@ def kelly_fraction_for_confidence(confidence: float) -> float:
         25-40%  -> 0.05  (minimum -- data accumulation only)
 
     Post-Brier review: recalibrate all tiers against actual calibration data.
+
+    NOTE: The tiers below are hardcoded constants. KELLY_FRACTION (defined above)
+    is NOT used here — it is an audit-log anchor only until the Optimizer is built.
     """
     if confidence >= 0.80:
         return 0.16
@@ -512,15 +519,20 @@ def should_exit(current_bid: float, entry_price: float,
         if gain >= 0.70:
             return {'exit': True, 'fraction': 1.0, 'reason': 'gain_70pct'}
 
+    # Catastrophic reversal override: if model edge has collapsed ≥0.35, exit even near settlement.
+    # Only full reversal (≥0.35) overrides — trim (0.10) and half (0.20) reversals do not.
+    entry_edge  = entry_signal.get('edge', 0.0)
+    current_edge = signal.get('edge', 0.0)
+    reversal = entry_edge - current_edge
+    if reversal >= 0.35 and hours_to_settlement < 0.5:
+        return {'exit': True, 'fraction': 1.0, 'reason': 'catastrophic_reversal_override_hold'}
+
     # Rule 3 — Near-settlement hold (let contract settle)
     if hours_to_settlement < 0.5:
         return {'exit': False, 'fraction': 0.0, 'reason': 'near_settlement_hold'}
 
     # Rule 4 — Reversal: edge has collapsed vs entry
-    entry_edge  = entry_signal.get('edge', 0.0)
-    current_edge = signal.get('edge', 0.0)
-    reversal = entry_edge - current_edge
-
+    # (entry_edge, current_edge, reversal already computed above for catastrophic override)
     if reversal >= 0.35:
         return {'exit': True,  'fraction': 1.0,  'reason': 'reversal_full'}
     if reversal >= 0.20:

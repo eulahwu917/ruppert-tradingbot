@@ -117,12 +117,12 @@ def _build_opportunity(market: dict, signal: dict, market_prob: float) -> dict:
     # Determine bet direction
     if edge > 0:
         # Model thinks probability is higher than market → BET YES
-        bet_direction = 'YES'
+        bet_direction = 'yes'
         bet_price = yes_ask  # cost in cents (market ask — actual fill may differ)
         implied_return = round((100 - yes_ask) / yes_ask, 3) if yes_ask > 0 else None
     else:
         # Model thinks probability is lower than market → BET NO
-        bet_direction = 'NO'
+        bet_direction = 'no'
         # NOTE: no_ask can be wide (illiquid NO side). Use limit orders near 100 - yes_ask
         # for better fill prices. The fair NO value ≈ 100 - yes_bid (not no_ask).
         fair_no_price = 100 - yes_ask  # theoretical fair NO price

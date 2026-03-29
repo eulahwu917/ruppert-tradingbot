@@ -52,7 +52,7 @@ CANDIDATE_SERIES_TO_SCAN = [
     # Weather — humidity / precipitation
     'KXPRECIP', 'KXSNOW', 'KXRAIN',
     # Macro
-    'KXGDP', 'KXPCE', 'KXPPI', 'KXNFP', 'KXISA',
+    'KXGDP', 'KXPCE', 'KXPPI', 'KXNFP', 'KXJOBLESSCLAIMS',
     # Politics
     'KXPRES', 'KXSEC', 'KXHOUSE', 'KXSENATE',
     # Sports
@@ -266,7 +266,7 @@ def check_economic_calendar_gaps() -> list[dict]:
         'KXPCE': 'PCE inflation',
         'KXPPI': 'Producer Price Index',
         'KXNFP': 'Non-Farm Payrolls',
-        'KXISA': 'Initial Jobless Claims',
+        'KXJOBLESSCLAIMS': 'Initial Jobless Claims',
         'KXCPI': 'CPI (covered)',
         'KXFOMC': 'FOMC rate decision (covered)',
         'KXUNRATE': 'Unemployment rate (covered)',
