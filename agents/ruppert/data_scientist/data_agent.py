@@ -223,19 +223,11 @@ def check_module_mismatch(trade: dict) -> tuple:
 
 
 def check_tracker_drift(trades: list[dict], tracked: dict) -> dict:
-    """Compare open trades vs position tracker."""
-    # Build set of tickers with open (non-exited) trades
-    entry_tickers = set()
-    exit_tickers = set()
-    for t in trades:
-        action = t.get('action', 'buy')
-        ticker = t.get('ticker', '')
-        if action in ('exit', 'settle'):
-            exit_tickers.add(ticker)
-        else:
-            entry_tickers.add(ticker)
-    open_tickers = entry_tickers - exit_tickers
-    tracked_tickers = set(tracked.keys())
+    """Compare open trades vs position tracker. Uses all-time logs for multi-day positions."""
+    # Use get_open_positions_from_logs() to include multi-day positions, not just today's trades
+    open_positions = get_open_positions_from_logs()
+    open_tickers = {t.get('ticker', '') for t in open_positions}
+    tracked_tickers = set(k.split('::')[0] if '::' in k else k for k in tracked.keys())
     return {
         'orphans': list(tracked_tickers - open_tickers),
         'missing': list(open_tickers - tracked_tickers),
@@ -435,6 +427,8 @@ def check_decision_log_orphans() -> list[dict]:
 
     orphans = []
     for d in decisions:
+        if d.get('decision', '').upper() in ('SKIP',):
+            continue
         ticker = d.get('market_id', d.get('ticker', ''))
         d_date = str(d.get('ts', ''))[:10]
         if d_date == date.today().isoformat() and ticker not in trade_tickers:
@@ -553,8 +547,10 @@ def _remove_tracker_orphans(orphan_tickers: list[str]):
         tracked = json.loads(TRACKER_FILE.read_text(encoding='utf-8'))
         changed = False
         for ticker in orphan_tickers:
-            if ticker in tracked:
-                del tracked[ticker]
+            # Match both plain keys AND "ticker::side" format keys
+            keys_to_remove = [k for k in list(tracked.keys()) if k == ticker or k.startswith(ticker + '::')]
+            for k in keys_to_remove:
+                del tracked[k]
                 changed = True
         if changed:
             tmp = TRACKER_FILE.with_suffix('.tmp')
