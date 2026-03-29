@@ -38,6 +38,7 @@ DAILY_CAP = _capital * (
     getattr(_config, 'ECON_DAILY_CAP_PCT', 0.04)
 )
 MIN_TRADES             = getattr(_config, 'OPTIMIZER_MIN_TRADES', 30)
+DOMAIN_THRESHOLD       = 30
 LOW_WIN_RATE_THRESHOLD = getattr(_config, 'OPTIMIZER_LOW_WIN_RATE', 0.60)
 BRIER_FLAG_THRESHOLD   = getattr(_config, 'OPTIMIZER_BRIER_FLAG', 0.25)
 HOLD_TIME_FLAG_HOURS   = getattr(_config, 'OPTIMIZER_HOLD_TIME_FLAG_HRS', 12)
@@ -116,6 +117,50 @@ def load_scored_predictions() -> dict:
     except OSError:
         pass
     return outcomes
+
+
+def get_domain_trade_counts() -> dict[str, int]:
+    """
+    Reads scored_predictions.jsonl and returns count of scored trades per domain.
+    Domain is inferred via detect_module(ticker).
+    """
+    counts = defaultdict(int)
+    scored_path = LOGS_DIR / "scored_predictions.jsonl"
+    if not scored_path.exists():
+        return dict(counts)
+    with open(scored_path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                ticker = rec.get("ticker", "")
+                if ticker:
+                    domain = detect_module(ticker)
+                    counts[domain] += 1
+            except json.JSONDecodeError:
+                pass
+    return dict(counts)
+
+
+def get_eligible_domains(threshold: int = DOMAIN_THRESHOLD) -> list[str]:
+    """
+    Returns list of domains with >= threshold scored trades.
+    """
+    counts = get_domain_trade_counts()
+    return [domain for domain, count in counts.items() if count >= threshold]
+
+
+def run_domain_experiments(domains: list[str]) -> dict:
+    """
+    Placeholder for running per-domain optimization experiments.
+    Currently a no-op. Future: grid search, bayesian optimization, etc.
+    """
+    results = {}
+    for domain in domains:
+        results[domain] = {"status": "placeholder", "experiments_run": 0}
+    return results
 
 
 def enrich_trades(trades: list, outcomes: dict) -> list:
@@ -548,6 +593,17 @@ def main():
     outcomes = load_scored_predictions()
     print(f"  Found outcome data for {len(outcomes)} tickers.")
 
+    # Per-domain scored trade counts
+    domain_counts = get_domain_trade_counts()
+    eligible_domains = get_eligible_domains()
+
+    print("Per-domain scored trade counts (threshold=30):")
+    for domain, count in sorted(domain_counts.items()):
+        status = "ELIGIBLE" if count >= DOMAIN_THRESHOLD else f"NEEDS {DOMAIN_THRESHOLD - count} more"
+        print(f"  {domain:12s}: {count:3d} trades  [{status}]")
+    print(f"Eligible domains: {eligible_domains}")
+    print()
+
     print("Enriching trade records...")
     trades = enrich_trades(trades_raw, outcomes)
     print(f"  Enriched {len(trades)} trades.")
@@ -637,6 +693,16 @@ def main():
         d = sizing[mod]
         flag = f" [FLAG >${MAX_MODULE_AVG_SIZE:.0f}]" if d["avg_size"] > MAX_MODULE_AVG_SIZE else ""
         print(f"      {mod:12s}: avg ${d['avg_size']:.2f}{flag}")
+
+    print()
+
+    if eligible_domains:
+        print("Running experiments for eligible domains...")
+        experiment_results = run_domain_experiments(eligible_domains)
+        for domain, result in experiment_results.items():
+            print(f"  {domain}: {result}")
+    else:
+        print("No domains eligible for experiments yet (need 30 scored trades each).")
 
     print()
     print("-" * 60)
