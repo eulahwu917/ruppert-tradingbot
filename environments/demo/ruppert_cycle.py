@@ -604,10 +604,12 @@ def run_crypto_only_mode(state):
             _cap_line = f'${_capital:.2f} | Deployed: ${_deployed:.2f} | BP: ${_bp:.2f}'
         except Exception:
             _cap_line = 'N/A'
+        _15m_block = _build_crypto_15m_block()
         _scan_msg = (
             f'\U0001f4ca Ruppert Scan \u2014 {_time_str} PDT\n\n'
             f'\u20bf Crypto-only scan\n'
-            f'{_crypto_count} trade(s) placed\n\n'
+            f'{_crypto_count} trade(s) placed'
+            f'{_15m_block}\n\n'
             f'\U0001f4b0 Capital: {_cap_line}'
         )
         log_event('SCAN_COMPLETE', {
@@ -623,6 +625,74 @@ def run_crypto_only_mode(state):
         print(f'  Scan notify error (non-fatal): {_notify_ex}')
 
     return {'crypto_trades': _crypto_count}
+
+
+def _build_crypto_15m_block() -> str:
+    """Build the 15m crypto summary block for Telegram scan notifications.
+    Reads from logs/decisions_15m.jsonl. Returns '' if file is missing/empty.
+    """
+    try:
+        log_path = LOGS / 'decisions_15m.jsonl'
+        if not log_path.exists():
+            return ''
+
+        from datetime import date as _date
+        today_prefix = _date.today().isoformat()
+
+        entries = []
+        with open(log_path, encoding='utf-8') as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if not _line:
+                    continue
+                try:
+                    rec = json.loads(_line)
+                    if str(rec.get('ts', '')).startswith(today_prefix):
+                        entries.append(rec)
+                except Exception:
+                    pass
+
+        if not entries:
+            return ''
+
+        total_evals = len(entries)
+        entries_count = 0
+        late_skips = 0
+        other_skips = 0
+        last_entry_rec = None
+        for rec in entries:
+            decision = rec.get('decision', '')
+            if decision == 'ENTER':
+                entries_count += 1
+                ts_val = rec.get('ts', '')
+                if last_entry_rec is None or ts_val > last_entry_rec.get('ts', ''):
+                    last_entry_rec = rec
+            elif decision == 'SKIP_LATE' or rec.get('reason') == 'LATE_WINDOW':
+                late_skips += 1
+            elif decision and decision != 'ENTER':
+                other_skips += 1
+
+        if entries_count > 0:
+            entries_line = f'Entries: {entries_count} | Late skips: {late_skips} | Other skips: {other_skips}'
+        else:
+            entries_line = 'Entries: 0 (no trades placed yet today)'
+
+        last_entry_line = ''
+        if last_entry_rec:
+            market_id = last_entry_rec.get('market_id', last_entry_rec.get('ticker', ''))
+            price = last_entry_rec.get('entry_price', last_entry_rec.get('price'))
+            edge = last_entry_rec.get('edge')
+            price_str = f'@ {price}¢' if price is not None else ''
+            edge_str = f' (edge: +{round(float(edge)*100):.0f}%)' if edge is not None else ''
+            last_entry_line = f'\n  Last entry: {market_id} {price_str}{edge_str}'
+
+        return (
+            f'\n\n\U0001f4ca Crypto 15m (today):\n'
+            f'  Evaluated: {total_evals} windows\n'
+            f'  {entries_line}{last_entry_line}'
+        )
+    except Exception:
+        return ''
 
 
 def run_report_mode(state):
@@ -921,11 +991,13 @@ def run_full_mode(client, state):
         _c_trades = summary['crypto_trades']
         _c_dir    = direction.upper() if direction else 'NEUTRAL'
 
+        _15m_block = _build_crypto_15m_block()
         _scan_msg = (
             f"\U0001f4ca Ruppert Scan \u2014 {_time_str} PDT\n\n"
             f"\U0001f324 Weather: {_w_opps} opportunities | {_w_trades} trades placed\n"
             f"\u20bf Crypto: {_c_dir} | {_c_opps} opportunities | {_c_trades} trades placed\n"
-            f"\U0001f3db Fed: {_fed_status}\n\n"
+            f"\U0001f3db Fed: {_fed_status}"
+            f"{_15m_block}\n\n"
             f"\U0001f4b0 Capital: {_cap_line}"
         )
 

@@ -74,6 +74,86 @@ def read_geo_log():
     return [e for e in entries if e.get('date') == today]
 
 
+def read_crypto_15m_summary() -> dict:
+    """Read today's 15m crypto window decisions from decisions_15m.jsonl.
+    Returns a summary dict for the dashboard crypto_15m_summary section.
+    """
+    log_path = LOGS_DIR / "decisions_15m.jsonl"
+    today_prefix = date.today().isoformat()  # e.g. "2026-03-28"
+
+    if not log_path.exists():
+        return {
+            "today_evaluations": 0,
+            "today_entries": 0,
+            "today_skips_late": 0,
+            "today_skips_other": 0,
+            "last_entry": None,
+            "avg_edge_on_entries": None,
+            "last_evaluated_at": None,
+        }
+
+    entries = []
+    with open(log_path, encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                ts_val = rec.get('ts', '')
+                if str(ts_val).startswith(today_prefix):
+                    entries.append(rec)
+            except Exception:
+                pass
+
+    today_evaluations = len(entries)
+    today_entries = 0
+    today_skips_late = 0
+    today_skips_other = 0
+    last_entry = None
+    edge_sum = 0.0
+    last_evaluated_at = None
+
+    for rec in entries:
+        decision = rec.get('decision', '')
+        ts_val = rec.get('ts')
+        if ts_val and (last_evaluated_at is None or ts_val > last_evaluated_at):
+            last_evaluated_at = ts_val
+
+        if decision == 'ENTER':
+            today_entries += 1
+            edge_val = rec.get('edge')
+            if edge_val is not None:
+                edge_sum += float(edge_val)
+            # Keep the most recent entry record
+            if last_entry is None or (ts_val and ts_val > last_entry.get('ts', '')):
+                last_entry = {
+                    'market_id': rec.get('market_id', rec.get('ticker', '')),
+                    'edge': round(float(rec.get('edge', 0)), 4) if rec.get('edge') is not None else None,
+                    'entry_price': rec.get('entry_price', rec.get('price')),
+                    'direction': rec.get('direction', rec.get('side', '')),
+                    'ts': ts_val,
+                }
+        elif decision == 'SKIP_LATE' or rec.get('reason') == 'LATE_WINDOW':
+            today_skips_late += 1
+        else:
+            # Any non-ENTER, non-SKIP_LATE decision is "other skip"
+            if decision and decision != 'ENTER':
+                today_skips_other += 1
+
+    avg_edge = round(edge_sum / today_entries, 4) if today_entries > 0 else None
+
+    return {
+        "today_evaluations": today_evaluations,
+        "today_entries": today_entries,
+        "today_skips_late": today_skips_late,
+        "today_skips_other": today_skips_other,
+        "last_entry": last_entry,
+        "avg_edge_on_entries": avg_edge,
+        "last_evaluated_at": last_evaluated_at,
+    }
+
+
 # classify_module imported from logger — single source of truth
 
 
@@ -188,14 +268,19 @@ def get_account():
     all_trades = read_all_trades()
 
     # Deduplicate by ticker (same logic as positions endpoint)
-    # Only count each position once — ignore exit entries and duplicates
-    exited = {t.get('ticker') for t in all_trades if t.get('action') == 'exit'}
+    # Only count each position once — ignore exit/settle entries and duplicates
+    closed_tickers = set()
+    for t in all_trades:
+        if t.get('action') in ('exit', 'settle'):
+            tk = t.get('ticker', '')
+            if tk:
+                closed_tickers.add(tk)
     seen_tickers = set()
     trades = []
     for t in all_trades:
         ticker = t.get('ticker', '')
-        if not ticker or ticker in exited or ticker in seen_tickers: continue
-        if t.get('action') == 'exit': continue
+        if not ticker or ticker in closed_tickers or ticker in seen_tickers: continue
+        if t.get('action') in ('exit', 'settle'): continue
         seen_tickers.add(ticker)
         trades.append(t)
 
@@ -206,8 +291,8 @@ def get_account():
     MANUAL_SOURCES = ('economics', 'geo', 'manual')
 
     # Only count OPEN (not-yet-settled) positions in deployed capital
-    # Settled positions: their capital is gone (loss) or returned (win) — reflected in Closed P&L
-    open_trades  = [t for t in trades if not is_settled_ticker(t.get('ticker', ''))]
+    # A position is "open" only if it has no settle/exit record
+    open_trades  = trades  # Already filtered to exclude closed positions above
     bot_cost     = sum(t.get('size_dollars',0) for t in open_trades if t.get('source','bot') in AUTO_SOURCES)
     manual_cost  = sum(t.get('size_dollars',0) for t in open_trades if t.get('source','bot') in MANUAL_SOURCES)
     total_deployed = bot_cost + manual_cost
@@ -280,116 +365,43 @@ async def add_deposit(request: Request):
 @app.get("/api/trades")
 def get_trades():
     """Trade history — closed positions only (settled OR manually exited).
-    Computes realized_pnl from exit record (manual exits) or Kalshi API (settled markets).
+    Uses pnl field from settle/exit records directly — no API calls needed.
     """
     all_trades = read_all_trades()
 
-    # Pre-build exit records dict: ticker -> exit record
-    exits = {}
+    # Build settle/exit records index: (ticker, side) -> record with pnl
+    close_records = {}
     for t in all_trades:
-        if t.get('action') == 'exit':
+        action = t.get('action', '')
+        if action in ('exit', 'settle'):
             ticker = t.get('ticker', '')
+            side = t.get('side', '')
             if ticker:
-                exits[ticker] = t
+                close_records[(ticker, side)] = t
 
     closed = []
     seen = set()
     for t in all_trades:
         ticker = t.get('ticker', '')
         if not ticker or ticker in seen: continue
-        if t.get('action') == 'exit': continue  # skip raw exit records; they inform via exits dict
+        action = t.get('action', '')
+        if action in ('exit', 'settle'): continue  # skip close records themselves
         seen.add(ticker)
 
-        is_settled       = is_settled_ticker(ticker)
-        is_manually_exited = ticker in exits
+        side = t.get('side', 'no')
+        key = (ticker, side)
 
-        # Only show in closed if settled OR manually exited
-        if not is_settled and not is_manually_exited:
+        # Only show in closed if we have a settle/exit record
+        if key not in close_records:
             continue
 
-        if is_manually_exited and not is_settled:
-            # Compute P&L directly from exit record fields
-            exit_rec  = exits[ticker]
-            ep        = exit_rec.get('entry_price')
-            xp        = exit_rec.get('exit_price')
-            contracts = exit_rec.get('contracts')
-            if ep is not None and xp is not None and contracts:
-                t['realized_pnl'] = round((xp - ep) * contracts / 100, 2)
-                t['exit_price']   = xp
-                t['exit_type']    = exit_rec.get('exit_type', 'manual')
-                t['exit_reason']  = exit_rec.get('reason', '')
-            else:
-                # Fallback: try WS cache first, then REST
-                _cached = market_cache.get_market_price(ticker)
-                if _cached and _cached.get('yes_ask') is not None:
-                    side      = t.get('side', 'no')
-                    mp        = t.get('market_prob', 0.5) or 0.5
-                    entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
-                    contracts = t.get('contracts', 0) or 0
-                    settle_yes = _cached['yes_ask']
-                    cur_p = (100 - settle_yes) if side == 'no' else settle_yes
-                    t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
-                    t['settled_price'] = settle_yes
-                else:
-                    try:
-                        import requests as req
-                        r = req.get(
-                            f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
-                            timeout=4
-                        )
-                        if r.status_code == 200:
-                            m         = r.json().get('market', {})
-                            result    = m.get('result')
-                            lp        = m.get('last_price')
-                            if lp is not None or result:
-                                side      = t.get('side', 'no')
-                                mp        = t.get('market_prob', 0.5) or 0.5
-                                entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
-                                contracts = t.get('contracts', 0) or 0
-                                if result == 'yes':   settle_yes = 100
-                                elif result == 'no':  settle_yes = 0
-                                else:                 settle_yes = lp or 50
-                                cur_p = (100 - settle_yes) if side == 'no' else settle_yes
-                                t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
-                                t['settled_price'] = settle_yes
-                    except Exception:
-                        pass
-        else:
-            # Settled market — try WS cache first, then REST for settlement result
-            _cached = market_cache.get_market_price(ticker)
-            if _cached and _cached.get('yes_ask') is not None:
-                side      = t.get('side', 'no')
-                mp        = t.get('market_prob', 0.5) or 0.5
-                entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
-                contracts = t.get('contracts', 0) or 0
-                settle_yes = _cached['yes_ask']
-                cur_p = (100 - settle_yes) if side == 'no' else settle_yes
-                t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
-                t['settled_price'] = settle_yes
-            else:
-                try:
-                    import requests as req
-                    r = req.get(
-                        f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
-                        timeout=4
-                    )
-                    if r.status_code == 200:
-                        m         = r.json().get('market', {})
-                        result    = m.get('result')
-                        lp        = m.get('last_price')
-                        if lp is not None or result:
-                            side      = t.get('side', 'no')
-                            mp        = t.get('market_prob', 0.5) or 0.5
-                            entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
-                            contracts = t.get('contracts', 0) or 0
-                            if result == 'yes':   settle_yes = 100
-                            elif result == 'no':  settle_yes = 0
-                            else:                 settle_yes = lp or 50
-                            cur_p = (100 - settle_yes) if side == 'no' else settle_yes
-                            t['realized_pnl'] = round((cur_p - entry_p) * contracts / 100, 2)
-                            t['settled_price'] = settle_yes
-                except Exception:
-                    pass
+        cr = close_records[key]
+        pnl = cr.get('pnl')
+        if pnl is not None:
+            t['realized_pnl'] = round(float(pnl), 2)
+        t['exit_price'] = cr.get('exit_price') or cr.get('fill_price')
+        t['settlement_result'] = cr.get('settlement_result', '')
+        t['exit_type'] = 'settle' if cr.get('action') == 'settle' else cr.get('exit_type', 'manual')
 
         t['module'] = classify_module(t.get('source', 'bot'), ticker)
         closed.append(t)
@@ -733,6 +745,14 @@ def get_geo_scout():
 
 # ─── Dashboard ────────────────────────────────────────────────────────────────
 
+@app.get("/api/crypto/15m_summary")
+def get_crypto_15m_summary():
+    """15m crypto window summary — today's evaluations, entries, and skips.
+    Reads from logs/decisions_15m.jsonl. Dashboard only — no per-window notifications.
+    """
+    return read_crypto_15m_summary()
+
+
 @app.get("/api/crypto/scan")
 def get_crypto_scan():
     """Crypto markets scan — BTC/ETH/XRP price + smart money signal + opportunities.
@@ -854,15 +874,28 @@ def get_pnl_history():
         if t.get('action') == 'exit':
             exit_records[t.get('ticker', '')] = t
 
+    # Build close records index for pnl: (ticker, side) -> settle/exit record
+    close_records_pnl = {}
+    for t in all_trades:
+        if t.get('action') in ('exit', 'settle'):
+            tk = t.get('ticker', '')
+            sd = t.get('side', '')
+            if tk:
+                close_records_pnl[(tk, sd)] = t
+
+    # A position is "closed" ONLY if it has a settle/exit record.
+    # Expired tickers without a settle record are still "open" (pending settlement).
     settled_tickers = {}
     open_tickers    = {}
     seen = set()
     for t in all_trades:
         ticker = t.get('ticker', '')
         if not ticker or ticker in seen: continue
-        if t.get('action') == 'exit': continue
+        if t.get('action') in ('exit', 'settle'): continue
         seen.add(ticker)
-        if is_settled_ticker(ticker) or ticker in exit_records:
+        side = t.get('side', 'no')
+        has_close = (ticker, side) in close_records_pnl or ticker in exit_records
+        if has_close:
             settled_tickers[ticker] = t
         else:
             open_tickers[ticker] = t
@@ -897,74 +930,38 @@ def get_pnl_history():
     _today = _date.today()
 
     # ── Settled / manually exited positions ─────────────────────────────────
-    # Module P&L is accumulated in the SAME loop as account-level P&L to
-    # eliminate the $1.96 rounding discrepancy from dual code paths.
+    # Use pnl field from settle/exit records directly — no API calls needed.
     for ticker, t in settled_tickers.items():
         try:
-            # Determine source and cost basis BEFORE any API call or `continue`.
             src = exit_records[ticker].get('source', t.get('source', 'bot')) if ticker in exit_records else t.get('source', 'bot')
             is_manual = src in ('economics', 'geo', 'manual')
-            # Accumulate cost basis for ALL closed positions — always, regardless of
-            # whether the Kalshi API call succeeds.
             position_cost = float(t.get('size_dollars') or 0)
             if is_manual:
                 manual_cost_basis += position_cost
             else:
                 bot_cost_basis += position_cost
 
-            # Check if this was manually exited — use exit record for P&L (no API call needed)
-            if ticker in exit_records:
+            side = t.get('side', 'no')
+            cr = close_records_pnl.get((ticker, side))
+            if cr and cr.get('pnl') is not None:
+                pnl = round(float(cr['pnl']), 2)
+            elif ticker in exit_records:
                 ex = exit_records[ticker]
-                pnl = ex.get('realized_pnl')
+                pnl = ex.get('pnl')
                 if pnl is None:
                     ep = ex.get('entry_price', 50)
                     xp = ex.get('exit_price', 50)
                     ct = ex.get('contracts', 0)
-                    side = ex.get('side', t.get('side', 'no'))
                     pnl = round((xp - ep) * ct / 100, 2)
                 pnl = round(float(pnl), 2)
-                side = ex.get('side', t.get('side', 'no'))
             else:
-                # Try WS cache first for live price
-                _cached = market_cache.get_market_price(ticker)
-                if _cached and _cached.get('yes_ask') is not None:
-                    lp = _cached['yes_ask']
-                    side      = t.get('side', 'no')
-                    mp        = t.get('market_prob', 0.5) or 0.5
-                    entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
-                    cost      = t.get('size_dollars', 25)
-                    contracts = t.get('contracts', 0) or 0
-                    if contracts > 0 and cost > 0:
-                        contracts = min(contracts, int(cost / max(entry_p, 1) * 100) + 2)
-                    cur_p = (100 - lp) if side == 'no' else lp
-                    pnl   = round((cur_p - entry_p) * contracts / 100, 2)
-                else:
-                    r = req.get(
-                        f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
-                        timeout=4
-                    )
-                    if r.status_code != 200: continue
-                    m = r.json().get('market', {})
-                    lp     = m.get('last_price')
-                    result = m.get('result')
-                    if lp is None and not result: continue
-                    if result == 'yes':   lp = 100
-                    elif result == 'no':  lp = 0
+                # No settle/exit record yet — skip (settlement_checker will create one)
+                continue
 
-                    side      = t.get('side', 'no')
-                    mp        = t.get('market_prob', 0.5) or 0.5
-                    entry_p   = round((1 - mp) * 100) if side == 'no' else round(mp * 100)
-                    cost      = t.get('size_dollars', 25)
-                    contracts = t.get('contracts', 0) or 0
-                    if contracts > 0 and cost > 0:
-                        contracts = min(contracts, int(cost / max(entry_p, 1) * 100) + 2)
-                    cur_p = (100 - lp) if side == 'no' else lp
-                    pnl   = round((cur_p - entry_p) * contracts / 100, 2)
             closed_pnl_total += pnl
             closed_total += 1
             if pnl > 0: closed_wins += 1
 
-            # is_manual already determined above — accumulate by source
             if is_manual:
                 closed_by_source['manual'] += pnl
                 closed_count_by_source['manual'] += 1
@@ -974,8 +971,6 @@ def get_pnl_history():
                 if pnl > 0:
                     bot_wins += 1
 
-                # ── Per-module P&L (bot trades only) ─────────────────────────
-                # Accumulated in the same loop to guarantee module sum == bot total
                 _mod = classify_module(src, ticker)
                 if _mod not in module_stats:
                     _mod = 'other'
@@ -984,11 +979,14 @@ def get_pnl_history():
                 if pnl > 0:
                     module_stats[_mod]['wins'] += 1
 
-            # Bucket by exit date (for manual exits) or settlement date
-            if ticker in exit_records and exit_records[ticker].get('timestamp'):
+            # Bucket by close record timestamp or settlement date from ticker
+            cr_ts = cr.get('timestamp') if cr else None
+            if not cr_ts and ticker in exit_records:
+                cr_ts = exit_records[ticker].get('timestamp')
+            if cr_ts:
                 try:
                     from datetime import datetime as _dt2
-                    sdate = _dt2.fromisoformat(exit_records[ticker]['timestamp']).date()
+                    sdate = _dt2.fromisoformat(cr_ts.split('+')[0]).date()
                 except Exception:
                     sdate = settlement_date_from_ticker(ticker)
             else:
@@ -1204,7 +1202,18 @@ def _build_state():
             if tk:
                 exit_records[tk] = t
 
+    # ── Build close records index: (ticker, side) -> settle/exit record ─────
+    _close_recs = {}
+    for t in all_trades:
+        if t.get('action') in ('exit', 'settle'):
+            tk = t.get('ticker', '')
+            sd = t.get('side', '')
+            if tk:
+                _close_recs[(tk, sd)] = t
+
     # ── Split: settled/exited vs open (for P&L calculation) ──────────────────
+    # A position is "closed" ONLY if it has a settle/exit record with pnl.
+    # Expired tickers without a settle record are still "open" (pending settlement).
     seen: set = set()
     settled_tickers: dict = {}
     open_tickers_all: dict = {}
@@ -1212,10 +1221,12 @@ def _build_state():
         ticker = t.get('ticker', '')
         if not ticker or ticker in seen:
             continue
-        if t.get('action') == 'exit':
+        if t.get('action') in ('exit', 'settle'):
             continue
         seen.add(ticker)
-        if is_settled_ticker(ticker) or ticker in exit_records:
+        side = t.get('side', 'no')
+        has_close = (ticker, side) in _close_recs or ticker in exit_records
+        if has_close:
             settled_tickers[ticker] = t
         else:
             open_tickers_all[ticker] = t
@@ -1362,15 +1373,28 @@ def _build_state():
         'wins': 0,
     } for m in module_keys}
 
+    # Build close records index for _build_state: (ticker, side) -> record
+    _close_recs_state = {}
+    for t in all_trades:
+        if t.get('action') in ('exit', 'settle'):
+            tk = t.get('ticker', '')
+            sd = t.get('side', '')
+            if tk:
+                _close_recs_state[(tk, sd)] = t
+
     for ticker, t in settled_tickers.items():
         try:
             src = (exit_records[ticker].get('source', t.get('source', 'bot'))
                    if ticker in exit_records else t.get('source', 'bot'))
             is_manual = src in ('economics', 'geo', 'manual')
 
-            if ticker in exit_records:
-                ex      = exit_records[ticker]
-                pnl_val = ex.get('realized_pnl')
+            side2 = t.get('side', 'no')
+            cr = _close_recs_state.get((ticker, side2))
+            if cr and cr.get('pnl') is not None:
+                pnl_val = round(float(cr['pnl']), 2)
+            elif ticker in exit_records:
+                ex = exit_records[ticker]
+                pnl_val = ex.get('pnl')
                 if pnl_val is None:
                     ep2 = ex.get('entry_price', 50)
                     xp  = ex.get('exit_price', 50)
@@ -1378,42 +1402,8 @@ def _build_state():
                     pnl_val = round((xp - ep2) * ct2 / 100, 2)
                 pnl_val = round(float(pnl_val), 2)
             else:
-                # Try WS cache first for live price
-                _cached = market_cache.get_market_price(ticker)
-                if _cached and _cached.get('yes_ask') is not None:
-                    lp = _cached['yes_ask']
-                    side2      = t.get('side', 'no')
-                    mp2        = t.get('market_prob', 0.5) or 0.5
-                    entry_p2   = round((1 - mp2) * 100) if side2 == 'no' else round(mp2 * 100)
-                    contracts2 = t.get('contracts', 0) or 0
-                    cost2      = t.get('size_dollars', 25)
-                    if contracts2 > 0 and cost2 > 0:
-                        contracts2 = min(contracts2, int(cost2 / max(entry_p2, 1) * 100) + 2)
-                    cur_p2  = (100 - lp) if side2 == 'no' else lp
-                    pnl_val = round((cur_p2 - entry_p2) * contracts2 / 100, 2)
-                else:
-                    r = req.get(
-                        f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}',
-                        timeout=4
-                    )
-                    if r.status_code != 200:
-                        continue
-                    m_data = r.json().get('market', {})
-                    lp     = m_data.get('last_price')
-                    result = m_data.get('result')
-                    if lp is None and not result:
-                        continue
-                    if result == 'yes':  lp = 100
-                    elif result == 'no': lp = 0
-                    side2      = t.get('side', 'no')
-                    mp2        = t.get('market_prob', 0.5) or 0.5
-                    entry_p2   = round((1 - mp2) * 100) if side2 == 'no' else round(mp2 * 100)
-                    contracts2 = t.get('contracts', 0) or 0
-                    cost2      = t.get('size_dollars', 25)
-                    if contracts2 > 0 and cost2 > 0:
-                        contracts2 = min(contracts2, int(cost2 / max(entry_p2, 1) * 100) + 2)
-                    cur_p2  = (100 - lp) if side2 == 'no' else lp
-                    pnl_val = round((cur_p2 - entry_p2) * contracts2 / 100, 2)
+                # No settle/exit record yet — skip
+                continue
 
             closed_pnl_total += pnl_val
             closed_count     += 1
@@ -1430,10 +1420,13 @@ def _build_state():
                     module_closed[mod_c]['wins'] += 1
 
             # Period bucketing
-            if ticker in exit_records and exit_records[ticker].get('timestamp'):
+            cr_ts2 = cr.get('timestamp') if cr else None
+            if not cr_ts2 and ticker in exit_records:
+                cr_ts2 = exit_records[ticker].get('timestamp')
+            if cr_ts2:
                 try:
                     from datetime import datetime as _dt2
-                    sdate = _dt2.fromisoformat(exit_records[ticker]['timestamp']).date()
+                    sdate = _dt2.fromisoformat(cr_ts2.split('+')[0]).date()
                 except Exception:
                     sdate = settlement_date_from_ticker(ticker)
             else:
@@ -1492,17 +1485,8 @@ def _build_state():
         except Exception:
             pass
 
-    # NOTE: pnl_cache.json is owned by data_agent.py — do NOT overwrite it here.
-    # Dashboard reads from it; Data Agent maintains it as source of truth.
-    # Read current cache value to reconcile display if needed.
-    try:
-        pnl_cache_path = LOGS_DIR / "truth" / "pnl_cache.json"
-        if pnl_cache_path.exists():
-            cached_pnl = json.loads(pnl_cache_path.read_text(encoding='utf-8')).get('closed_pnl', 0)
-            # Use cache value as authoritative closed P&L
-            closed_pnl_total = float(cached_pnl)
-    except Exception:
-        pass
+    # Closed P&L is now computed from settle/exit records directly.
+    # No longer overriding with pnl_cache.json (which may be stale).
 
     return {
         'account': {
