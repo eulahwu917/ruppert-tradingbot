@@ -314,18 +314,40 @@ def check_pnl_consistency() -> tuple:
 
 
 def get_open_positions_from_logs() -> list[dict]:
-    """Get open positions by scanning all trade files."""
-    entries = {}  # ticker -> trade record
+    """Get open positions by scanning all trade files.
+
+    Scale-in fix: aggregate cost_basis and contracts across all buy legs
+    per ticker. Stop aggregating (clear the entry) when an exit/settle
+    record is encountered for that ticker.
+    """
+    entries = {}   # ticker -> aggregated record (based on first buy leg)
     exits = set()
+
     for path in _get_trade_files():
         for t in _read_trades_file(path):
             ticker = t.get('ticker', '')
+            if not ticker:
+                continue
             action = t.get('action', 'buy')
             if action in ('exit', 'settle'):
                 exits.add(ticker)
+                entries.pop(ticker, None)  # clear any accumulated entry
             else:
-                entries[ticker] = t
-    return [t for ticker, t in entries.items() if ticker not in exits]
+                if ticker not in entries:
+                    # First buy leg: store a copy as the base record
+                    entries[ticker] = dict(t)
+                else:
+                    # Scale-in: accumulate size_dollars and contracts
+                    entries[ticker]['size_dollars'] = (
+                        float(entries[ticker].get('size_dollars') or 0)
+                        + float(t.get('size_dollars') or 0)
+                    )
+                    entries[ticker]['contracts'] = (
+                        int(entries[ticker].get('contracts') or 0)
+                        + int(t.get('contracts') or 0)
+                    )
+
+    return [rec for ticker, rec in entries.items() if ticker not in exits]
 
 
 def compute_win_rate_from_logs(module: str) -> float | None:

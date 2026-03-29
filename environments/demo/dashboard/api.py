@@ -289,22 +289,29 @@ def get_account():
 
     all_trades = read_all_trades()
 
-    # Deduplicate by ticker (same logic as positions endpoint)
-    # Only count each position once — ignore exit/settle entries and duplicates
-    closed_tickers = set()
-    for t in all_trades:
-        if t.get('action') in ('exit', 'settle'):
-            tk = t.get('ticker', '')
-            if tk:
-                closed_tickers.add(tk)
-    seen_tickers = set()
-    trades = []
+    # Scale-in fix: aggregate size_dollars + contracts per ticker across all buy legs.
+    # Clear accumulated entry when exit/settle encountered (position closed).
+    entries = {}   # ticker -> aggregated record
     for t in all_trades:
         ticker = t.get('ticker', '')
-        if not ticker or ticker in closed_tickers or ticker in seen_tickers: continue
-        if t.get('action') in ('exit', 'settle'): continue
-        seen_tickers.add(ticker)
-        trades.append(t)
+        if not ticker:
+            continue
+        action = t.get('action', '')
+        if action in ('exit', 'settle'):
+            entries.pop(ticker, None)  # position closed; reset accumulator
+        else:
+            if ticker not in entries:
+                entries[ticker] = dict(t)
+            else:
+                entries[ticker]['size_dollars'] = (
+                    float(entries[ticker].get('size_dollars') or 0)
+                    + float(t.get('size_dollars') or 0)
+                )
+                entries[ticker]['contracts'] = (
+                    int(entries[ticker].get('contracts') or 0)
+                    + int(t.get('contracts') or 0)
+                )
+    trades = list(entries.values())
 
     # Bot = weather + crypto (fully autonomous, Ruppert decides)
     # Manual = economics + geo (David approves)
