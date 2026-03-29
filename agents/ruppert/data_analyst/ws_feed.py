@@ -19,7 +19,7 @@ import asyncio
 import json
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 # Resolve workspace root and add to path for env_config
@@ -48,6 +48,13 @@ import agents.ruppert.trader.position_tracker as position_tracker
 logger = logging.getLogger(__name__)
 
 DRY_RUN = getattr(config, 'DRY_RUN', True)
+
+# Per-window evaluation dedup guard
+# Key: "{series}::{window_open_iso}"  Value: ISO timestamp when evaluated
+_window_evaluated: dict[str, str] = {}
+
+# Lazy KalshiClient instance for REST fallback (avoids re-init per poll cycle)
+_kalshi_client_instance = None
 
 # Series prefixes from config (updateable without code change)
 ACTIVE_SERIES_PREFIXES = set(getattr(config, 'WS_ACTIVE_SERIES', []))
@@ -99,6 +106,175 @@ def _build_auth_headers() -> dict:
     }
 
 
+# ─────────────────────────────── REST Fallback Helpers ───────────────────────
+
+def _get_kalshi_client():
+    """Lazy singleton getter for KalshiClient — avoids re-init per poll cycle."""
+    global _kalshi_client_instance
+    if _kalshi_client_instance is None:
+        from agents.ruppert.data_analyst.kalshi_client import KalshiClient
+        _kalshi_client_instance = KalshiClient()
+    return _kalshi_client_instance
+
+
+def _prune_window_guard():
+    """Remove dedup entries older than 60 minutes."""
+    cutoff = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+    stale = [k for k, v in _window_evaluated.items() if v < cutoff]
+    for k in stale:
+        del _window_evaluated[k]
+
+
+async def _resolve_15m_ticker(series: str, window_open_dt: datetime) -> dict | None:
+    """Find the active 15m market for this series and window via REST.
+    Returns market dict with yes_ask, yes_bid, close_time, open_time, or None.
+    """
+    loop = asyncio.get_running_loop()
+    markets = await loop.run_in_executor(
+        None,
+        lambda: _get_kalshi_client().get_markets_metadata(series, status='open')
+    )
+    window_open_iso = window_open_dt.replace(tzinfo=timezone.utc).isoformat()
+    for m in markets:
+        if (m.get('open_time') or '').replace('Z', '+00:00') == window_open_iso:
+            return m
+    return None
+
+
+def _enrich_and_compute_depth(m):
+    """Fetch orderbook for market dict m, enrich with bid/ask, compute book_depth_usd.
+    Runs in executor (blocking). Modifies m in place and returns it.
+    """
+    client = _get_kalshi_client()
+    t = m.get('ticker', '')
+    host = client.client.configuration.host
+    ob_url = f"{host}/markets/{t}/orderbook"
+    from agents.ruppert.data_analyst.kalshi_client import _get_with_retry
+    ob_resp = _get_with_retry(ob_url, timeout=5)
+    depth = 0.0
+    if ob_resp is not None and ob_resp.status_code == 200:
+        ob = ob_resp.json().get('orderbook_fp', {})
+        yes_side = ob.get('yes_dollars', [])   # [[price_str, vol_str], ...]
+        no_side  = ob.get('no_dollars', [])
+        # Top-3 volumes on each side (vol is already in dollars)
+        yes_vols = sorted([float(v) for p, v in yes_side], reverse=True)[:3]
+        no_vols  = sorted([float(v) for p, v in no_side],  reverse=True)[:3]
+        depth = sum(yes_vols) + sum(no_vols)
+        # Derive bid/ask from the same response
+        if no_side:
+            best_no_bid = max(float(p) for p, v in no_side)
+            m['no_bid']  = int(round(best_no_bid * 100))
+            m['yes_ask'] = 100 - m['no_bid']
+        if yes_side:
+            best_yes_bid = max(float(p) for p, v in yes_side)
+            m['yes_bid'] = int(round(best_yes_bid * 100))
+            m['no_ask']  = 100 - m['yes_bid']
+    m['_book_depth_usd'] = depth
+    return m
+
+
+async def _fetch_15m_market_price(series: str, window_open_dt: datetime) -> dict | None:
+    """Resolve ticker and fetch live bid/ask for a 15m series/window via REST."""
+    market = await _resolve_15m_ticker(series, window_open_dt)
+    if not market:
+        logger.warning('[Fallback] No open market found for %s window %s', series, window_open_dt)
+        return None
+
+    ticker = market.get('ticker', '')
+    if not ticker:
+        return None
+
+    loop = asyncio.get_running_loop()
+    enriched = await loop.run_in_executor(None, lambda: _enrich_and_compute_depth(market))
+
+    yes_ask = enriched.get('yes_ask')
+    yes_bid = enriched.get('yes_bid')
+    book_depth_usd = enriched.get('_book_depth_usd', 0.0)
+    if yes_ask is None or yes_bid is None:
+        logger.warning('[Fallback] No bid/ask from REST for %s', ticker)
+        return None
+
+    return {
+        'ticker': ticker,
+        'yes_ask': yes_ask,                    # cents (int)
+        'yes_bid': yes_bid,                    # cents (int)
+        'book_depth_usd': book_depth_usd,      # sum of top-3 volumes each side (dollars)
+        'open_time': market.get('open_time'),
+        'close_time': market.get('close_time'),
+    }
+
+
+async def _check_and_fire_fallback() -> None:
+    """Check each 15m series; fire REST-based evaluation if WS missed the window."""
+    now_utc = datetime.now(tz=timezone.utc)
+
+    # Compute current 15m window boundaries
+    window_minutes = (now_utc.minute // 15) * 15
+    window_open_dt = now_utc.replace(minute=window_minutes, second=0, microsecond=0)
+    window_close_dt = window_open_dt + timedelta(minutes=15)
+    window_open_iso = window_open_dt.isoformat()
+
+    elapsed_secs = (now_utc - window_open_dt).total_seconds()
+    remaining_secs = (window_close_dt - now_utc).total_seconds()
+
+    # Only fire in the useful window: 90s after open, 120s before close
+    if elapsed_secs < 90 or remaining_secs < 120:
+        return
+
+    for series in CRYPTO_15M_SERIES:
+        guard_key = f"{series}::{window_open_iso}"
+
+        # Skip if WS already evaluated this window
+        if guard_key in _window_evaluated:
+            continue
+
+        try:
+            market = await _fetch_15m_market_price(series, window_open_dt)
+            if not market:
+                continue
+
+            ticker = market['ticker']
+            yes_ask = market['yes_ask']
+            yes_bid = market['yes_bid']
+            close_time = market['close_time']
+            open_time = market['open_time']
+
+            # Update market cache with REST price
+            market_cache.update(ticker, yes_bid / 100, yes_ask / 100, source='rest_fallback')
+
+            logger.info('[Fallback] Firing REST eval for %s (WS missed window)', ticker)
+
+            book_depth_usd = market.get('book_depth_usd', 0.0)
+
+            from agents.ruppert.trader.crypto_15m import evaluate_crypto_15m_entry
+            try:
+                evaluate_crypto_15m_entry(
+                    ticker, yes_ask, yes_bid, close_time, open_time,
+                    book_depth_usd=book_depth_usd,  # computed from top-3 volumes each side
+                    dollar_oi=0.0,                  # REST OI not fetched here — strategy must tolerate 0
+                )
+            finally:
+                # Always mark window evaluated — even on exception — to prevent retry storm
+                _window_evaluated[guard_key] = now_utc.isoformat()
+
+        except Exception as e:
+            logger.warning('[Fallback] eval error for %s: %s', series, e)
+
+
+async def _fallback_poll_loop() -> None:
+    """Background task: REST-poll each 15m series if WS hasn't fired for current window.
+    Created and cancelled per WS connection cycle — do not run globally.
+    """
+    while True:
+        await asyncio.sleep(60)
+        try:
+            await _check_and_fire_fallback()
+        except asyncio.CancelledError:
+            raise  # propagate cancellation
+        except Exception as e:
+            logger.warning('[WS Feed] Fallback poll error: %s', e)
+
+
 # ─────────────────────────────── Message Handler ──────────────────────────────
 
 async def handle_message(msg: dict):
@@ -146,6 +322,12 @@ async def handle_message(msg: dict):
                 evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time, book_depth_usd, dollar_oi)
             except Exception as e:
                 logger.warning('[WS Feed] 15m eval error: %s', e)
+            # Mark this window as evaluated so fallback poll skips it
+            _series = next((s for s in CRYPTO_15M_SERIES if ticker_upper.startswith(s)), None)
+            # Normalize Z suffix to match fallback's +00:00 format
+            _open_time_norm = open_time.replace('Z', '+00:00') if open_time and open_time.endswith('Z') else open_time
+            if _series and _open_time_norm:
+                _window_evaluated[f"{_series}::{_open_time_norm}"] = datetime.utcnow().isoformat()
 
     # Route crypto hourly band tickers
     elif any(ticker_upper.startswith(p) for p in CRYPTO_HOURLY_PREFIXES):
@@ -240,35 +422,47 @@ async def run_ws_feed():
                 last_persist = time.time()
                 msg_count = 0
 
-                async for raw in ws:
-                    msg = json.loads(raw)
-                    await handle_message(msg)
-                    msg_count += 1
+                # START fallback task for this connection cycle
+                fallback_task = asyncio.create_task(_fallback_poll_loop())
 
-                    # Yield to event loop every 100 messages so server PINGs get answered
-                    if msg_count % 100 == 0:
-                        await asyncio.sleep(0)
+                try:
+                    async for raw in ws:
+                        msg = json.loads(raw)
+                        await handle_message(msg)
+                        msg_count += 1
 
-                    now = time.time()
+                        # Yield to event loop every 100 messages so server PINGs get answered
+                        if msg_count % 100 == 0:
+                            await asyncio.sleep(0)
 
-                    # Periodic persist every 60s
-                    if now - last_persist >= 60:
-                        market_cache.persist()
-                        _write_heartbeat()
-                        last_persist = now
+                        now = time.time()
 
-                    # Periodic purge every 5 min
-                    if now - last_purge > 300:
-                        market_cache.purge_stale()
-                        await _rest_refresh_stale()
-                        cache_size = len(market_cache.snapshot())
-                        tracked_count = len(position_tracker.get_tracked())
-                        print(
-                            f'  [WS Feed] Heartbeat: {msg_count} msgs, '
-                            f'{cache_size} cached, {tracked_count} tracked | {ts()}'
-                        )
-                        _write_heartbeat()
-                        last_purge = now
+                        # Periodic persist every 60s
+                        if now - last_persist >= 60:
+                            market_cache.persist()
+                            _write_heartbeat()
+                            last_persist = now
+
+                        # Periodic purge every 5 min
+                        if now - last_purge > 300:
+                            market_cache.purge_stale()
+                            await _rest_refresh_stale()
+                            _prune_window_guard()
+                            cache_size = len(market_cache.snapshot())
+                            tracked_count = len(position_tracker.get_tracked())
+                            print(
+                                f'  [WS Feed] Heartbeat: {msg_count} msgs, '
+                                f'{cache_size} cached, {tracked_count} tracked | {ts()}'
+                            )
+                            _write_heartbeat()
+                            last_purge = now
+                finally:
+                    # CANCEL on every exit (disconnect, exception, clean shutdown)
+                    fallback_task.cancel()
+                    try:
+                        await fallback_task
+                    except asyncio.CancelledError:
+                        pass
 
         except Exception as e:
             print(f'  [WS Feed] Disconnected: {e} — reconnecting in 5s')
