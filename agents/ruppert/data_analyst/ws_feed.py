@@ -207,6 +207,10 @@ async def run_ws_feed():
                     await handle_message(msg)
                     msg_count += 1
 
+                    # Yield to event loop every 100 messages so server PINGs get answered
+                    if msg_count % 100 == 0:
+                        await asyncio.sleep(0)
+
                     # Periodic purge every 5 min
                     now = time.time()
                     if now - last_purge > 300:
