@@ -97,7 +97,6 @@ def check_task_scheduler():
         "Ruppert-PostTrade-Monitor",
         "Ruppert-DailyProgressReport",
         "Ruppert-DailyHealthCheck",
-        "Ruppert-ArchitectureResearch",
     ]
     try:
         result = subprocess.run(

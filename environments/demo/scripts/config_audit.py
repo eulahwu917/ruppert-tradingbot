@@ -22,7 +22,6 @@ import sys
 # Task names verified against registered tasks on DEMO host: 2026-03-29
 # -----------------------------------------------------------------------
 REQUIRED_TASKS = [
-    {"name": "Ruppert-ArchitectureResearch", "description": "Weekly architecture/research scan (Sundays 8AM)"},
     {"name": "Ruppert-Crypto-10AM", "description": "Crypto scanner — 10AM daily"},
     {"name": "Ruppert-Crypto-12PM", "description": "Crypto scanner — 12PM daily"},
     {"name": "Ruppert-Crypto-2PM", "description": "Crypto scanner — 2PM daily"},

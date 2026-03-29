@@ -324,7 +324,7 @@ async def handle_message(msg: dict):
             # Single-level depth too low — fetch REST orderbook for true top-3 depth
             try:
                 import asyncio as _asyncio
-                loop = _asyncio.get_event_loop()
+                loop = _asyncio.get_running_loop()
                 _market_stub = {'ticker': ticker}
                 _enriched = await loop.run_in_executor(None, lambda: _enrich_and_compute_depth(_market_stub))
                 _rest_depth = _enriched.get('_book_depth_usd', 0.0)

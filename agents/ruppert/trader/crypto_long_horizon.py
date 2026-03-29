@@ -95,7 +95,7 @@ def touch_probability(
         # Barrier approximation: P(price touches strike) ≈ 2 * P(terminal > strike) for GBM.
         # This is the standard reflection principle result. Cap the boost at the reflection bound.
         p_terminal = norm.cdf(-log_ratio / sigma)
-        barrier_boost = min(2.0 * p_terminal / p_terminal, 1.5) if p_terminal > 0 else 1.0  # max 1.5x boost
+        barrier_boost = 1.5  # reflection principle upper bound (2x) capped at 1.5x
         p = min(p_terminal * barrier_boost, 0.99)
     else:
         p_terminal = norm.cdf(log_ratio / sigma)

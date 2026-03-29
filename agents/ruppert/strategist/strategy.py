@@ -280,6 +280,7 @@ def should_enter(
 
     Returns:
         {'enter': bool, 'size': float, 'reason': str}
+        # Optional key: warning (str) — present when module has no daily cap config
     """
     signal_module     = signal.get('module', 'unknown')
     edge              = signal.get('edge', 0.0)
@@ -528,7 +529,7 @@ def should_exit(current_bid: float, entry_price: float,
     current_edge = signal.get('edge', 0.0)
     reversal = entry_edge - current_edge
     if reversal >= 0.35 and hours_to_settlement < 0.5:
-        return {'exit': True, 'fraction': 1.0, 'reason': 'catastrophic_reversal_override_hold'}
+        return {'exit': True, 'fraction': 1.0, 'reason': 'catastrophic_reversal_full'}
 
     # Rule 3 — Near-settlement hold (let contract settle)
     if hours_to_settlement < 0.5:
@@ -577,6 +578,7 @@ def get_strategy_summary() -> dict:
         'min_edge_geo':             MIN_EDGE['geo'],
         'min_edge_econ':            MIN_EDGE['econ'],
         'min_edge_fed':             MIN_EDGE['fed'],
+        'min_edge_crypto_15m':      getattr(_cfg, 'MIN_EDGE_15M', 0.05),
         'min_confidence':           MIN_CONFIDENCE,
         'min_hours_to_entry':       MIN_HOURS_ENTRY,
         'min_hours_to_add':         MIN_HOURS_ADD,
