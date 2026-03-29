@@ -7,14 +7,17 @@ Ruppert is a fully automated multi-module prediction market trading system built
 ## Architecture
 
 ### Agent Org Chart
-```
-CEO (Ruppert) — ruppert_cycle.py
-├── Strategist — strategy.py, edge_detector.py, optimizer.py
-├── Data Scientist — capital.py, logger.py, data_agent.py, dashboard
-│   ├── Data Analyst — market_cache.py, kalshi_client.py, ws_feed.py, wallet_updater.py
-│   └── Researcher — research_agent.py, market_scanner.py
-└── Trader — trader.py, position_monitor.py, position_tracker.py
-```
+
+| Agent | Scripts Owned |
+|-------|--------------|
+| **CEO** | `ruppert_cycle.py` (orchestration only — delegates to Trader) |
+| **Strategist** | `bot/strategy.py`, `edge_detector.py`, `optimizer.py` |
+| **Data Scientist** | `data_agent.py`, `capital.py`, `dashboard/api.py`, `logger.py` |
+| **Data Analyst** | `ghcnd_client.py`, `openmeteo_client.py`, `kalshi_client.py`, `ws_feed.py`, `fetch_smart_money.py`, `bot/wallet_updater.py` |
+| **Researcher** | `research_agent.py`, `market_scanner.py` |
+| **Trader** | `trader.py`, `post_trade_monitor.py`, `position_monitor.py`, `position_tracker.py`, `main.py`, `crypto_15m.py`, `crypto_client.py`, `crypto_long_horizon.py` |
+| **Dev** | Pipeline only — no persistent scripts |
+| **QA** | Pipeline only — no persistent scripts |
 
 ### Trading Modules
 | Module | Markets | Signal Source |
