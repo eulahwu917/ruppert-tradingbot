@@ -98,8 +98,10 @@ def _get_with_retry(url: str, params=None, headers=None, timeout=10, max_retries
 
 
 # API URLs
+# Note: Kalshi uses the same endpoint for both demo and production.
+# Demo mode is distinguished by account credentials, not by URL.
 PROD_HOST = 'https://api.elections.kalshi.com/trade-api/v2'
-DEMO_HOST = 'https://api.elections.kalshi.com/trade-api/v2'  # Same URL, demo uses demo account credentials
+DEMO_HOST = PROD_HOST  # Same endpoint; demo uses demo account credentials, not a different URL
 
 
 class KalshiClient:
@@ -214,6 +216,7 @@ class KalshiClient:
                     all_markets.extend(markets)
             except Exception as e:
                 print(f"  [Warning] Could not fetch {series}: {e}")
+            time.sleep(0.1)  # inter-series courtesy delay — 10 req/sec for series-level calls
 
         return all_markets
 
@@ -408,6 +411,34 @@ class KalshiClient:
             # Fall back to raw HTTP request and return SimpleNamespace objects.
             return self._get_positions_raw()
 
+    def _build_rest_auth_headers(self, method: str, path: str) -> dict:
+        """Build RSA/PSS auth headers for direct REST calls.
+        Uses same signing pattern as ws_feed._build_auth_headers().
+        """
+        import base64
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import padding
+        from pathlib import Path as _Path
+
+        timestamp = str(int(time.time() * 1000))
+        key_data = _Path(self.private_key_path).read_bytes()
+        private_key = serialization.load_pem_private_key(key_data, password=None)
+        msg = f"{timestamp}{method}{path}".encode()
+        signature = private_key.sign(
+            msg,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.DIGEST_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        sig_b64 = base64.b64encode(signature).decode()
+        return {
+            "KALSHI-ACCESS-KEY": self.api_key_id,
+            "KALSHI-ACCESS-SIGNATURE": sig_b64,
+            "KALSHI-ACCESS-TIMESTAMP": timestamp,
+        }
+
     def _get_positions_raw(self):
         """Raw HTTP fallback for get_positions when SDK Pydantic deserialization fails."""
         import requests
@@ -415,9 +446,13 @@ class KalshiClient:
         host = DEMO_HOST if self.environment == 'demo' else PROD_HOST
         url = f"{host}/portfolio/positions"
         path = '/trade-api/v2/portfolio/positions'
-        headers = self.client.kalshi_auth.create_auth_headers('GET', path)
-        resp = requests.get(url, headers=headers, timeout=10)
-        resp.raise_for_status()
+        headers = self._build_rest_auth_headers('GET', path)
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.raise_for_status()
+        except Exception as e:
+            print(f"  [Warning] _get_positions_raw HTTP error: {e}")
+            return []
         raw = resp.json().get('market_positions') or []
         positions = []
         for p in raw:
@@ -432,9 +467,19 @@ class KalshiClient:
         return positions
 
     def get_orders(self):
-        """Get recent orders."""
-        result = self.client.get_orders()
-        return result.orders or []
+        """Get recent orders. Retries up to 3 times on transient errors."""
+        delay = 1.0
+        for attempt in range(3):
+            try:
+                result = self.client.get_orders()
+                return result.orders or []
+            except Exception as e:
+                if attempt == 2:
+                    print(f"  [Orders] All retries exhausted: {e}")
+                    return []
+                print(f"  [Orders] Error fetching orders: {e} — retrying in {delay:.1f}s (attempt {attempt+1}/3)")
+                time.sleep(delay)
+                delay *= 2
 
 
 if __name__ == '__main__':

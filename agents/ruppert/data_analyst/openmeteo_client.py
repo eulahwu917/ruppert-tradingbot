@@ -357,7 +357,10 @@ def _fetch_raw_ensemble(series_ticker: str, target_date: date, model: str) -> li
             return result
 
         except Exception as e:
-            logger.error(f"[OpenMeteo/{model}] Ensemble fetch failed for {series_ticker}: {e}")
+            logger.error(f"[OpenMeteo/{model}] Ensemble fetch failed for {series_ticker}: {e} (attempt {attempt+1}/3)")
+            if attempt < 2:
+                continue  # retry — do NOT write None to cache yet
+            # Final attempt exhausted: cache None so callers don't retry this scan
             _ensemble_raw_cache[_cache_key] = None
             return None
 
@@ -439,9 +442,12 @@ def get_ensemble_probability(series_ticker: str, threshold_f: float, target_date
           "error": None or str,
         }
     """
+    import time as _time
     # Fetch all models (independent calls for clean error isolation)
     model_results = {}
-    for model in ENSEMBLE_MODEL_WEIGHTS:
+    for i, model in enumerate(ENSEMBLE_MODEL_WEIGHTS):
+        if i > 0:
+            _time.sleep(0.2)  # courtesy delay between model calls
         model_results[model] = _fetch_model_ensemble(
             series_ticker, threshold_f, target_date, model
         )
@@ -695,14 +701,21 @@ def get_nws_forecast_high_official(series_ticker: str, target_date: date) -> Opt
                     )
                     return float(temp_f)
 
-        # Fallback: first daytime period
+        # Fallback: first daytime period — only if it matches the target date
         for period in periods:
             if period.get("isDaytime", False):
+                start = period.get("startTime", "")
+                if target_str not in start:
+                    logger.warning(
+                        f"[NWS Official] {city_name}: fallback period date mismatch "
+                        f"(target={target_str}, fallback_start={start[:10]}) — returning None"
+                    )
+                    return None
                 temp_f = period.get("temperature")
                 if temp_f is not None:
                     logger.warning(
-                        f"[NWS Official] {city_name}: exact date {target_str} not found, "
-                        f"using first daytime period: {temp_f}°F"
+                        f"[NWS Official] {city_name}: exact period not found for {target_str}, "
+                        f"using first matching daytime period: {temp_f}°F"
                     )
                     return float(temp_f)
 

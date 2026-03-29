@@ -515,8 +515,8 @@ def get_active_positions():
     # dry_run trades are NOT real Kalshi positions — trade logs are the source of truth
     all_trades = read_all_trades()
 
-    # Build set of exited tickers
-    exited = {t.get('ticker') for t in all_trades if t.get('action') == 'exit'}
+    # Build set of exited/settled tickers
+    exited = {t.get('ticker') for t in all_trades if t.get('action') in ('exit', 'settle')}
 
     # Deduplicate: keep first (earliest) open/buy entry per ticker
     # Only collect entries where action is 'open' or 'buy' (not exit, add-on, update, etc.)

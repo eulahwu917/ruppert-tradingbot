@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 CACHE_FILE = _get_paths()['logs'] / 'price_cache.json'
 STALE_THRESHOLD = getattr(cfg, 'WS_CACHE_STALE_SECONDS', 60)
-PURGE_THRESHOLD = getattr(cfg, 'WS_CACHE_PURGE_SECONDS', 300)
+PURGE_THRESHOLD = getattr(cfg, 'WS_CACHE_PURGE_SECONDS', 86400)
 
 _cache = {}         # {ticker: {bid, ask, updated_at, source}}
 _lock = threading.Lock()
@@ -85,14 +85,15 @@ def persist():
     """Write cache to disk (call on graceful shutdown)."""
     with _lock:
         data = dict(_cache)
+    tmp = CACHE_FILE.with_suffix('.tmp')
     try:
         CACHE_FILE.parent.mkdir(exist_ok=True)
-        tmp = CACHE_FILE.with_suffix('.tmp')
         tmp.write_text(json.dumps(data), encoding='utf-8')
         tmp.replace(CACHE_FILE)
         logger.debug('[MarketCache] Persisted %d entries to disk', len(data))
     except Exception as e:
         logger.warning('[MarketCache] Persist failed: %s', e)
+        tmp.unlink(missing_ok=True)
 
 
 def load():
@@ -119,10 +120,10 @@ def get_market_price(ticker: str, fallback_client=None) -> dict | None:
     bid_d, ask_d, is_stale = get_with_staleness(ticker)
     if not is_stale and bid_d is not None:
         return {
-            'yes_bid': round(bid_d * 100),
-            'yes_ask': round(ask_d * 100),
-            'no_bid':  round((1 - ask_d) * 100),
-            'no_ask':  round((1 - bid_d) * 100),
+            'yes_bid': int(round(bid_d * 100)),
+            'yes_ask': int(round(ask_d * 100)),
+            'no_bid':  int(round((1 - ask_d) * 100)),
+            'no_ask':  int(round((1 - bid_d) * 100)),
             'source': 'ws_cache',
         }
     # Stale or missing — fall back to REST
@@ -150,10 +151,10 @@ def get_market_price(ticker: str, fallback_client=None) -> dict | None:
     # Use original stale values
     if orig_bid_d is not None and orig_ask_d is not None:
         return {
-            'yes_bid': round(orig_bid_d * 100),
-            'yes_ask': round(orig_ask_d * 100),
-            'no_bid':  round((1 - orig_ask_d) * 100),
-            'no_ask':  round((1 - orig_bid_d) * 100),
+            'yes_bid': int(round(orig_bid_d * 100)),
+            'yes_ask': int(round(orig_ask_d * 100)),
+            'no_bid':  int(round((1 - orig_ask_d) * 100)),
+            'no_ask':  int(round((1 - orig_bid_d) * 100)),
             'source': 'ws_cache_stale',
         }
     return None

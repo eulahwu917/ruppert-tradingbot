@@ -154,7 +154,7 @@ def synthesize_pnl_cache(events: list = None) -> dict:
                     except json.JSONDecodeError:
                         continue
                     if trade.get('action') in ('exit', 'settle'):
-                        pnl = trade.get('pnl') or trade.get('realized_pnl') or 0
+                        pnl = trade.get('pnl') or 0
                         try:
                             closed_pnl += float(pnl)
                         except (TypeError, ValueError):

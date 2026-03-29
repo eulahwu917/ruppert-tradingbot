@@ -317,37 +317,42 @@ def get_open_positions_from_logs() -> list[dict]:
     """Get open positions by scanning all trade files.
 
     Scale-in fix: aggregate cost_basis and contracts across all buy legs
-    per ticker. Stop aggregating (clear the entry) when an exit/settle
-    record is encountered for that ticker.
+    per (ticker, side). Stop aggregating when an exit/settle record is
+    encountered for that (ticker, side) key.
+
+    Key type aligned with logger.get_daily_exposure() — both use (ticker, side)
+    tuple to correctly handle separate YES and NO legs on the same ticker.
     """
-    entries = {}   # ticker -> aggregated record (based on first buy leg)
-    exits = set()
+    entries = {}   # (ticker, side) -> aggregated record (based on first buy leg)
+    exits = set()  # set of (ticker, side) tuples
 
     for path in _get_trade_files():
         for t in _read_trades_file(path):
             ticker = t.get('ticker', '')
+            side = t.get('side', '')
             if not ticker:
                 continue
+            key = (ticker, side)
             action = t.get('action', 'buy')
             if action in ('exit', 'settle'):
-                exits.add(ticker)
-                entries.pop(ticker, None)  # clear any accumulated entry
+                exits.add(key)
+                entries.pop(key, None)  # clear any accumulated entry
             else:
-                if ticker not in entries:
+                if key not in entries:
                     # First buy leg: store a copy as the base record
-                    entries[ticker] = dict(t)
+                    entries[key] = dict(t)
                 else:
                     # Scale-in: accumulate size_dollars and contracts
-                    entries[ticker]['size_dollars'] = (
-                        float(entries[ticker].get('size_dollars') or 0)
+                    entries[key]['size_dollars'] = (
+                        float(entries[key].get('size_dollars') or 0)
                         + float(t.get('size_dollars') or 0)
                     )
-                    entries[ticker]['contracts'] = (
-                        int(entries[ticker].get('contracts') or 0)
+                    entries[key]['contracts'] = (
+                        int(entries[key].get('contracts') or 0)
                         + int(t.get('contracts') or 0)
                     )
 
-    return [rec for ticker, rec in entries.items() if ticker not in exits]
+    return [rec for key, rec in entries.items() if key not in exits]
 
 
 def compute_win_rate_from_logs(module: str) -> float | None:
@@ -583,17 +588,15 @@ def _remove_tracker_orphans(orphan_tickers: list[str]):
 
 
 def _regenerate_pnl_cache():
-    """Regenerate pnl_cache.json from trade logs."""
+    """Regenerate pnl_cache.json from trade logs.
+
+    Writes closed_pnl only. open_pnl is not persisted here — the
+    synthesizer computes it from live prices on the next synthesis run.
+    (The open_pnl preservation block was dead code: synthesize_pnl_cache()
+    always overwrites pnl_cache.json immediately after this function runs.)
+    """
     computed = compute_pnl_from_logs()
     cache_data = {'closed_pnl': computed}
-    # Preserve open_pnl if it exists
-    if PNL_CACHE_FILE.exists():
-        try:
-            existing = json.loads(PNL_CACHE_FILE.read_text(encoding='utf-8'))
-            if 'open_pnl' in existing:
-                cache_data['open_pnl'] = existing['open_pnl']
-        except Exception:
-            pass
     tmp = PNL_CACHE_FILE.with_suffix('.tmp')
     tmp.write_text(json.dumps(cache_data), encoding='utf-8')
     tmp.replace(PNL_CACHE_FILE)
@@ -614,13 +617,16 @@ def _format_single_alert(issue_type: str, ticker: str, detail: str, action: str)
 
 def _format_batch_alert(issues: list[dict], audit_file: str = '') -> str:
     lines = [f'\u26a0\ufe0f Data Agent: {len(issues)} issues found in post-scan audit']
-    # Group by type
+    # Group by type, tracking first-seen action per type
     by_type = {}
+    by_action = {}
     for iss in issues:
         t = iss.get('type', 'unknown')
         by_type[t] = by_type.get(t, 0) + 1
+        if t not in by_action:
+            by_action[t] = iss.get('action', '')
     for t, count in sorted(by_type.items()):
-        action = iss.get('action', '')
+        action = by_action.get(t, '')
         lines.append(f'- {count}x {t} ({action})')
     if audit_file:
         lines.append(f'Details: {audit_file}')

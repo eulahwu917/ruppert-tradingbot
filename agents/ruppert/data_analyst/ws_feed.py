@@ -119,7 +119,7 @@ def _get_kalshi_client():
 
 def _prune_window_guard():
     """Remove dedup entries older than 60 minutes."""
-    cutoff = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)).isoformat()
     stale = [k for k, v in _window_evaluated.items() if v < cutoff]
     for k in stale:
         del _window_evaluated[k]
@@ -255,7 +255,7 @@ async def _check_and_fire_fallback() -> None:
                 )
             finally:
                 # Always mark window evaluated — even on exception — to prevent retry storm
-                _window_evaluated[guard_key] = now_utc.isoformat()
+                _window_evaluated[guard_key] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
         except Exception as e:
             logger.warning('[Fallback] eval error for %s: %s', series, e)
@@ -303,8 +303,9 @@ async def handle_message(msg: dict):
     if yes_bid is not None and yes_ask is not None:
         market_cache.update(ticker, float(yes_bid_d), float(yes_ask_d))
 
-    # Check exit triggers for tracked positions
-    await position_tracker.check_exits(ticker, yes_bid, yes_ask)
+    # Check exit triggers for tracked positions (only when both prices are present)
+    if yes_bid is not None and yes_ask is not None:
+        await position_tracker.check_exits(ticker, yes_bid, yes_ask)
 
     # Route crypto 15m tickers to evaluate entry
     ticker_upper = ticker.upper()
@@ -316,7 +317,7 @@ async def handle_message(msg: dict):
         bid_size = float(data.get('yes_bid_size_fp') or 0)
         book_depth_usd = ask_size + bid_size
         dollar_oi = float(data.get('dollar_open_interest') or 0)
-        if yes_ask and yes_bid:
+        if yes_ask is not None and yes_bid is not None:
             try:
                 from agents.ruppert.trader.crypto_15m import evaluate_crypto_15m_entry
                 evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time, book_depth_usd, dollar_oi)
@@ -327,13 +328,13 @@ async def handle_message(msg: dict):
             # Normalize Z suffix to match fallback's +00:00 format
             _open_time_norm = open_time.replace('Z', '+00:00') if open_time and open_time.endswith('Z') else open_time
             if _series and _open_time_norm:
-                _window_evaluated[f"{_series}::{_open_time_norm}"] = datetime.utcnow().isoformat()
+                _window_evaluated[f"{_series}::{_open_time_norm}"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
     # Route crypto hourly band tickers
     elif any(ticker_upper.startswith(p) for p in CRYPTO_HOURLY_PREFIXES):
         # Skip 15m tickers that also match hourly prefixes (already handled above)
         if not any(ticker_upper.startswith(s) for s in CRYPTO_15M_SERIES):
-            if yes_ask and yes_bid:
+            if yes_ask is not None and yes_bid is not None:
                 try:
                     from agents.ruppert.trader.position_monitor import evaluate_crypto_entry
                     evaluate_crypto_entry(ticker, yes_ask, yes_bid, data.get('close_time'))
@@ -404,8 +405,8 @@ async def run_ws_feed():
             async with websockets.connect(
                 'wss://api.elections.kalshi.com/trade-api/ws/v2',
                 additional_headers=headers,
-                ping_interval=None,
-                ping_timeout=None,
+                ping_interval=30,
+                ping_timeout=10,
             ) as ws:
                 print(f'  [WS Feed] Connected at {ts()}')
                 log_activity('[WS Feed] Connected')
@@ -427,7 +428,11 @@ async def run_ws_feed():
 
                 try:
                     async for raw in ws:
-                        msg = json.loads(raw)
+                        try:
+                            msg = json.loads(raw)
+                        except json.JSONDecodeError as e:
+                            logger.warning('[WS Feed] Malformed JSON message, skipping: %s', e)
+                            continue
                         await handle_message(msg)
                         msg_count += 1
 

@@ -1149,6 +1149,9 @@ def run_cycle(mode):
         else:
             raise ValueError(f'Unknown mode: {mode}')
 
+        # ── Save state FIRST so synthesizer reads current cycle's STATE_UPDATE ──────
+        save_state(logs_dir, state.traded_tickers, mode)
+
         # ── Data Scientist: post-scan audit (non-fatal) ─────────────────────────────
         # Note: 'smart' mode triggers lighter synthesis (pnl_cache + positions only)
         if mode in ('full', 'smart', 'crypto_only', 'weather_only', 'econ_prescan'):
@@ -1161,7 +1164,6 @@ def run_cycle(mode):
             except Exception as _da_err:
                 log_activity(f'[DataAgent] Post-scan audit failed: {_da_err}')
 
-        save_state(logs_dir, state.traded_tickers, mode)
         log_cycle(mode, 'done', summary)
 
     except Exception as e:
