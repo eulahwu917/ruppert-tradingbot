@@ -176,8 +176,6 @@ async def run_ws_feed():
     from agents.ruppert.data_scientist.logger import log_activity
     log_activity('[WS Feed] Starting persistent WebSocket feed')
 
-    reconnect_delay = 1
-
     while True:
         try:
             headers = _build_auth_headers()
@@ -188,9 +186,9 @@ async def run_ws_feed():
                 ping_interval=None,
                 ping_timeout=None,
             ) as ws:
-                reconnect_delay = 1  # reset on successful connect
                 print(f'  [WS Feed] Connected at {ts()}')
                 log_activity('[WS Feed] Connected')
+                _write_heartbeat()  # update heartbeat on every successful reconnect
 
                 # Subscribe to ALL ticker updates (no market_tickers filter)
                 await ws.send(json.dumps({
@@ -225,8 +223,8 @@ async def run_ws_feed():
                         last_purge = now
 
         except Exception as e:
-            print(f'  [WS Feed] Disconnected: {e} (client pings disabled) — reconnecting in {reconnect_delay}s')
-            log_activity(f'[WS Feed] Disconnected: {e} (client pings disabled)')
+            print(f'  [WS Feed] Disconnected: {e} — reconnecting in 5s')
+            log_activity(f'[WS Feed] Disconnected: {e}')
 
             # On disconnect: REST-poll tracked positions to catch missed moves
             try:
@@ -234,8 +232,7 @@ async def run_ws_feed():
             except Exception as re:
                 logger.warning('[WS Feed] Recovery poll failed: %s', re)
 
-            await asyncio.sleep(reconnect_delay)
-            reconnect_delay = min(reconnect_delay * 2, 60)  # exponential backoff, max 60s
+            await asyncio.sleep(5)  # fixed 5s wait, then infinite retry
 
         finally:
             market_cache.persist()
