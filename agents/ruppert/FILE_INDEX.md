@@ -14,10 +14,11 @@ _Maintained by: CEO. Update during Phase 5 housekeeping after every audit loop._
 - Convention: `{AGENT}-SPECS-{BATCH}.md` or `{topic}-spec.md`
 - Audit-cycle specs (temp): `memory/agents/specs-{agent}-YYYY-MM-DD.md` (archived after Dev→QA completes)
 
-## Audit Log (permanent record)
-- CHANGELOG: `memory/audit-log/CHANGELOG.md` — compact index, read before every audit
-- Domain detail files: `memory/audit-log/YYYY-MM-DD-{domain}.md` — full finding detail per domain per loop
-- Archive: `memory/audit-log/archive/` — Fixed+QA-passed entries older than 60 days
+## Changelog (permanent record — audit findings + runtime issues)
+- Master index: `memory/changelog/CHANGELOG.md` — always read before starting any audit
+- Audit domain files: `memory/changelog/audit-logs/YYYY-MM-DD-{domain}.md` — full per-domain detail
+- Runtime issues: `memory/changelog/runtime/YYYY-MM-DD-issues.md` — bugs/alerts surfaced between audits
+- Archive: `memory/changelog/archive/` — Fixed+QA-passed entries older than 60 days; pruned periodically by CEO
 
 ## Agent Memory
 - Long-term: `agents/ruppert/{agent}/MEMORY.md`

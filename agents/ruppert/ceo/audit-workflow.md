@@ -25,6 +25,13 @@ Spawn all domain audit agents simultaneously. Each reads their own files and pro
 
 **Audit prompt template (per agent):**
 > You are the [Agent] for the Ruppert trading bot. This is a full domain audit of all files you own.
+>
+> **Before starting:** Read `memory/changelog/CHANGELOG.md`. For any finding you identify:
+> - If it matches a prior **Fixed+QA-passed** entry → skip it (already resolved)
+> - If it matches a prior **False-alarm** entry → skip it unless circumstances have changed
+> - If it matches a prior **Deferred** entry → check if the deferral condition has been met
+> - If it touches the same file/function as any prior entry → read the domain detail file at `memory/changelog/audit-logs/` before writing your spec
+>
 > Read every file in your domain. For each issue found, classify as Critical / High / Medium / Low with:
 > - File and line numbers
 > - What the bug/issue is (be precise)
@@ -169,21 +176,24 @@ After all domains are clean, CEO does a full housekeeping sweep across the **ent
 
 After housekeeping is complete, CEO writes the permanent audit record.
 
+**Folder structure:**
+```
+memory/changelog/
+  CHANGELOG.md              ← master index (audit + runtime findings)
+  audit-logs/               ← full per-domain detail files
+  runtime/                  ← bugs/alerts surfaced between audits
+  archive/                  ← entries older than 60 days (Fixed+QA-passed)
+```
+
+**Steps:**
 1. Read all audit finding files from this loop: `memory/agents/audit-{domain}-YYYY-MM-DD.md` and `memory/agents/audit2-{domain}-YYYY-MM-DD.md`
-2. Update `memory/audit-log/CHANGELOG.md` — add a new date section with one-line entries for every finding (Fixed/False-alarm/Deferred/Dismissed)
-3. Create domain detail files: `memory/audit-log/YYYY-MM-DD-{domain}.md` — full detail per finding
-4. Archive temp audit files: move `memory/agents/audit-*.md` and `memory/agents/specs-*.md` from this loop to `memory/agents/archive/` (they're now captured in audit-log)
-5. Commit: `git add memory/audit-log/` + commit message
-
-## Audit Agent Instructions (Phase 1 update)
-
-Update the Phase 1 audit prompt template to include:
-
-> Before starting your audit, read `memory/audit-log/CHANGELOG.md`. For any finding you identify:
-> - If it matches a prior **Fixed+QA-passed** entry → skip it (already resolved)
-> - If it matches a prior **False-alarm** entry → skip it unless circumstances have changed (note the scope)
-> - If it matches a prior **Deferred** entry → check if the deferral condition has been met
-> - If it touches the same file/function as any prior entry → read the domain detail file before writing your spec
+2. Update `memory/changelog/CHANGELOG.md` — add a new date section with one-line entries for every finding. Format: `{ID} | {description} | {status}`
+   - Status values: `Fixed (commit hash) QA-passed` / `False-alarm (reason)` / `Deferred (condition to revisit)` / `Dismissed`
+3. Create domain detail files: `memory/changelog/audit-logs/YYYY-MM-DD-{domain}.md` — full detail per finding (no raw code blobs, descriptions only)
+4. For runtime issues surfaced during the session: update `memory/changelog/runtime/YYYY-MM-DD-issues.md`
+5. Archive temp files: move `memory/agents/audit-*.md`, `memory/agents/audit2-*.md`, `memory/agents/specs-*.md` from this loop to `memory/agents/archive/`
+6. Pruning: move Fixed+QA-passed entries older than 60 days from CHANGELOG into `memory/changelog/archive/`
+7. Commit: `git add agents/ruppert/ceo/audit-workflow.md agents/ruppert/FILE_INDEX.md` (memory/ is gitignored — no need to add those)
 
 ---
 
