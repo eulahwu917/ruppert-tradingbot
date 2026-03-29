@@ -65,6 +65,7 @@ def _load():
         return
     try:
         data = json.loads(TRACKER_FILE.read_text(encoding='utf-8'))
+        migrated = 0
         for key_str, value in data.items():
             if '::' in key_str:
                 parts = key_str.split('::', 1)
@@ -72,7 +73,17 @@ def _load():
             else:
                 # Legacy key: ticker string only — use side from value
                 key = (key_str, value.get('side', 'yes'))
+            # Migrate legacy NO positions stored with YES-side entry price (< 50).
+            # Pre-2026-03-28 fix: add_position() did not flip NO entry prices.
+            # Convert: if side='no' and entry_price < 50, flip to NO price.
+            if value.get('side') == 'no' and isinstance(value.get('entry_price'), (int, float)):
+                if value['entry_price'] < 50:
+                    value['entry_price'] = 100 - value['entry_price']
+                    migrated += 1
             _tracked[key] = value
+        if migrated:
+            logger.info('[PositionTracker] Migrated %d legacy NO position(s) with flipped entry_price', migrated)
+            _persist()  # Write corrected data back to disk immediately
         logger.info('[PositionTracker] Loaded %d tracked positions from disk', len(_tracked))
     except Exception as e:
         logger.warning('[PositionTracker] Load failed: %s', e)
@@ -215,6 +226,8 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str):
     if DRY_RUN:
         order_result = {'dry_run': True, 'status': 'simulated'}
     else:
+        from agents.ruppert.env_config import require_live_enabled
+        require_live_enabled()
         try:
             client = KalshiClient()
             order_result = client.sell_position(ticker, side, current_bid, quantity)

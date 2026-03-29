@@ -525,6 +525,8 @@ def run_monitor():
                     log_activity(f'[POST-MONITOR EXIT] {ticker} {side.upper()} @ {cur_price}c — {reason}')
                     print(f"    [DEMO] Exit logged")
                 else:
+                    from agents.ruppert.env_config import require_live_enabled
+                    require_live_enabled()
                     try:
                         result = client.sell_position(ticker, side, cur_price, pos_contracts)
                         log_trade(exit_opp, exit_opp['size_dollars'], pos_contracts, result)

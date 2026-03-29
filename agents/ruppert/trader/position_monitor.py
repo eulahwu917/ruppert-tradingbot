@@ -375,8 +375,8 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
 
     # Check entry via strategy
     deployed_today = get_daily_exposure()
-    _total_deployed = get_daily_exposure()
-    module_deployed_pct = _total_deployed / capital if capital > 0 else 0.0
+    _module_deployed = get_daily_exposure('crypto')
+    module_deployed_pct = _module_deployed / capital if capital > 0 else 0.0
     decision = should_enter(opp, capital, deployed_today, module='crypto', module_deployed_pct=module_deployed_pct, traded_tickers=None)
     if not decision['enter']:
         reason = decision['reason']
@@ -405,6 +405,8 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     if DRY_RUN:
         order_result = {'dry_run': True, 'status': 'simulated'}
     else:
+        from agents.ruppert.env_config import require_live_enabled
+        require_live_enabled()
         try:
             order_result = client.place_order(ticker, side, bet_price, contracts)
         except Exception as e:
@@ -417,6 +419,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     opp['timestamp'] = ts()
     opp['date'] = str(date.today())
     opp['scan_price'] = bet_price
+    opp['fill_price'] = bet_price
     
     log_trade(opp, size, contracts, order_result)
     log_activity(f'[WS-CRYPTO] Entered {ticker} {side.upper()} @ {bet_price}c | edge={edge:+.1%}')

@@ -1014,6 +1014,8 @@ def evaluate_crypto_15m_entry(
     if DRY_RUN:
         order_result = {'dry_run': True, 'status': 'simulated'}
     else:
+        from agents.ruppert.env_config import require_live_enabled
+        require_live_enabled()
         try:
             client = KalshiClient()
             order_result = client.place_order(ticker, direction, entry_price, contracts)
@@ -1045,6 +1047,7 @@ def evaluate_crypto_15m_entry(
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'date': str(date.today()),
         'scan_price': entry_price,
+        'fill_price': entry_price,
         # ── Data quality tags (for Optimizer / Data Scientist segmentation) ──
         'data_quality':          data_quality,
         'okx_volume_pct':        okx_volume_pct,                  # float ratio, e.g. 0.12 = 12% of 30d avg

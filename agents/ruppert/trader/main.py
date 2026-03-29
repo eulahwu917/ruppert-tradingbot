@@ -1,6 +1,10 @@
 """
 Ruppert Kalshi Trading Bot — Full System
-Modules: Weather, Economics, Geopolitical
+Modules: Weather, Economics, Geopolitical (scanning only)
+
+NOTE: Crypto, Fed, and Geo TRADING execution runs via ruppert_cycle.py, not this file.
+main.py handles Weather trades + Econ/Geo market scanning (alert-only).
+To run crypto/fed/geo trades, use: python ruppert_cycle.py
 
 Usage:
   python main.py --test         # Test API connection
@@ -696,7 +700,10 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
             }
             opp['strategy_size'] = size
             opp['module'] = 'crypto'
-            trader.execute_opportunity(opp)
+            result = trader.execute_opportunity(opp)
+            if not result:
+                print(f"  [Crypto] execute_opportunity failed for {t['ticker']} — skipping accounting")
+                continue
 
             # Log Brier prediction at trade entry
             try:
@@ -727,6 +734,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
             traded_tickers.add(t['ticker'])
             _crypto_deployed_this_cycle += actual_cost
             _open_exposure += actual_cost
+            _deployed_today += actual_cost
             executed.append(opp)
 
     except Exception as e:

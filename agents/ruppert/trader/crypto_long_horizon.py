@@ -372,9 +372,9 @@ def run_long_horizon_scan(client, dry_run: bool = True, traded_tickers: set = No
         _bp = get_buying_power()
         opp['open_position_value'] = max(0.0, _total - _bp)
         _deployed_today = get_daily_exposure()
-        _crypto_deployed = get_daily_exposure('crypto')
-        _module_deployed_pct = _crypto_deployed / _total if _total > 0 else 0.0
-        se_decision = should_enter(opp, _total, _deployed_today, module='crypto', module_deployed_pct=_module_deployed_pct, traded_tickers=None)
+        _crypto_long_deployed = get_daily_exposure('crypto_long_horizon')
+        _module_deployed_pct = _crypto_long_deployed / _total if _total > 0 else 0.0
+        se_decision = should_enter(opp, _total, _deployed_today, module='crypto_long_horizon', module_deployed_pct=_module_deployed_pct, traded_tickers=None)
         if not se_decision['enter']:
             print(f"  SKIP {ticker}: strategy gate — {se_decision['reason']}")
             log_activity(f'[LongHorizon] SKIP {ticker}: {se_decision["reason"]}')
@@ -403,6 +403,8 @@ def run_long_horizon_scan(client, dry_run: bool = True, traded_tickers: set = No
             'note': f"regime={opp['regime']} fg={opp['fear_greed']} strike={opp['strike']} days={opp['days_to_expiry']}",
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'date': str(date.today()),
+            'scan_price': bet_price,
+            'fill_price': bet_price,
         }
 
         if dry_run or config.DRY_RUN:
@@ -410,6 +412,8 @@ def run_long_horizon_scan(client, dry_run: bool = True, traded_tickers: set = No
             log_activity(f"[LongHorizon] BUY {side.upper()} {ticker} {contracts}@{bet_price}c ${actual_cost:.2f} edge={opp['edge']:.0%}")
             print(f"  [DEMO] BUY {side.upper()} {ticker} {contracts}@{bet_price}c ${actual_cost:.2f}")
         else:
+            from agents.ruppert.env_config import require_live_enabled
+            require_live_enabled()
             try:
                 result = client.place_order(ticker, side, bet_price, contracts)
                 log_trade(trade, actual_cost, contracts, result)
