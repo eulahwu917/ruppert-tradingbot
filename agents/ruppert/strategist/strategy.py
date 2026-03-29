@@ -38,11 +38,12 @@ import config
 # Module-specific thresholds (mirrors config.py constants)
 # ---------------------------------------------------------------------------
 MIN_EDGE = {
-    'weather': 0.12,   # lowered from 0.30 (Post-Brier review: recalibrated)
-    'crypto':  0.12,
-    'geo':     0.15,   # Phase 4: higher than crypto — geo harder to model (LLM-estimated)
-    'econ':    0.12,   # Phase 5: economics/CPI — matches config.ECON_MIN_EDGE
-    'fed':     0.12,   # Phase 5: Fed rate — matches fed_client.FED_MIN_EDGE
+    'weather':    0.12,   # lowered from 0.30 (Post-Brier review: recalibrated)
+    'crypto':     0.12,
+    'crypto_15m': getattr(config, 'CRYPTO_15M_MIN_EDGE', 0.08),
+    'geo':        0.15,   # Phase 4: higher than crypto — geo harder to model (LLM-estimated)
+    'econ':       0.12,   # Phase 5: economics/CPI — matches config.ECON_MIN_EDGE
+    'fed':        0.12,   # Phase 5: Fed rate — matches fed_client.FED_MIN_EDGE
 }
 MIN_CONFIDENCE   = 0.25          # universal minimum confidence to enter (Post-Brier review)
 MIN_HOURS_ENTRY  = 0.5           # must be ≥ 30 min from settlement to open

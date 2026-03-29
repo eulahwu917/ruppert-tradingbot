@@ -85,7 +85,7 @@ def read_all_trades():
 
 
 def read_geo_log():
-    log_path = LOGS_DIR / "geopolitical_scout.jsonl"
+    log_path = LOGS_DIR / "geopolitical_scanner.jsonl"
     entries = []
     if log_path.exists():
         with open(log_path, encoding='utf-8') as f:

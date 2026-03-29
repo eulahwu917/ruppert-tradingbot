@@ -435,8 +435,8 @@ def check_decision_log_orphans() -> list[dict]:
 
     orphans = []
     for d in decisions:
-        ticker = d.get('ticker', '')
-        d_date = d.get('date', '')
+        ticker = d.get('market_id', d.get('ticker', ''))
+        d_date = str(d.get('ts', ''))[:10]
         if d_date == date.today().isoformat() and ticker not in trade_tickers:
             orphans.append(d)
     return orphans

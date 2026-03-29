@@ -969,7 +969,7 @@ def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
             bet_price = yes_ask if side == 'yes' else 100 - yes_ask
 
             # Geo: hours_to_settlement from opp or fallback to GEO_MIN_DAYS_TO_EXPIRY
-            _geo_days = opp.get('days_to_expiry', getattr(config, 'GEO_MIN_DAYS_TO_EXPIRY', 1))
+            _geo_days = opp.get('days_to_expiry') or getattr(config, 'GEO_MIN_DAYS_TO_EXPIRY', 1)
             _geo_hours = max(24.0, float(_geo_days) * 24)
 
             signal = {
