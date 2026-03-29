@@ -53,6 +53,36 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _city_has_trade_history(series: str) -> bool:
+    """Check if a city series has ANY trade history in logs/trades/.
+
+    Returns True if at least one trade record exists with a ticker starting
+    with the given series prefix, False otherwise.
+    """
+    try:
+        from agents.ruppert.env_config import get_paths as _gp
+        trades_dir = _gp()['trades']
+        if not trades_dir.exists():
+            return False
+        import json as _json
+        for log_file in trades_dir.glob('trades_*.jsonl'):
+            for line in log_file.read_text(encoding='utf-8').splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = _json.loads(line)
+                    t = rec.get('ticker', '')
+                    if t.upper().startswith(series) and rec.get('action', '') in ('buy', 'open'):
+                        return True
+                except Exception:
+                    continue
+    except Exception as e:
+        logger.warning(f"[Edge] Could not check trade history for {series}: {e}")
+        return True  # fail-open: allow trading if we can't check
+    return False
+
+
 def _safe_int(val, default=0):
     """Safely cast API numeric fields that may arrive as float strings (e.g. '2563.00')."""
     try:
@@ -273,6 +303,26 @@ def analyze_market(market: dict) -> dict | None:
         return None
 
     series  = get_series_from_ticker(ticker)
+
+    # ── Expanded cities gate ─────────────────────────────────────────────────
+    # Skip cities with unvalidated bias corrections when flag is disabled
+    if not getattr(config, 'EXPANDED_CITIES_ENABLED', True):
+        skip_list = getattr(config, 'EXPANDED_CITIES_SKIP', [])
+        if series in skip_list:
+            logger.debug(
+                f"[Edge] {ticker}: skipping — expanded city disabled "
+                f"(EXPANDED_CITIES_ENABLED=False)"
+            )
+            return None
+
+    # ── New city gate ─────────────────────────────────────────────────────────
+    # Block brand-new cities (zero trade history) when ALLOW_NEW_CITIES=False.
+    # Cities with ANY prior trade are always allowed through.
+    if not getattr(config, 'ALLOW_NEW_CITIES', True):
+        if series in TICKER_TO_SERIES and not _city_has_trade_history(series):
+            logger.info(f"[SKIP] New city {series} — ALLOW_NEW_CITIES=False")
+            return None
+
     market_prob = yes_ask / 100
 
     # ── Parse contract metadata ───────────────────────────────────────────────

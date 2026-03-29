@@ -172,3 +172,29 @@ LONG_HORIZON_MIN_EDGE = 0.08        # 8c minimum edge
 LONG_HORIZON_MAX_SPREAD = 10        # max 10c spread (monthly/annual are tighter)
 LONG_HORIZON_MAX_POSITION_PCT = 0.005  # 0.5% of capital per trade
 LONG_HORIZON_DAILY_CAP_PCT = 0.10   # 10% of capital/day total for this module
+
+# ── Expanded Cities (Weather) ────────────────────────────────────────────────
+# Disable trading on cities with unvalidated bias corrections (0.0 bias).
+# Re-enable after GHCND analysis validates bias offsets for each city.
+EXPANDED_CITIES_ENABLED = False
+
+# ── New City Gate ────────────────────────────────────────────────────────────
+# Prevent bot from picking up brand-new cities it has never traded before.
+# Existing cities (any trade history in logs/trades/) are always allowed.
+# Set True only when existing cities have 30+ scored trades each.
+ALLOW_NEW_CITIES = False
+
+# Cities to skip when EXPANDED_CITIES_ENABLED = False
+# These have 0.0 bias correction (not yet calibrated from GHCND data)
+EXPANDED_CITIES_SKIP = [
+    "KXHIGHTDC",    # Washington DC
+    "KXHIGHPHIL",   # Philadelphia
+    "KXHIGHDEN",    # Denver
+    "KXHIGHTMIN",   # Minneapolis
+    "KXHIGHTLV",    # Las Vegas
+    "KXHIGHTNOU",   # New Orleans
+    "KXHIGHTOKC",   # Oklahoma City
+    "KXHIGHTSEA",   # Seattle
+    "KXHIGHTSATX",  # San Antonio
+    "KXHIGHTATL",   # Atlanta
+]

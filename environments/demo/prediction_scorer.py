@@ -1,0 +1,175 @@
+"""
+Prediction Scorer -- extracts scored predictions from settlement records.
+
+Reads settle/exit records from logs/trades/ and writes standardized
+prediction accuracy records to logs/scored_predictions.jsonl.
+
+Idempotent: tracks processed settlements to avoid duplicates.
+
+Usage:
+    python -m environments.demo.prediction_scorer           # Standalone
+    from environments.demo.prediction_scorer import score_new_settlements  # Called by settlement_checker
+"""
+import sys
+import json
+from pathlib import Path
+
+# Ensure workspace root is on sys.path
+_WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
+if str(_WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORKSPACE_ROOT))
+
+sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
+
+from agents.ruppert.env_config import get_paths as _get_paths
+
+_paths = _get_paths()
+TRADES_DIR = _paths['trades']
+LOGS_DIR = _paths['logs']
+OUTPUT_FILE = LOGS_DIR / 'scored_predictions.jsonl'
+
+# Ticker prefix -> city name mapping for weather module
+TICKER_CITY_MAP = {
+    "KXHIGHMIA":   "Miami",
+    "KXHIGHLAX":   "Los Angeles",
+    "KXHIGHLA":    "Los Angeles",
+    "KXHIGHCHI":   "Chicago",
+    "KXHIGHHOU":   "Houston",
+    "KXHIGHPHX":   "Phoenix",
+    "KXHIGHNY":    "New York",
+    "KXHIGHTDC":   "Washington DC",
+    "KXHIGHPHIL":  "Philadelphia",
+    "KXHIGHDEN":   "Denver",
+    "KXHIGHTMIN":  "Minneapolis",
+    "KXHIGHTLV":   "Las Vegas",
+    "KXHIGHTNOU":  "New Orleans",
+    "KXHIGHTOKC":  "Oklahoma City",
+    "KXHIGHTSEA":  "Seattle",
+    "KXHIGHTSATX": "San Antonio",
+    "KXHIGHTATL":  "Atlanta",
+    "KXHIGHAUS":   "Austin",
+    "KXHIGHSFO":   "San Francisco",
+}
+
+
+def _extract_city(ticker: str, title: str) -> str | None:
+    """Extract city name from ticker prefix or title for weather module."""
+    series = ticker.split('-')[0].upper() if ticker else ''
+    for prefix, city in TICKER_CITY_MAP.items():
+        if series.startswith(prefix):
+            return city
+    # Fallback: parse from title
+    if title:
+        title_lower = title.lower()
+        for city in TICKER_CITY_MAP.values():
+            if city.lower() in title_lower:
+                return city
+    return None
+
+
+def _load_processed_keys() -> set:
+    """Load set of (ticker, date) tuples already in scored_predictions.jsonl."""
+    processed = set()
+    if OUTPUT_FILE.exists():
+        for line in OUTPUT_FILE.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+                processed.add((rec.get('ticker', ''), rec.get('date', '')))
+            except Exception:
+                continue
+    return processed
+
+
+def _load_all_trades() -> list:
+    """Load all trade records from all log files."""
+    records = []
+    for trade_log in sorted(TRADES_DIR.glob('trades_*.jsonl')):
+        for line in trade_log.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except Exception:
+                continue
+    return records
+
+
+def score_new_settlements():
+    """Main scoring function. Finds new settle/exit records and writes scored predictions."""
+    processed = _load_processed_keys()
+    all_trades = _load_all_trades()
+
+    # Index buy records by (ticker, date) for lookup
+    buy_index: dict[tuple, dict] = {}
+    for rec in all_trades:
+        action = rec.get('action', '')
+        if action in ('buy', 'open'):
+            key = (rec.get('ticker', ''), rec.get('date', ''))
+            if key not in buy_index:
+                buy_index[key] = rec
+
+    # Find new settle/exit records
+    new_scored = []
+    for rec in all_trades:
+        action = rec.get('action', '')
+        if action not in ('settle', 'exit'):
+            continue
+
+        ticker = rec.get('ticker', '')
+        trade_date = rec.get('date', '')
+        key = (ticker, trade_date)
+
+        if key in processed:
+            continue
+
+        # Look up original buy record
+        buy_rec = buy_index.get(key, {})
+
+        module = rec.get('module') or buy_rec.get('module', '')
+        city = None
+        if module == 'weather':
+            city = _extract_city(ticker, rec.get('title') or buy_rec.get('title', ''))
+
+        # Extract predicted probability: prefer noaa_prob from buy record, fall back to model_prob
+        predicted_prob = buy_rec.get('noaa_prob')
+        if predicted_prob is None:
+            predicted_prob = buy_rec.get('model_prob')
+        if predicted_prob is None:
+            predicted_prob = buy_rec.get('market_prob')
+
+        scored = {
+            "domain":          module or None,
+            "ticker":          ticker,
+            "predicted_prob":  round(float(predicted_prob), 4) if predicted_prob is not None else None,
+            "actual_result":   rec.get('settlement_result') or None,
+            "edge":            round(float(buy_rec.get('edge', 0)), 4) if buy_rec.get('edge') is not None else None,
+            "confidence":      round(float(buy_rec.get('confidence', 0)), 4) if buy_rec.get('confidence') is not None else None,
+            "entry_price":     buy_rec.get('fill_price') or buy_rec.get('scan_price') or None,
+            "pnl":             round(float(rec.get('pnl', 0)), 2) if rec.get('pnl') is not None else None,
+            "city":            city,
+            "date":            trade_date,
+            "settlement_date": rec.get('date', trade_date),
+        }
+        new_scored.append(scored)
+        processed.add(key)
+
+    if not new_scored:
+        print(f"  [Scorer] No new settlements to score.")
+        return
+
+    # Append to output file
+    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(OUTPUT_FILE, 'a', encoding='utf-8') as f:
+        for rec in new_scored:
+            f.write(json.dumps(rec) + '\n')
+
+    print(f"  [Scorer] Wrote {len(new_scored)} scored prediction(s) to {OUTPUT_FILE.name}")
+
+
+if __name__ == '__main__':
+    score_new_settlements()
