@@ -383,6 +383,8 @@ def run_weather_scan(dry_run=True):
                 module_deployed_pct=_weather_deployed_this_cycle / total_capital if total_capital > 0 else 0.0,
                 traded_tickers=None,
             )
+            if decision.get('warning'):
+                log_activity(f"  [Strategy] WARNING: {decision['warning']}")
             if decision['enter']:
                 # Check weather-specific budget before approving
                 if _weather_deployed_this_cycle + decision['size'] > _weather_daily_cap:
@@ -671,6 +673,8 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 module_deployed_pct=_crypto_deployed_this_cycle / _total_capital if _total_capital > 0 else 0.0,
                 traded_tickers=traded_tickers,
             )
+            if decision.get('warning'):
+                log_activity(f"  [Strategy] WARNING: {decision['warning']}")
             if not decision['enter']:
                 print(f"  [Strategy] SKIP {t['ticker']}: {decision['reason']}")
                 continue
@@ -819,6 +823,8 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
                     module_deployed_pct=_fed_deployed_pct,
                     traded_tickers=traded_tickers,
                 )
+                if _fed_decision.get('warning'):
+                    log_activity(f"  [Strategy] WARNING: {_fed_decision['warning']}")
                 if not _fed_decision['enter']:
                     print(f"  [Strategy] SKIP {ticker}: {_fed_decision['reason']}")
                 elif _fed_decision['size'] > _fed_daily_cap:
@@ -1000,6 +1006,8 @@ def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
                 module_deployed_pct=_geo_deployed_this_cycle / _geo_capital if _geo_capital > 0 else 0.0,
                 traded_tickers=traded_tickers,
             )
+            if decision.get('warning'):
+                log_activity(f"  [Strategy] WARNING: {decision['warning']}")
 
             if not decision['enter']:
                 log_activity(f"  [Strategy] SKIP {ticker}: {decision['reason']}")

@@ -55,6 +55,8 @@ FED_DAILY_CAP_PCT     = 0.03   # 3% of capital/day (fed trades are rare/high-con
 # Per-trade position size cap — percentage of total capital
 MAX_POSITION_PCT = 0.01   # 1% of capital per trade (replaces fixed $25 caps)
 
+MAX_ADD_ALLOCATION = 50.0   # Maximum total allocation per add-on position ($)
+
 # Legacy fixed-dollar position caps — used by trader.py legacy fallback (risk.py inlined)
 # These are safety backstops; actual sizing is done by strategy.py MAX_POSITION_PCT.
 MAX_POSITION_SIZE   = 100.0   # P0-1 fix: was deleted; restored for trader.py legacy path

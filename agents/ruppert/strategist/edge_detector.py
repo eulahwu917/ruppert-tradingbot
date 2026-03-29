@@ -375,10 +375,10 @@ def analyze_market(market: dict) -> dict | None:
             # None means both NWS sources failed (e.g. Miami MFL 404, network error).
             nws_data = signal.get("nws_current_f")
             if nws_data is None:
-                confidence = max(confidence - 0.15, 0.50)
+                confidence = max(confidence - 0.15, 0.0)
                 logger.warning(
                     f"[Edge] {ticker}: NWS data unavailable — confidence degraded "
-                    f"by 0.15 → {confidence:.2f} (floored at 0.50)"
+                    f"by 0.15 → {confidence:.2f}"
                 )
 
             models_used_names = [m.get("model", "?") for m in signal.get("models_used", [])]
@@ -503,7 +503,7 @@ def analyze_market(market: dict) -> dict | None:
         'volume_tier_miss': (
             _volume_tier in ('mid', 'thin') and
             abs(_raw_edge) >= config.MIN_EDGE_THRESHOLD and
-            abs(_adj_edge) >= config.MIN_EDGE_THRESHOLD
+            abs(_adj_edge) < config.MIN_EDGE_THRESHOLD
         ),
     }
 
@@ -534,7 +534,7 @@ def analyze_market(market: dict) -> dict | None:
 def find_opportunities(markets: list) -> list:
     """Scan all markets and return edge opportunities sorted by edge size."""
     import time as _time
-    from openmeteo_client import clear_signal_cache as _clear_cache
+    from agents.ruppert.data_analyst.openmeteo_client import clear_signal_cache as _clear_cache
     _clear_cache()  # fresh cache for this scan batch
 
     total = len(markets)
