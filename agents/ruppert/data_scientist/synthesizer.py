@@ -131,6 +131,10 @@ def synthesize_pnl_cache(events: list = None) -> dict:
     are the only inputs. SETTLEMENT events in the raw log are used elsewhere
     to trigger synthesis but must NOT contribute to the P&L total here.
 
+    NOTE: The `events` parameter is intentionally unused. Trade files (not the
+    event log) are the authoritative P&L source. The parameter exists only for
+    call-signature consistency with synthesize_alerts() and synthesize_state().
+
     Returns the updated pnl_cache dict.
     """
     closed_pnl = 0.0

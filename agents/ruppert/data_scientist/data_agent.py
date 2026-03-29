@@ -223,11 +223,24 @@ def check_module_mismatch(trade: dict) -> tuple:
 
 
 def check_tracker_drift(tracked: dict) -> dict:
-    """Compare open trades vs position tracker. Uses all-time logs for multi-day positions."""
-    # Use get_open_positions_from_logs() to include multi-day positions, not just today's trades
+    """Compare open trades vs position tracker. Uses all-time logs for multi-day positions.
+
+    Comparison is done on (ticker, side) pairs to correctly handle positions
+    that have both YES and NO legs open simultaneously.
+    """
     open_positions = get_open_positions_from_logs()
-    open_tickers = {t.get('ticker', '') for t in open_positions}
-    tracked_tickers = set(k.split('::')[0] if '::' in k else k for k in tracked.keys())
+    # Build set of (ticker, side) pairs from logs
+    open_keys = {(t.get('ticker', ''), t.get('side', '')) for t in open_positions}
+    open_tickers = {ticker for ticker, side in open_keys}
+    # Build set of (ticker, side) pairs from tracker
+    tracked_pairs = set()
+    for k in tracked.keys():
+        if '::' in k:
+            parts = k.split('::', 1)
+            tracked_pairs.add((parts[0], parts[1]))
+        else:
+            tracked_pairs.add((k, ''))
+    tracked_tickers = {ticker for ticker, side in tracked_pairs}
     return {
         'orphans': list(tracked_tickers - open_tickers),
         'missing': list(open_tickers - tracked_tickers),
@@ -443,12 +456,23 @@ def check_dashboard_consistency() -> list[dict]:
 
 
 def check_decision_log_orphans() -> list[dict]:
-    """Check for decision log entries with no matching trade."""
-    decision_path = LOGS_DIR / 'decisions_15m.jsonl'
-    if not decision_path.exists():
-        return []
+    """Check for decision log entries with no matching trade.
 
-    decisions = _read_trades_file(decision_path)
+    Scans all known decision log files (crypto 15m, weather, econ, fed, crypto_long).
+    """
+    decision_paths = [
+        LOGS_DIR / 'decisions_15m.jsonl',
+        LOGS_DIR / 'decisions_weather.jsonl',
+        LOGS_DIR / 'decisions_econ.jsonl',
+        LOGS_DIR / 'decisions_fed.jsonl',
+        LOGS_DIR / 'decisions_crypto_long.jsonl',
+    ]
+    decisions = []
+    for decision_path in decision_paths:
+        if decision_path.exists():
+            decisions.extend(_read_trades_file(decision_path))
+    if not decisions:
+        return []
     today_trades = _read_trades_file(_today_trades_path())
     trade_tickers = {t.get('ticker') for t in today_trades}
 
@@ -567,15 +591,32 @@ def _flag_trade(path: Path, trade_id: str, flag_key: str, flag_value=True):
 
 
 def _remove_tracker_orphans(orphan_tickers: list[str]):
-    """Remove orphan tickers from position tracker file."""
+    """Remove orphan tickers from position tracker file.
+
+    orphan_tickers is a list of plain ticker strings. To avoid deleting valid
+    sibling-side entries (e.g., KXBTC::no is still open when KXBTC::yes is orphaned),
+    we cross-check each compound key against the current open positions before removing.
+    """
     if not TRACKER_FILE.exists():
         return
     try:
         tracked = json.loads(TRACKER_FILE.read_text(encoding='utf-8'))
+        # Get currently open (ticker, side) pairs from logs to avoid over-deletion
+        open_positions = get_open_positions_from_logs()
+        open_keys = {(t.get('ticker', ''), t.get('side', '')) for t in open_positions}
         changed = False
         for ticker in orphan_tickers:
-            # Match both plain keys AND "ticker::side" format keys
-            keys_to_remove = [k for k in list(tracked.keys()) if k == ticker or k.startswith(ticker + '::')]
+            keys_to_remove = []
+            for k in list(tracked.keys()):
+                if k == ticker:
+                    # Plain key — remove if ticker has no open position at all
+                    if not any(t == ticker for t, s in open_keys):
+                        keys_to_remove.append(k)
+                elif k.startswith(ticker + '::'):
+                    # Compound key — only remove if (ticker, side) has no open position
+                    side = k.split('::', 1)[1]
+                    if (ticker, side) not in open_keys:
+                        keys_to_remove.append(k)
             for k in keys_to_remove:
                 del tracked[k]
                 changed = True
@@ -752,7 +793,6 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
             log_activity(f'[DataAgent] Module fix: {tid[:8]} {old_module} -> {expected}')
 
     # 5. Position tracker drift
-    all_today = _read_trades_file(today_path)
     drift = check_tracker_drift(tracked)
     if drift['orphans']:
         _remove_tracker_orphans(drift['orphans'])

@@ -32,7 +32,7 @@ LOGS_DIR = _get_paths()['logs']
 WALLETS_FILE = LOGS_DIR / "smart_money_wallets.json"
 
 # Minimum filters to exclude noise traders
-MIN_PNL    = 0.0     # PnL must be > 0
+MIN_PNL_EXCLUSIVE = 0.0     # Minimum PnL threshold — wallets with pnl <= this are excluded (must be strictly positive)
 MIN_VOLUME = 1000.0  # Volume must be > $1,000
 
 
@@ -75,7 +75,7 @@ def fetch_top_crypto_wallets(limit: int = 30) -> list:
 
             if not proxy_wallet:
                 continue
-            if pnl <= MIN_PNL:
+            if pnl <= MIN_PNL_EXCLUSIVE:
                 continue
             if volume <= MIN_VOLUME:
                 continue

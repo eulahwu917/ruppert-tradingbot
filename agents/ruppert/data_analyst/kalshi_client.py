@@ -5,7 +5,6 @@ Uses the official kalshi_python_sync SDK.
 import os
 import sys
 import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 from kalshi_python_sync import Configuration, KalshiClient as _KalshiClient
@@ -19,49 +18,6 @@ if str(_WORKSPACE_ROOT) not in sys.path:
 
 import config as cfg
 
-
-# TODO: migrate callers to use KalshiMarket.from_dict() for type safety
-@dataclass
-class KalshiMarket:
-    ticker: str
-    yes_ask: Optional[int] = None
-    no_ask: Optional[int] = None
-    yes_bid: Optional[int] = None
-    no_bid: Optional[int] = None
-    status: str = 'active'
-    close_time: str = ''
-    title: str = ''
-    volume_fp: str = '0'
-    open_interest_fp: str = '0'
-
-    @classmethod
-    def from_dict(cls, d: dict) -> 'KalshiMarket':
-        return cls(
-            ticker=d.get('ticker', ''),
-            yes_ask=d.get('yes_ask'),
-            no_ask=d.get('no_ask'),
-            yes_bid=d.get('yes_bid'),
-            no_bid=d.get('no_bid'),
-            status=d.get('status', 'active'),
-            close_time=d.get('close_time', ''),
-            title=d.get('title', ''),
-            volume_fp=d.get('volume_fp', '0'),
-            open_interest_fp=d.get('open_interest_fp', '0'),
-        )
-
-    def to_dict(self) -> dict:
-        return {
-            'ticker': self.ticker,
-            'yes_ask': self.yes_ask,
-            'no_ask': self.no_ask,
-            'yes_bid': self.yes_bid,
-            'no_bid': self.no_bid,
-            'status': self.status,
-            'close_time': self.close_time,
-            'title': self.title,
-            'volume_fp': self.volume_fp,
-            'open_interest_fp': self.open_interest_fp,
-        }
 
 # ---------------------------------------------------------------------------
 # HTTP retry helper (handles 429 + transient 5xx)
@@ -147,25 +103,10 @@ class KalshiClient:
         Orderbook prices are enriched per-market (real bid/ask from orderbook endpoint).
         """
         import requests
-        weather_series = [
-            # HIGH temp — original cities
-            'KXHIGHNY', 'KXHIGHCHI', 'KXHIGHMIA', 'KXHIGHHOU', 'KXHIGHPHX',
-            # HIGH temp — new cities (expanded 2026-03-13)
-            'KXHIGHAUS',    # Austin
-            'KXHIGHDEN',    # Denver
-            'KXHIGHLAX',    # Los Angeles (LAX coords)
-            'KXHIGHPHIL',   # Philadelphia
-            'KXHIGHTMIN',   # Minneapolis
-            'KXHIGHTDAL',   # Dallas
-            'KXHIGHTDC',    # Washington DC
-            'KXHIGHTLV',    # Las Vegas
-            'KXHIGHTNOU',   # New Orleans (try KXHIGHTNOLA if this 404s)
-            'KXHIGHTOKC',   # Oklahoma City
-            'KXHIGHTSFO',   # San Francisco
-            'KXHIGHTSEA',   # Seattle
-            'KXHIGHTSATX',  # San Antonio
-            'KXHIGHTATL',   # Atlanta
-        ]
+        # Single source of truth: derive series list from openmeteo_client.CITIES
+        # This ensures search_markets() and the weather signal engine stay in sync.
+        from agents.ruppert.data_analyst.openmeteo_client import CITIES as _CITIES
+        weather_series = list(_CITIES.keys())
         all_markets = []
 
         for series in weather_series:
@@ -362,7 +303,7 @@ class KalshiClient:
             return self._demo_block("place_order")
         return self.client.create_order(
             ticker=ticker,
-            client_order_id=f"ruppert_{int(time.time())}",
+            client_order_id=f"ruppert_{int(time.time() * 1000)}",
             type='limit',
             action='buy',
             side=side,
@@ -440,31 +381,39 @@ class KalshiClient:
         }
 
     def _get_positions_raw(self):
-        """Raw HTTP fallback for get_positions when SDK Pydantic deserialization fails."""
+        """Raw HTTP fallback for get_positions when SDK Pydantic deserialization fails.
+        Retries up to 3 times on transient errors (mirrors get_balance/get_orders pattern).
+        """
         import requests
         from types import SimpleNamespace
         host = DEMO_HOST if self.environment == 'demo' else PROD_HOST
         url = f"{host}/portfolio/positions"
         path = '/trade-api/v2/portfolio/positions'
-        headers = self._build_rest_auth_headers('GET', path)
-        try:
-            resp = requests.get(url, headers=headers, timeout=10)
-            resp.raise_for_status()
-        except Exception as e:
-            print(f"  [Warning] _get_positions_raw HTTP error: {e}")
-            return []
-        raw = resp.json().get('market_positions') or []
-        positions = []
-        for p in raw:
-            positions.append(SimpleNamespace(
-                ticker=p.get('ticker') or '',
-                position=int(p.get('position') or 0),
-                total_traded=int(p.get('total_traded') or 0),
-                market_exposure=int(p.get('market_exposure') or 0),
-                realized_pnl=int(p.get('realized_pnl') or 0),
-                fees_paid=int(p.get('fees_paid') or 0),
-            ))
-        return positions
+        delay = 1.0
+        for attempt in range(3):
+            headers = self._build_rest_auth_headers('GET', path)
+            try:
+                resp = requests.get(url, headers=headers, timeout=10)
+                resp.raise_for_status()
+                raw = resp.json().get('market_positions') or []
+                positions = []
+                for p in raw:
+                    positions.append(SimpleNamespace(
+                        ticker=p.get('ticker') or '',
+                        position=int(p.get('position') or 0),
+                        total_traded=int(p.get('total_traded') or 0),
+                        market_exposure=int(p.get('market_exposure') or 0),
+                        realized_pnl=int(p.get('realized_pnl') or 0),
+                        fees_paid=int(p.get('fees_paid') or 0),
+                    ))
+                return positions
+            except Exception as e:
+                if attempt == 2:
+                    print(f"  [Warning] _get_positions_raw failed after 3 attempts: {e}")
+                    return []
+                print(f"  [Warning] _get_positions_raw HTTP error: {e} — retrying in {delay:.1f}s (attempt {attempt+1}/3)")
+                time.sleep(delay)
+                delay *= 2
 
     def get_orders(self):
         """Get recent orders. Retries up to 3 times on transient errors."""

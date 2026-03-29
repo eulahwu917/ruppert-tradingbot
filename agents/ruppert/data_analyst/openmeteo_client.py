@@ -629,10 +629,14 @@ def get_current_conditions(series_ticker: str) -> dict:
         return {"error": str(e), "current_temp_f": None}
 
 
-def get_nws_forecast_high(series_ticker: str, target_date: date) -> Optional[float]:
+def get_nws_current_obs(series_ticker: str) -> Optional[float]:
     """
-    Fetch NWS (National Weather Service) current observation.
+    Fetch NWS (National Weather Service) current observation temperature.
+    Returns the latest observed temperature in °F, or None on failure.
+
     NWS is the official data source Kalshi uses for contract settlement.
+    This function returns the CURRENT observation only — it does not forecast.
+    For forecast high temperatures, use get_nws_forecast_high_official().
     """
     city = CITIES.get(series_ticker)
     if not city:
@@ -656,6 +660,12 @@ def get_nws_forecast_high(series_ticker: str, target_date: date) -> Optional[flo
     except Exception as e:
         logger.error(f"[NWS] Observation fetch failed for {series_ticker}: {e}")
         return None
+
+
+# Backward-compatibility alias — remove after all callers updated
+def get_nws_forecast_high(series_ticker: str, target_date: date = None) -> Optional[float]:
+    """Deprecated: use get_nws_current_obs(). The target_date parameter was never used."""
+    return get_nws_current_obs(series_ticker)
 
 
 def get_nws_forecast_high_official(series_ticker: str, target_date: date) -> Optional[float]:

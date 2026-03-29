@@ -312,23 +312,46 @@ async def handle_message(msg: dict):
     if any(ticker_upper.startswith(s) for s in CRYPTO_15M_SERIES):
         close_time = data.get('close_time')
         open_time = data.get('open_time')
-        # Estimate book depth from WS message size fields (dollars)
+        # Estimate book depth from WS message size fields (dollars).
+        # yes_ask_size_fp / yes_bid_size_fp are single best-level sizes only.
+        # When single-level depth is below the R3 liquidity floor ($50), fetch
+        # the full orderbook depth (top-3 each side) via REST to avoid false R3 failures.
         ask_size = float(data.get('yes_ask_size_fp') or 0)
         bid_size = float(data.get('yes_bid_size_fp') or 0)
         book_depth_usd = ask_size + bid_size
         dollar_oi = float(data.get('dollar_open_interest') or 0)
+        if book_depth_usd < 50.0:
+            # Single-level depth too low — fetch REST orderbook for true top-3 depth
+            try:
+                import asyncio as _asyncio
+                loop = _asyncio.get_event_loop()
+                _market_stub = {'ticker': ticker}
+                _enriched = await loop.run_in_executor(None, lambda: _enrich_and_compute_depth(_market_stub))
+                _rest_depth = _enriched.get('_book_depth_usd', 0.0)
+                if _rest_depth > book_depth_usd:
+                    book_depth_usd = _rest_depth
+            except Exception as _e:
+                logger.debug('[WS Feed] depth enrich failed for %s: %s', ticker, _e)
         if yes_ask is not None and yes_bid is not None:
+            _import_ok = True
             try:
                 from agents.ruppert.trader.crypto_15m import evaluate_crypto_15m_entry
-                evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time, book_depth_usd, dollar_oi)
-            except Exception as e:
-                logger.warning('[WS Feed] 15m eval error: %s', e)
-            # Mark this window as evaluated so fallback poll skips it
-            _series = next((s for s in CRYPTO_15M_SERIES if ticker_upper.startswith(s)), None)
-            # Normalize Z suffix to match fallback's +00:00 format
-            _open_time_norm = open_time.replace('Z', '+00:00') if open_time and open_time.endswith('Z') else open_time
-            if _series and _open_time_norm:
-                _window_evaluated[f"{_series}::{_open_time_norm}"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            except ImportError as e:
+                logger.error('[WS Feed] crypto_15m import failed — window NOT marked evaluated so REST fallback can recover: %s', e)
+                _import_ok = False
+            if _import_ok:
+                try:
+                    evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time, book_depth_usd, dollar_oi)
+                except Exception as e:
+                    logger.warning('[WS Feed] 15m eval error: %s', e)
+                # Mark this window as evaluated so fallback poll skips it
+                # Only mark after a successful import — ImportError leaves it unmarked
+                # so the REST fallback (300s poll) can still fire for this window.
+                _series = next((s for s in CRYPTO_15M_SERIES if ticker_upper.startswith(s)), None)
+                # Normalize Z suffix to match fallback's +00:00 format
+                _open_time_norm = open_time.replace('Z', '+00:00') if open_time and open_time.endswith('Z') else open_time
+                if _series and _open_time_norm:
+                    _window_evaluated[f"{_series}::{_open_time_norm}"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
     # Route crypto hourly band tickers
     elif any(ticker_upper.startswith(p) for p in CRYPTO_HOURLY_PREFIXES):

@@ -28,7 +28,7 @@ import json
 import logging
 import sys
 import requests
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 # Ensure project root is on sys.path when running standalone
@@ -235,7 +235,7 @@ def _save_cache(biases: dict, sources: dict | None = None):
         _CACHE_FILE.parent.mkdir(exist_ok=True)
         payload = {
             "updated_date": date.today().isoformat(),
-            "updated_at": datetime.utcnow().isoformat() + "Z",
+            "updated_at": datetime.now(timezone.utc).isoformat(),
             "biases": biases,
             "sources": sources or {},
         }
@@ -366,11 +366,12 @@ def compute_station_bias(ticker: str, token: str, lookback_days: int = 30) -> fl
         logger.warning(f"[GHCND] No station config for {ticker}")
         return None
 
-    # Use yesterday as end (today's data is often incomplete until midnight)
-    # Query window: yesterday as the end date (today's observations are often incomplete
-    # until midnight); start is lookback_days before today for exactly lookback_days days.
+    # Use yesterday as end (today's data is often incomplete until midnight).
+    # Query window: [today - lookback_days - 1, today - 1] (closed interval) = lookback_days days.
+    # Adding 1 extra day to start ensures exactly lookback_days full days are available
+    # after excluding today (incomplete) from the count.
     end_date   = (date.today() - timedelta(days=1)).isoformat()
-    start_date = (date.today() - timedelta(days=lookback_days)).isoformat()
+    start_date = (date.today() - timedelta(days=lookback_days + 1)).isoformat()
 
     noaa_obs  = _fetch_noaa_tmax(station_cfg["station"], start_date, end_date, token)
     era5_data = _fetch_era5_tmax(

@@ -215,8 +215,8 @@ def get_daily_exposure(module: str = None) -> float:
                             if not (entry_module == module or
                                     entry_module.startswith(module + '_')):
                                 continue
-                        entries[key] = entry.get('size_dollars', 0)
-                except:
+                        entries[key] = entries.get(key, 0) + entry.get('size_dollars', 0)
+                except Exception:
                     pass
 
     # Sum positions that have an entry but no corresponding exit
@@ -232,7 +232,8 @@ def normalize_entry_price(pos: dict) -> float:
     so NO entry cost = (1 - market_prob) * 100.
     """
     side        = pos.get('side', 'no')
-    entry_price = pos.get('entry_price') or pos.get('market_prob', 0.5) * 100
+    raw_ep      = pos.get('entry_price')
+    entry_price = raw_ep if raw_ep is not None else pos.get('market_prob', 0.5) * 100
     if side == 'no':
         entry_price = entry_price if isinstance(entry_price, (int, float)) else 50
         # Normalize: if value looks like a probability (0-1), convert to cents
@@ -335,12 +336,15 @@ def get_daily_summary():
         for line in f:
             try:
                 trades.append(json.loads(line))
-            except:
+            except Exception:
                 pass
 
     return {
         'date': date.today().isoformat(),
         'trades': len(trades),
-        'total_exposure': sum(t.get('size_dollars', 0) for t in trades),
+        'total_exposure': sum(
+            t.get('size_dollars', 0) for t in trades
+            if t.get('action') not in ('exit', 'settle')
+        ),
         'markets': [t['ticker'] for t in trades],
     }

@@ -77,15 +77,28 @@ if __name__ == '__main__':
     down_value = 0.0
     positions_detail = []
 
+    sampled_count = 0
     for name, wallet in WALLETS.items():
         try:
-            r = requests.get(
-                f'https://data-api.polymarket.com/positions?user={wallet}&limit=100',
-                headers=HEADERS, timeout=8
-            )
-            if r.status_code != 200:
-                print(f'{name}: HTTP {r.status_code}')
+            r = None
+            for _attempt in range(3):
+                try:
+                    r = requests.get(
+                        f'https://data-api.polymarket.com/positions?user={wallet}&limit=100',
+                        headers=HEADERS, timeout=8
+                    )
+                    if r.status_code == 200:
+                        break
+                    if r.status_code == 429:
+                        time.sleep(2 ** _attempt)
+                    else:
+                        time.sleep(1)
+                except Exception:
+                    time.sleep(1)
+            if r is None or r.status_code != 200:
+                print(f'{name}: failed after 3 attempts (last status: {r.status_code if r else "no response"})')
                 continue
+            sampled_count += 1
 
             positions = r.json()
             crypto = [p for p in positions if any(k in p.get('title','').lower() for k in CRYPTO_KW)]
@@ -121,6 +134,13 @@ if __name__ == '__main__':
 
         except Exception as e:
             print(f'{name}: ERROR {e}')
+
+    if sampled_count < max(1, len(WALLETS) // 2):
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            '[SmartMoney] Only %d/%d wallets sampled — API stress or outage. Signal may be unreliable.',
+            sampled_count, len(WALLETS)
+        )
 
     # Compute aggregate signal
     total = up_value + down_value
