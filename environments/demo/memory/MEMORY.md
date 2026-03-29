@@ -1,0 +1,1 @@
+- [Cycle Refactor Plan](agents/architect-cycle-refactor-plan-2026-03-27.md) — Technical spec: refactor ruppert_cycle.py from top-level script to testable function-based module

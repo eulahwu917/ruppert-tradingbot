@@ -1,0 +1,34 @@
+==================================================
+  RUPPERT BACKTEST -- ACCURACY REPORT
+  Generated: 2026-03-13 19:00:58
+==================================================
+
+Period:    2026-02-27 to 2026-03-13
+Markets evaluated: 288
+Triggered: 268 (93.1%)
+Correct:   126 (47.0% win rate)
+
+By city:
+  KXHIGHDEN       18 triggered, 7 correct (38.9%)
+  KXHIGHPHIL      18 triggered, 10 correct (55.6%)
+  KXHIGHTMIN      18 triggered, 13 correct (72.2%)
+  KXHIGHTSEA      18 triggered, 10 correct (55.6%)
+  KXHIGHNY        17 triggered, 7 correct (41.2%)
+  KXHIGHAUS       17 triggered, 10 correct (58.8%)
+  KXHIGHLAX       17 triggered, 6 correct (35.3%)
+  KXHIGHTLV       17 triggered, 7 correct (41.2%)
+  KXHIGHTSFO      17 triggered, 5 correct (29.4%)
+  KXHIGHCHI       16 triggered, 10 correct (62.5%)
+  KXHIGHMIA       16 triggered, 5 correct (31.2%)
+  KXHIGHTDC       16 triggered, 7 correct (43.8%)
+  KXHIGHTOKC      16 triggered, 8 correct (50.0%)
+  KXHIGHTSATX     16 triggered, 9 correct (56.2%)
+  KXHIGHTATL      16 triggered, 7 correct (43.8%)
+  KXHIGHTDAL      15 triggered, 5 correct (33.3%)
+
+Config used:
+  min_edge_weather:       0.15
+  min_confidence_weather: 0.55
+  same_day_skip_hour:     14
+
+==================================================

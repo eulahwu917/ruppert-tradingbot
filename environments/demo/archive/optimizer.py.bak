@@ -1,0 +1,419 @@
+"""
+bot/optimizer.py — Optimizer Loss Review Module
+Analyzes settled losing trades, produces learnings and recommendations.
+Runs daily as part of the 7am report cycle.
+
+Self-contained — no circular imports with main.py.
+"""
+import json
+import re
+from collections import Counter
+from datetime import date, datetime
+from pathlib import Path
+
+# ── Path constants ────────────────────────────────────────────────────────────
+_ROOT          = Path(__file__).resolve().parent.parent.parent  # workspace root
+_BOT_DIR       = Path(__file__).resolve().parent.parent         # kalshi-bot/
+_LOGS_DIR      = _BOT_DIR / 'logs'
+_MEM_AGENTS    = _ROOT / 'memory' / 'agents'
+_LEARNINGS_FILE = _MEM_AGENTS / 'optimizer_learnings.md'
+_TEAM_CTX_FILE  = _MEM_AGENTS / 'team_context.md'
+
+# Loss significance threshold (absolute value)
+SIGNIFICANT_LOSS_THRESHOLD = 5.00
+
+# Loss reason categories
+LOSS_REASONS = (
+    'edge_too_low',
+    'overconfident',
+    'market_timing',
+    'weather_bias',
+    'crypto_volatility',
+    'unknown',
+)
+
+# ── Kalshi API helpers ────────────────────────────────────────────────────────
+
+def _get_kalshi_client():
+    """Return a KalshiClient instance — reads creds from secrets/kalshi_config.json."""
+    import sys
+    sys.path.insert(0, str(_BOT_DIR))
+    from kalshi_client import KalshiClient  # noqa: imported here to stay self-contained
+    return KalshiClient()
+
+
+def _fetch_settled_positions(client) -> dict:
+    """
+    Return a dict of {ticker: settled_value_cents} for all settled positions.
+    Uses the Kalshi API; returns {} on failure.
+    """
+    try:
+        positions = client.get_positions()  # list of position dicts
+        settled = {}
+        for pos in positions:
+            ticker = pos.get('ticker', '')
+            status = pos.get('market', {}).get('status', '') if isinstance(pos.get('market'), dict) else ''
+            if status in ('finalized', 'settled'):
+                result = pos.get('market', {}).get('result', '') if isinstance(pos.get('market'), dict) else ''
+                settled[ticker] = result  # 'yes' | 'no' | ''
+        return settled
+    except Exception:
+        return {}
+
+
+# ── Trade log reader ──────────────────────────────────────────────────────────
+
+def _read_trade_logs(trade_log_paths: list) -> list:
+    """Read and parse all trades from the given JSONL log paths."""
+    trades = []
+    for path in trade_log_paths:
+        p = Path(path)
+        if not p.exists():
+            continue
+        for line in p.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                trades.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return trades
+
+
+def _pair_open_and_exit(trades: list) -> list:
+    """
+    Match each 'open'/'buy' trade with its corresponding 'exit' record by ticker.
+    Returns list of dicts with open_trade + exit info merged.
+    """
+    opens = {}  # ticker -> trade dict (last open wins if dupes)
+    exits = {}  # ticker -> exit dict (last exit wins)
+
+    for t in trades:
+        action = t.get('action', '')
+        ticker = t.get('ticker', '')
+        if not ticker:
+            continue
+        if action in ('open', 'buy'):
+            opens[ticker] = t
+        elif action == 'exit':
+            exits[ticker] = t
+
+    pairs = []
+    for ticker, open_trade in opens.items():
+        exit_trade = exits.get(ticker)
+        pairs.append({**open_trade, '_exit': exit_trade})
+    return pairs
+
+
+# ── Loss classification ───────────────────────────────────────────────────────
+
+def _classify_loss(trade: dict, realized_pnl: float) -> str:
+    """
+    Determine why a trade lost based on signal vs outcome.
+    Returns one of LOSS_REASONS.
+    """
+    source = trade.get('source', 'unknown')
+    edge   = trade.get('edge') or 0.0
+    market_prob = trade.get('market_prob') or 0.0
+
+    if source in ('weather', 'bot') and 'KX' in trade.get('ticker', ''):
+        if edge < 0.15:
+            return 'edge_too_low'
+        if market_prob > 0.85:
+            return 'overconfident'
+        return 'weather_bias'
+
+    if source == 'crypto':
+        if edge < 0.10:
+            return 'edge_too_low'
+        if market_prob > 0.85:
+            return 'overconfident'
+        return 'crypto_volatility'
+
+    if source == 'manual':
+        if edge and edge < 0.12:
+            return 'edge_too_low'
+        if market_prob > 0.80:
+            return 'overconfident'
+        return 'market_timing'
+
+    return 'unknown'
+
+
+def _build_recommendation(loss_reason: str, trade: dict, realized_pnl: float,
+                           reason_history_counts: Counter) -> tuple:
+    """
+    Return (recommendation_text, priority) given the loss reason and history.
+    Never recommends changing thresholds directly — flags for CEO review.
+    priority: 'HIGH' if same reason appeared 3+ times in history, else 'NORMAL'
+    """
+    count = reason_history_counts.get(loss_reason, 0)
+    priority = 'HIGH' if count >= 3 else 'NORMAL'
+
+    ticker = trade.get('ticker', 'unknown')
+    source = trade.get('source', 'unknown')
+    edge   = trade.get('edge') or 0.0
+
+    recommendations = {
+        'edge_too_low': (
+            f"Trade {ticker} entered with edge {edge*100:.1f}% below recommended minimum. "
+            f"Flag for CEO review: consider raising minimum edge threshold for {source} module."
+        ),
+        'overconfident': (
+            f"Trade {ticker} had high market_prob ({trade.get('market_prob', 0)*100:.0f}%) "
+            f"suggesting overconfidence. Flag for CEO review: position sizing on high-prob entries."
+        ),
+        'market_timing': (
+            f"Trade {ticker} lost due to market timing factors. "
+            f"Flag for CEO review: assess entry timing criteria for {source} module."
+        ),
+        'weather_bias': (
+            f"Trade {ticker} lost despite weather signal edge {edge*100:.1f}%. "
+            f"Flag for CEO review: potential systematic weather forecast bias — needs backtest validation."
+        ),
+        'crypto_volatility': (
+            f"Trade {ticker} lost to crypto volatility. "
+            f"Flag for CEO review: assess volatility model calibration for crypto module."
+        ),
+        'unknown': (
+            f"Trade {ticker} loss reason unclear. "
+            f"Flag for CEO review: manual inspection of {ticker} signal vs settlement outcome."
+        ),
+    }
+
+    rec_text = recommendations.get(loss_reason, recommendations['unknown'])
+    if priority == 'HIGH':
+        rec_text = f"[HIGH PRIORITY — {count+1} occurrences] " + rec_text
+
+    return rec_text, priority
+
+
+# ── History parser ────────────────────────────────────────────────────────────
+
+def _count_historical_reasons(learnings_text: str) -> Counter:
+    """
+    Parse optimizer_learnings.md to count how many times each loss_reason
+    has appeared historically.
+    """
+    counts = Counter()
+    for reason in LOSS_REASONS:
+        # Match any line containing the reason keyword
+        pattern = re.compile(r'\b' + re.escape(reason) + r'\b', re.IGNORECASE)
+        matches = pattern.findall(learnings_text)
+        counts[reason] = len(matches)
+    return counts
+
+
+# ── Main entry point ──────────────────────────────────────────────────────────
+
+def run_loss_review(trade_log_paths: list, output_to_telegram: bool = False) -> dict:
+    """
+    Analyze settled losing trades and produce learnings + recommendations.
+
+    Args:
+        trade_log_paths: List of paths to trades_YYYY-MM-DD.jsonl files.
+        output_to_telegram: If True, also push findings to pending_alerts.json
+                            (heartbeat will forward to David).
+
+    Returns:
+        {
+            'losses_analyzed': int,
+            'new_learnings':   list of str,
+            'recommendations': list of str,
+        }
+    """
+    today_str = date.today().isoformat()
+    review_file = _LOGS_DIR / f'optimizer_review_{today_str}.jsonl'
+
+    # ── 1. Read trade logs ────────────────────────────────────────────────────
+    all_trades = _read_trade_logs(trade_log_paths)
+    pairs = _pair_open_and_exit(all_trades)
+
+    # ── 2. Load historical context ────────────────────────────────────────────
+    learnings_text = ''
+    if _LEARNINGS_FILE.exists():
+        learnings_text = _LEARNINGS_FILE.read_text(encoding='utf-8')
+
+    team_ctx_text = ''
+    if _TEAM_CTX_FILE.exists():
+        team_ctx_text = _TEAM_CTX_FILE.read_text(encoding='utf-8')
+
+    reason_history_counts = _count_historical_reasons(learnings_text)
+
+    # ── 3. Try Kalshi API for settlement data (optional, best-effort) ─────────
+    settled_results = {}
+    try:
+        client = _get_kalshi_client()
+        settled_results = _fetch_settled_positions(client)
+    except Exception:
+        pass  # API unavailable — rely on exit records only
+
+    # ── 4. Identify losing trades ─────────────────────────────────────────────
+    losing_trades = []
+    for pair in pairs:
+        ticker   = pair.get('ticker', '')
+        exit_rec = pair.get('_exit')
+
+        realized_pnl = None
+
+        # Case A: explicit exit record with realized_pnl
+        if exit_rec and exit_rec.get('realized_pnl') is not None:
+            realized_pnl = float(exit_rec['realized_pnl'])
+
+        # Case B: settlement from API — estimate P&L
+        elif ticker in settled_results:
+            side        = pair.get('side', 'no')
+            contracts   = pair.get('contracts', 0)
+            entry_price = pair.get('entry_price') or (
+                100 - round((pair.get('market_prob') or 0.5) * 100)
+                if side == 'no'
+                else round((pair.get('market_prob') or 0.5) * 100)
+            )
+            settlement  = settled_results[ticker]  # 'yes' | 'no'
+            if settlement:
+                # YES settles at 100¢, NO settles at 0¢ (for the YES contract)
+                settle_cents = 100 if settlement == 'yes' else 0
+                exit_cents   = settle_cents if side == 'yes' else (100 - settle_cents)
+                realized_pnl = round((exit_cents - entry_price) * contracts / 100, 2)
+
+        if realized_pnl is not None and realized_pnl < 0:
+            losing_trades.append((pair, realized_pnl))
+
+    # ── 5. Analyze each losing trade ─────────────────────────────────────────
+    review_entries  = []
+    new_learnings   = []
+    recommendations = []
+
+    for trade, realized_pnl in losing_trades:
+        ticker      = trade.get('ticker', 'unknown')
+        side        = trade.get('side', 'unknown')
+        entry_price = trade.get('entry_price') or (
+            100 - round((trade.get('market_prob') or 0.5) * 100)
+            if side == 'no'
+            else round((trade.get('market_prob') or 0.5) * 100)
+        )
+        contracts      = trade.get('contracts', 0)
+        size_dollars   = trade.get('size_dollars', 0)
+        source         = trade.get('source', 'unknown')
+        edge           = trade.get('edge') or 0.0
+        market_prob    = trade.get('market_prob') or 0.0
+        noaa_prob      = trade.get('noaa_prob')
+        timestamp      = trade.get('timestamp', '')
+
+        loss_reason = _classify_loss(trade, realized_pnl)
+        rec_text, priority = _build_recommendation(
+            loss_reason, trade, realized_pnl, reason_history_counts
+        )
+
+        # What went wrong narrative
+        what_went_wrong = (
+            f"{loss_reason.replace('_', ' ').title()}: "
+            f"entered {side.upper()} {ticker} at {entry_price}¢ "
+            f"(edge={edge*100:.1f}%, mkt_prob={market_prob*100:.0f}%), "
+            f"realized P&L ${realized_pnl:.2f}"
+        )
+
+        significant = abs(realized_pnl) > SIGNIFICANT_LOSS_THRESHOLD
+
+        entry = {
+            'date':             today_str,
+            'ticker':           ticker,
+            'loss_amount':      round(realized_pnl, 2),
+            'side':             side,
+            'entry_price':      entry_price,
+            'contracts':        contracts,
+            'size_dollars':     size_dollars,
+            'source':           source,
+            'signal_edge':      round(edge, 4),
+            'signal_confidence': round(market_prob, 4),
+            'noaa_prob':        noaa_prob,
+            'timestamp':        timestamp,
+            'loss_reason':      loss_reason,
+            'significant':      significant,
+            'what_went_wrong':  what_went_wrong,
+            'recommendation':   rec_text,
+            'priority':         priority,
+        }
+        review_entries.append(entry)
+
+        # Update running reason counts for subsequent trades in same run
+        reason_history_counts[loss_reason] += 1
+
+        learning = f"[{today_str}] {loss_reason} — {ticker} lost ${abs(realized_pnl):.2f} | {what_went_wrong}"
+        new_learnings.append(learning)
+        recommendations.append(rec_text)
+
+    # ── 6. Write optimizer_review_YYYY-MM-DD.jsonl ───────────────────────────
+    _LOGS_DIR.mkdir(exist_ok=True)
+    with open(review_file, 'a', encoding='utf-8') as f:
+        for entry in review_entries:
+            f.write(json.dumps(entry) + '\n')
+
+    # ── 7. Append summary to optimizer_learnings.md ──────────────────────────
+    if new_learnings:
+        timestamp_now = datetime.now().strftime('%Y-%m-%d %H:%M')
+
+        # Determine top recommendation
+        high_prio = [r for r in recommendations if r.startswith('[HIGH PRIORITY')]
+        top_rec   = high_prio[0] if high_prio else (recommendations[0] if recommendations else 'None')
+
+        # Count significant losses
+        sig_count = sum(1 for e in review_entries if e['significant'])
+
+        summary_block = (
+            f"\n---\n"
+            f"### Review: {today_str} ({timestamp_now})\n"
+            f"- Losses analyzed: {len(losing_trades)}\n"
+            f"- Significant losses (>${SIGNIFICANT_LOSS_THRESHOLD:.0f}): {sig_count}\n"
+            f"- Loss reasons: {dict(Counter(e['loss_reason'] for e in review_entries))}\n"
+            f"- Top recommendation: {top_rec}\n"
+            f"\n**Individual learnings:**\n"
+        )
+        for l in new_learnings:
+            summary_block += f"- {l}\n"
+
+        # Update "Last updated" line and append summary
+        updated_text = re.sub(
+            r'_Last updated: \d{4}-\d{2}-\d{2}_',
+            f'_Last updated: {today_str}_',
+            learnings_text
+        )
+        # Replace "(no entries yet)" if still present
+        if '(no entries yet)' in updated_text:
+            updated_text = updated_text.replace('\n(no entries yet)\n', '\n')
+
+        updated_text = updated_text.rstrip() + '\n' + summary_block
+
+        _LEARNINGS_FILE.write_text(updated_text, encoding='utf-8')
+
+    # ── 8. Optionally push to pending_alerts.json for Telegram delivery ───────
+    if output_to_telegram and new_learnings:
+        alerts_file = _LOGS_DIR / 'pending_alerts.json'
+        alerts = []
+        if alerts_file.exists():
+            try:
+                alerts = json.loads(alerts_file.read_text(encoding='utf-8'))
+            except Exception:
+                pass
+
+        high_prio_recs = [r for r in recommendations if r.startswith('[HIGH PRIORITY')]
+        top_rec = high_prio_recs[0] if high_prio_recs else (
+            recommendations[0] if recommendations else 'No recommendations'
+        )
+
+        alerts.append({
+            'level':     'optimizer',
+            'message':   (
+                f"📊 OPTIMIZER: {len(losing_trades)} losses reviewed. "
+                f"Top recommendation: {top_rec}"
+            ),
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        })
+        alerts_file.write_text(json.dumps(alerts, indent=2), encoding='utf-8')
+
+    return {
+        'losses_analyzed': len(losing_trades),
+        'new_learnings':   new_learnings,
+        'recommendations': recommendations,
+    }
