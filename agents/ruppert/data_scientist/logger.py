@@ -143,6 +143,11 @@ def build_trade_entry(opportunity, size, contracts, order_result):
         'scan_price':   opportunity.get('scan_price'),
         'fill_price':   opportunity.get('fill_price'),
         'order_result': order_result,
+        # ── Data quality tags (crypto_15m only; None for all other modules) ──
+        'data_quality':          opportunity.get('data_quality'),
+        'okx_volume_pct':        opportunity.get('okx_volume_pct'),
+        'kalshi_book_depth_usd': opportunity.get('kalshi_book_depth_usd'),
+        'kalshi_spread_cents':   opportunity.get('kalshi_spread_cents'),
     }
 
 

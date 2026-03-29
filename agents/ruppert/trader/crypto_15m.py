@@ -538,24 +538,43 @@ def check_risk_filters(
     obi_stale: bool,
     fr_z: float | None,
     dollar_oi: float = 0.0,
-) -> str | None:
+) -> dict:
     """
-    Apply all 10 risk filters. Returns block reason string or None if clear.
+    Apply all 10 risk filters.
+
+    Returns dict:
+        {
+            'block': str | None,       # block reason, or None if all filters pass
+            'okx_volume_pct': float | None,  # actual okx_vol / avg_30d (e.g. 0.12 = 12%)
+        }
+    'block' is None means clear to enter.
+    'okx_volume_pct' is always returned when available (even on block) for logging.
     """
+    # Compute OKX volume ratio upfront (used for R4 gate + tagging on all rejection paths)
+    okx_volume_pct: float | None = None
+    try:
+        okx_vol = _fetch_okx_5m_volume(symbol)
+        avg_okx_vol = _fetch_30d_avg_okx_vol(symbol)
+        if okx_vol is not None and avg_okx_vol is not None and avg_okx_vol > 0:
+            okx_volume_pct = round(okx_vol / avg_okx_vol, 4)
+    except Exception:
+        pass
+
     # R1: Extreme realized vol
     vol_5m, _ = _get_realized_5m_vol(symbol)
     avg_vol_30d = _fetch_30d_avg_okx_vol(symbol)
     if vol_5m is not None and avg_vol_30d is not None and avg_vol_30d > 0:
         if vol_5m > 3.0 * avg_vol_30d:
-            return 'EXTREME_VOL'
+            return {'block': 'EXTREME_VOL', 'okx_volume_pct': okx_volume_pct}
 
-    # R2: Wide spread
+    # R2: Wide spread — now config-driven (DEMO: 15c, PROD default: 8c)
     spread = yes_ask - yes_bid
-    if spread > 8:
-        return 'WIDE_SPREAD'
+    max_spread = getattr(config, 'CRYPTO_15M_MAX_SPREAD', 8)
+    if spread > max_spread:
+        return {'block': 'WIDE_SPREAD', 'okx_volume_pct': okx_volume_pct}
 
     # R3: Thin Kalshi book — percentage of OI (scales with market activity)
-    # Require book depth >= LIQUIDITY_MIN_PCT of open interest (default 0.3%)
+    # Require book depth >= LIQUIDITY_MIN_PCT of open interest
     # Falls back to absolute $100 floor if OI is unavailable
     liquidity_min_pct = getattr(config, 'CRYPTO_15M_LIQUIDITY_MIN_PCT', 0.003)
     if dollar_oi > 0:
@@ -563,28 +582,27 @@ def check_risk_filters(
     else:
         min_depth = 100.0  # fallback if OI unavailable
     if book_depth_usd < min_depth:
-        return 'LOW_KALSHI_LIQUIDITY'
+        return {'block': 'LOW_KALSHI_LIQUIDITY', 'okx_volume_pct': okx_volume_pct}
 
-    # R4: Thin underlying volume
-    okx_vol = _fetch_okx_5m_volume(symbol)
-    avg_okx_vol = _fetch_30d_avg_okx_vol(symbol)
-    if okx_vol is not None and avg_okx_vol is not None and avg_okx_vol > 0:
-        if okx_vol < 0.25 * avg_okx_vol:
-            return 'THIN_MARKET'
+    # R4: Thin underlying volume — now uses already-computed okx_volume_pct
+    if okx_volume_pct is not None:
+        thin_market_ratio = getattr(config, 'CRYPTO_15M_THIN_MARKET_RATIO', 0.25)
+        if okx_volume_pct < thin_market_ratio:
+            return {'block': 'THIN_MARKET', 'okx_volume_pct': okx_volume_pct}
 
     # R5: Stale data
     if tfi_stale:
-        return 'TFI_STALE'
+        return {'block': 'TFI_STALE', 'okx_volume_pct': okx_volume_pct}
     if obi_stale:
-        return 'OBI_STALE'
+        return {'block': 'OBI_STALE', 'okx_volume_pct': okx_volume_pct}
 
     # R6: Extreme funding
     if fr_z is not None and abs(fr_z) > 3.0:
-        return 'EXTREME_FUNDING'
+        return {'block': 'EXTREME_FUNDING', 'okx_volume_pct': okx_volume_pct}
 
     # R7: Low conviction
     if abs(raw_score) < 0.15:
-        return 'LOW_CONVICTION'
+        return {'block': 'LOW_CONVICTION', 'okx_volume_pct': okx_volume_pct}
 
     # R8: Session drawdown
     session_pnl = _get_session_pnl_15m()
@@ -592,13 +610,13 @@ def check_risk_filters(
     capital = get_capital()
     daily_alloc = capital * getattr(config, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04)
     if session_pnl < -0.05 * daily_alloc:
-        return 'DRAWDOWN_PAUSE'
+        return {'block': 'DRAWDOWN_PAUSE', 'okx_volume_pct': okx_volume_pct}
 
     # R9: Macro event (reuse from main cycle if available)
     try:
         from ruppert_cycle import has_macro_event_within
         if has_macro_event_within(minutes=30):
-            return 'MACRO_EVENT_RISK'
+            return {'block': 'MACRO_EVENT_RISK', 'okx_volume_pct': okx_volume_pct}
     except (ImportError, AttributeError):
         pass  # Not available in all contexts
 
@@ -608,9 +626,9 @@ def check_risk_filters(
     if coinbase_price and okx_price and okx_price > 0:
         basis = abs(coinbase_price - okx_price) / okx_price
         if basis > 0.0015:
-            return 'BASIS_RISK'
+            return {'block': 'BASIS_RISK', 'okx_volume_pct': okx_volume_pct}
 
-    return None
+    return {'block': None, 'okx_volume_pct': okx_volume_pct}
 
 
 # ─────────────────────────────── Decision Logger ─────────────────────────────
@@ -843,7 +861,7 @@ def evaluate_crypto_15m_entry(
     }
 
     # ── Risk Filters ──
-    block_reason = check_risk_filters(
+    risk_result = check_risk_filters(
         symbol=symbol,
         asset=asset,
         raw_score=raw_score,
@@ -855,10 +873,48 @@ def evaluate_crypto_15m_entry(
         fr_z=fr_z,
         dollar_oi=dollar_oi,
     )
+    block_reason = risk_result['block']
+    okx_volume_pct = risk_result['okx_volume_pct']  # used for data quality tagging
+
     if block_reason:
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
                        signals, kalshi_info, 'SKIP', block_reason, None, None, None)
         return
+
+    # ── Data Quality Tagging ──
+    # Compare actual values against original PROD thresholds to classify trade quality.
+    # These constants define "clean" data regardless of what config is currently set to.
+    # Priority when multiple thresholds are relaxed: thin_market > wide_spread > low_liquidity
+    _STRICT_MAX_SPREAD        = 8      # original R2 production threshold
+    _STRICT_THIN_MARKET_RATIO = 0.25   # original R4 production threshold
+    _STRICT_LIQUIDITY_MIN_PCT = 0.003  # original R3 production threshold
+
+    spread = yes_ask - yes_bid
+
+    spread_clean = spread <= _STRICT_MAX_SPREAD
+
+    thin_mkt_clean = (
+        okx_volume_pct is None  # couldn't fetch — treat as unknown, don't penalize
+        or okx_volume_pct >= _STRICT_THIN_MARKET_RATIO
+    )
+
+    strict_min_depth = (
+        max(dollar_oi * _STRICT_LIQUIDITY_MIN_PCT, 50.0) if dollar_oi > 0 else 100.0
+    )
+    liquidity_clean = book_depth_usd >= strict_min_depth
+
+    if not thin_mkt_clean:
+        data_quality = 'thin_market'
+    elif not spread_clean:
+        data_quality = 'wide_spread'
+    elif not liquidity_clean:
+        data_quality = 'low_liquidity'
+    else:
+        data_quality = 'standard'
+
+    # Can't confirm standard quality without OKX volume data
+    if data_quality == 'standard' and okx_volume_pct is None:
+        data_quality = 'unknown'
 
     # ── Entry Logic ──
     edge_yes = P_final - (yes_ask / 100.0)
@@ -989,6 +1045,11 @@ def evaluate_crypto_15m_entry(
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'date': str(date.today()),
         'scan_price': entry_price,
+        # ── Data quality tags (for Optimizer / Data Scientist segmentation) ──
+        'data_quality':          data_quality,
+        'okx_volume_pct':        okx_volume_pct,                  # float ratio, e.g. 0.12 = 12% of 30d avg
+        'kalshi_book_depth_usd': round(book_depth_usd, 2),        # USD depth at entry
+        'kalshi_spread_cents':   yes_ask - yes_bid,               # spread in cents at entry
     }
 
     log_trade(opp, position_usd, contracts, order_result)
