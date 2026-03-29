@@ -222,7 +222,7 @@ def check_module_mismatch(trade: dict) -> tuple:
     return False, None
 
 
-def check_tracker_drift(trades: list[dict], tracked: dict) -> dict:
+def check_tracker_drift(tracked: dict) -> dict:
     """Compare open trades vs position tracker. Uses all-time logs for multi-day positions."""
     # Use get_open_positions_from_logs() to include multi-day positions, not just today's trades
     open_positions = get_open_positions_from_logs()
@@ -725,7 +725,7 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
 
     # 5. Position tracker drift
     all_today = _read_trades_file(today_path)
-    drift = check_tracker_drift(all_today, tracked)
+    drift = check_tracker_drift(tracked)
     if drift['orphans']:
         _remove_tracker_orphans(drift['orphans'])
         auto_fixed += len(drift['orphans'])
