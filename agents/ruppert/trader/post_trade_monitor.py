@@ -54,12 +54,13 @@ def check_settlements(client):
     print(f"\n  [Settlement Checker] running...")
 
     today = date.today()
-    yesterday = today - timedelta(days=1)
 
-    logs_to_check = [
-        TRADES_DIR / f"trades_{yesterday.isoformat()}.jsonl",
-        TRADES_DIR / f"trades_{today.isoformat()}.jsonl",
-    ]
+    # Scan a rolling 30-day window to catch long-horizon positions (monthly/annual).
+    # We read all available log files from the last 30 days; most will be empty/missing.
+    logs_to_check = []
+    for days_back in range(30):
+        log_date = today - timedelta(days=days_back)
+        logs_to_check.append(TRADES_DIR / f"trades_{log_date.isoformat()}.jsonl")
 
     # Build open positions (same logic as load_open_positions)
     entries_by_key = {}
@@ -259,14 +260,13 @@ def load_open_positions():
     Reads today's log AND yesterday's log so multi-day positions entered
     yesterday are not missed. Today's entries/exits take precedence.
     """
-    from datetime import timedelta
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    today = date.today().isoformat()
+    today = date.today()
 
-    logs_to_check = [
-        TRADES_DIR / f"trades_{yesterday}.jsonl",
-        TRADES_DIR / f"trades_{today}.jsonl",
-    ]
+    # Scan rolling 30-day window to include long-horizon positions (monthly/annual).
+    logs_to_check = []
+    for days_back in range(30):
+        log_date = today - timedelta(days=days_back)
+        logs_to_check.append(TRADES_DIR / f"trades_{log_date.isoformat()}.jsonl")
 
     # P1-2 fix: key by (ticker, side) tuple instead of ticker alone.
     # Previously keyed by ticker only, so holding both YES and NO on the same

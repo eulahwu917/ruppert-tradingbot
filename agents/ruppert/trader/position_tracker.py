@@ -26,8 +26,6 @@ from agents.ruppert.data_scientist.logger import log_activity, normalize_entry_p
 
 logger = logging.getLogger(__name__)
 
-DRY_RUN = getattr(config, 'DRY_RUN', True)
-
 _env_paths = _get_paths()
 TRACKER_FILE = _env_paths['logs'] / 'tracked_positions.json'
 LOGS_DIR = _env_paths['logs']
@@ -46,8 +44,6 @@ _tracked = {}
 
 def _persist():
     """Write tracked positions to disk. Keys are serialized as 'ticker::side' strings."""
-    if get_current_env() == 'live':
-        require_live_enabled()  # Raises RuntimeError if enabled=false in mode.json
     try:
         TRACKER_FILE.parent.mkdir(exist_ok=True)
         tmp = TRACKER_FILE.with_suffix('.tmp')
@@ -98,9 +94,6 @@ def add_position(ticker: str, quantity: int, side: str, entry_price: float,
     entry_price: in cents (e.g. 45 = 45c).
     holding_type: 'long_horizon' skips the 70% gain exit threshold.
     """
-    if get_current_env() == 'live':
-        require_live_enabled()  # Raises RuntimeError if enabled=false in mode.json
-
     skip_gain_exit = (holding_type == 'long_horizon')
 
     # P0-4 fix: standardize NO positions to always use NO price.
@@ -223,7 +216,8 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str):
         # NO position: our cost was (100 - entry_price), our exit value is (100 - current_bid)
         pnl = ((100 - current_bid) - (100 - entry_price)) * quantity / 100
 
-    if DRY_RUN:
+    _dry_run = getattr(config, 'DRY_RUN', True)
+    if _dry_run:
         order_result = {'dry_run': True, 'status': 'simulated'}
     else:
         from agents.ruppert.env_config import require_live_enabled
@@ -237,6 +231,10 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str):
 
     # Log the exit trade — P0-1 fix: write to logs/trades/ not logs/
     log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
+    # For NO positions, exit_price should reflect the NO side price (100 - yes_bid).
+    # Entry_price is already stored as the NO price. Exit_price should match the same convention.
+    exit_price_logged = current_bid if side == 'yes' else (100 - current_bid)
+
     exit_record = {
         'trade_id': str(uuid.uuid4()),
         'timestamp': datetime.now().isoformat(),
@@ -249,7 +247,7 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str):
         'source': 'ws_position_tracker',
         'module': module,
         'entry_price': entry_price,
-        'exit_price': current_bid,
+        'exit_price': exit_price_logged,
         'contracts': quantity,
         'pnl': round(pnl, 2),
     }

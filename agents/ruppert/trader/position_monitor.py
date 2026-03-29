@@ -97,13 +97,13 @@ def push_alert(level, message, ticker=None, pnl=None):
 
 def load_open_positions():
     """Load open positions from trade logs, filtering out exits/settlements."""
-    yesterday = (date.today() - timedelta(days=1)).isoformat()
-    today = date.today().isoformat()
+    today = date.today()
 
-    logs_to_check = [
-        TRADES_DIR / f"trades_{yesterday}.jsonl",
-        TRADES_DIR / f"trades_{today}.jsonl",
-    ]
+    # Scan rolling 30-day window to include long-horizon positions (monthly/annual).
+    logs_to_check = []
+    for days_back in range(30):
+        log_date = today - timedelta(days=days_back)
+        logs_to_check.append(TRADES_DIR / f"trades_{log_date.isoformat()}.jsonl")
 
     entries_by_key = {}
     exit_keys = set()
@@ -520,7 +520,15 @@ def run_polling_scan(client: KalshiClient, run_settlement_check: bool = True):
         
         if action == 'auto_exit':
             print(f"  [Polling] AUTO-EXIT: {ticker} — {reason}")
-            # Note: actual exit execution is handled by existing run_monitor()
+            # Execute exit directly — run_monitor() is not called in WS mode.
+            # Reuse post_trade_monitor execution logic.
+            try:
+                from agents.ruppert.trader.post_trade_monitor import run_monitor as _run_monitor_exit
+                # run_monitor() re-scans all positions; call it to handle this exit.
+                # A targeted single-position exit would be preferable long-term (see Notes).
+                _run_monitor_exit()
+            except Exception as _exit_err:
+                print(f"  [Polling] AUTO-EXIT execution failed for {ticker}: {_exit_err}")
         elif action and 'alert' in action:
             push_alert('warning', f'{ticker}: {reason}', ticker=ticker)
         elif action:
@@ -639,11 +647,13 @@ async def run_ws_mode(client: KalshiClient):
                         evaluate_crypto_entry(ticker, yes_ask, yes_bid, close_time)
 
                 # Check for settlement (price at 99 or 1)
-                if yes_ask is not None and ticker not in settled_tickers:
-                    if yes_ask >= 99:
+                # Use yes_bid: settlement is confirmed when buyers bid at 99c (YES) or 1c (NO).
+                # yes_ask alone is unreliable — a stale 99c ask on an illiquid market is not settlement.
+                if yes_bid is not None and ticker not in settled_tickers:
+                    if yes_bid >= 99:
                         _settle_single_ticker(ticker, 'yes')
                         settled_tickers.add(ticker)
-                    elif yes_ask <= 1:
+                    elif yes_bid <= 1:
                         _settle_single_ticker(ticker, 'no')
                         settled_tickers.add(ticker)
             

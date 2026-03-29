@@ -124,7 +124,6 @@ class Trader:
                 )
             except Exception as e:
                 log_activity(f"[Trader] Warning: could not register {ticker} in position tracker: {e}")
-            self.bankroll -= size  # Update local balance tracking
             return True
 
         except Exception as e:

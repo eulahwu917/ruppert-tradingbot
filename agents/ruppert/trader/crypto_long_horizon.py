@@ -92,21 +92,22 @@ def touch_probability(
     z = abs(log_ratio) / sigma
 
     if strike > spot:
-        # P(price reaches strike) — conservative terminal + barrier blend
+        # Barrier approximation: P(price touches strike) ≈ 2 * P(terminal > strike) for GBM.
+        # This is the standard reflection principle result. Cap the boost at the reflection bound.
         p_terminal = norm.cdf(-log_ratio / sigma)
-        # Barrier boost: path-dependent touch > terminal probability
-        p = p_terminal * 1.25
+        barrier_boost = min(2.0 * p_terminal / p_terminal, 1.5) if p_terminal > 0 else 1.0  # max 1.5x boost
+        p = min(p_terminal * barrier_boost, 0.99)
     else:
-        # P(price drops to strike) — lower touch
         p_terminal = norm.cdf(log_ratio / sigma)
-        p = p_terminal * 1.4
+        # Downside barrier: slightly more conservative (1.2x, reflection principle with vol skew)
+        p = min(p_terminal * 1.2, 0.99)
 
-    p = min(max(p, 0.0), 1.0)
+    p = min(max(p, 0.0), 0.99)
 
-    # Fat-tail correction for extreme strikes (>2 sigma)
+    # Fat-tail correction for extreme strikes (>2 sigma) — additive nudge, not multiplicative
     if z > 2.0:
-        fat_tail_boost = 1.35
-        p = min(p * fat_tail_boost, 0.99)
+        fat_tail_addend = 0.03  # +3 percentage points for fat tail, not 35% multiplicative boost
+        p = min(p + fat_tail_addend, 0.99)
 
     return round(min(p, 0.99), 4)
 
@@ -199,9 +200,18 @@ def scan_long_horizon_markets(client) -> list[dict]:
             if not close_time:
                 continue
 
-            # Days to expiry
+            # Days to expiry — skip markets that have already closed
             close_dt = datetime.fromisoformat(close_time.replace('Z', '+00:00'))
-            days = max((close_dt - datetime.now(timezone.utc)).days, 1)
+            days_raw = (close_dt - datetime.now(timezone.utc)).days
+            if days_raw < 0:
+                log_decision({
+                    'ticker': ticker, 'asset': asset, 'strike': None,
+                    'decision': 'SKIP', 'skip_reason': 'market_already_closed',
+                    'regime': regime, 'fear_greed': fg['value'],
+                    'fear_greed_trend': fg['trend'],
+                })
+                continue
+            days = max(days_raw, 1)
 
             # Parse strike from ticker
             strike = parse_strike(ticker)

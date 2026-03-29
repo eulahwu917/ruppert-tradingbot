@@ -108,136 +108,18 @@ def _opp_to_signal(opp: dict, module: str = 'weather') -> dict:
 
 def run_exit_scan(dry_run=True):
     """
-    DEPRECATED: Exits are now owned by ws_feed.py (position_tracker) + post_trade_monitor.py.
-    This function is retained for reference only. Will raise in live mode.
+    DEPRECATED: Exits are owned by ws_feed.py (position_tracker) + post_trade_monitor.py.
+    This function is a no-op stub kept to avoid ImportError from any external caller.
+    Do not call this function. It will be removed in a future cleanup.
     """
     import warnings
     warnings.warn(
-        "run_exit_scan() is deprecated. Exits are handled by WS feed / position_tracker.",
+        "run_exit_scan() is deprecated and is a no-op. Exits are handled by WS feed / position_tracker.",
         DeprecationWarning, stacklevel=2,
     )
-    log_activity("[ExitScan] WARNING: Deprecated run_exit_scan() called. Check caller.")
+    log_activity("[ExitScan] DEPRECATED run_exit_scan() called — no-op. Check caller.")
     if not dry_run:
         raise RuntimeError("run_exit_scan() is deprecated and must not run in live mode.")
-    log_activity("[ExitScan] Checking open positions for exit signals...")
-    os.makedirs(os.path.dirname(_STRATEGY_EXITS_LOG), exist_ok=True)
-
-    try:
-        client = KalshiClient()
-        positions = client.get_positions()
-        if not positions:
-            log_activity("[ExitScan] No open positions.")
-            return
-
-        log_activity(f"[ExitScan] {len(positions)} open position(s) found.")
-        exits_logged = 0
-
-        for pos in positions:
-            ticker = getattr(pos, 'ticker', None)
-            if not ticker:
-                continue
-
-            # Only scan bot-managed markets (weather: KXHIGH*, crypto: KXBTC*/KXETH*)
-            series = ticker.split('-')[0].upper()
-            if series.startswith('KXHIGH'):
-                module = 'weather'
-            elif any(series.startswith(p) for p in ('KXBTC', 'KXETH', 'KXCRYPTO')):
-                module = 'crypto'
-            else:
-                continue  # Skip non-bot positions
-
-            # Fetch live market bid
-            try:
-                market = client.get_market(ticker)
-                yes_bid = getattr(market, 'yes_bid', 0) or 0
-                no_bid  = getattr(market, 'no_bid',  0) or 0
-            except Exception as e:
-                log_activity(f"  [ExitScan] Could not fetch market {ticker}: {e}")
-                continue
-
-            position_count = getattr(pos, 'position', 0) or 0
-            if position_count > 0:
-                current_bid = yes_bid
-            elif position_count < 0:
-                current_bid = no_bid
-            else:
-                continue  # Flat position
-
-            # Derive hours_to_settlement from ticker date component
-            try:
-                date_part = ticker.split('-')[1]          # e.g. "26MAR11"
-                target_dt = datetime.strptime("20" + date_part, "%Y%b%d").replace(hour=23, minute=59)
-                hours_to_settlement = max(0.0, (target_dt - datetime.now()).total_seconds() / 3600)
-            except Exception:
-                hours_to_settlement = 24.0
-
-            # ── Load entry metadata from trade log ───────────────────────────
-            trade_record = _load_trade_record(ticker)
-            if trade_record:
-                market_prob = trade_record.get('market_prob', 0.5) or 0.5
-                trade_side  = trade_record.get('side', 'yes')
-                if trade_side == 'no':
-                    entry_price = (1.0 - market_prob) * 100
-                else:
-                    entry_price = market_prob * 100
-                entry_edge = trade_record.get('edge', 0.0) or 0.0
-            else:
-                # Fallback: no record found; 95¢ rule and near-settlement hold
-                # still fire correctly; reversal will be conservative.
-                entry_price = 50
-                entry_edge  = 0.0
-                log_activity(f"  [ExitScan] No trade record found for {ticker}; using defaults.")
-
-            # Approximate current edge from live bid vs entry price
-            current_edge = abs(current_bid / 100.0 - (1.0 - entry_price / 100.0))
-
-            entry_signal = {
-                'edge': entry_edge, 'win_prob': 0.5, 'confidence': 0.5,
-                'hours_to_settlement': hours_to_settlement, 'module': module,
-            }
-            current_signal = {
-                'edge': current_edge, 'win_prob': 0.5, 'confidence': 0.5,
-                'hours_to_settlement': hours_to_settlement, 'module': module,
-            }
-
-            decision = should_exit(
-                current_bid=current_bid,
-                entry_price=entry_price,
-                signal=current_signal,
-                entry_signal=entry_signal,
-                hours_to_settlement=hours_to_settlement,
-                module=module,
-            )
-
-            if decision['exit']:
-                log_entry = {
-                    'timestamp':          datetime.now().isoformat(),
-                    'ticker':             ticker,
-                    'module':             module,
-                    'reason':             decision['reason'],
-                    'fraction':           decision['fraction'],
-                    'current_bid':        current_bid,
-                    'position_count':     position_count,
-                    'hours_to_settlement': round(hours_to_settlement, 2),
-                    'dry_run':            dry_run,
-                }
-                with open(_STRATEGY_EXITS_LOG, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(log_entry) + '\n')
-                log_activity(
-                    f"  [ExitScan] EXIT SIGNAL: {ticker} | reason={decision['reason']} "
-                    f"fraction={decision['fraction']:.0%} bid={current_bid}¢"
-                )
-                # TODO: live mode - execute sell via trader.py
-                exits_logged += 1
-            else:
-                log_activity(f"  [ExitScan] HOLD: {ticker} | {decision['reason']}")
-
-        log_activity(f"[ExitScan] Done. {exits_logged} exit signal(s) logged.")
-
-    except Exception as e:
-        log_activity(f"[ExitScan] ERROR: {e}")
-        import traceback
-        traceback.print_exc()
 
 
 def test_connection():
@@ -448,29 +330,8 @@ def run_weather_scan(dry_run=True):
                         )
                     except Exception:
                         pass
-                    # Register position in tracker so data_agent drift check sees it
-                    try:
-                        from agents.ruppert.trader import position_tracker
-                        _wx_entry_price = (
-                            opp.get('fill_price')
-                            or opp.get('scan_price')
-                            or opp.get('yes_price', 50)
-                        )
-                        _wx_contracts = (
-                            opp.get('fill_contracts')
-                            or opp.get('scan_contracts')
-                            or max(1, int(opp.get('strategy_size', 10) / max(_wx_entry_price, 1) * 100))
-                        )
-                        position_tracker.add_position(
-                            ticker=opp['ticker'],
-                            quantity=_wx_contracts,
-                            side=opp['side'],
-                            entry_price=_wx_entry_price,
-                            module='weather',
-                            title=opp.get('title', opp['ticker']),
-                        )
-                    except Exception as _pt_err:
-                        print(f"  [Weather] Tracker registration failed (non-fatal): {_pt_err}")
+                    # Position tracker registration is handled inside trader.py execute_opportunity().
+                    # Do not call position_tracker.add_position() here — would double-register.
             except Exception as exec_err:
                 log_activity(f"[Weather] Execution error (trades may be partially logged): {exec_err}")
                 import traceback
@@ -892,46 +753,47 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
                     result = Trader(dry_run=dry_run).execute_opportunity(opp)
                     if result:
                         _fed_deployed_this_cycle += _fed_decision.get('size', 0)
+                        traded_tickers.add(ticker)
+                        executed.append(opp)
 
-                    traded_tickers.add(ticker)
-                    executed.append(opp)
-
-                    # Baseline: log what pure CME-follow would have done
-                    try:
-                        from baselines import log_follow_cme_fed, log_uniform_sizing
-                        _cme_prob = fed_signal.get('prob', 0.5)
-                        _mkt_price_f = fed_signal.get('market_price', 0.5)
-                        log_follow_cme_fed(
-                            ticker=ticker,
-                            cme_prob=_cme_prob,
-                            market_price=_mkt_price_f,
-                            actual_action=side,
-                            actual_price=bet_price / 100,
-                            ensemble_prob=fed_signal.get('ensemble_prob'),
-                        )
-                        # Baseline: uniform sizing vs Kelly
-                        log_uniform_sizing(
-                            ticker=ticker,
-                            domain='fed',
-                            actual_action=side,
-                            actual_price=bet_price / 100,
-                            actual_size=actual_cost,
-                        )
-                    except Exception:
-                        pass
-                    # Log Brier prediction at trade entry
-                    try:
-                        from brier_tracker import log_prediction
-                        log_prediction(
-                            domain='fed',
-                            ticker=ticker,
-                            predicted_prob=fed_signal.get('prob', 0.5),
-                            market_price=fed_signal.get('market_price', 0.5),
-                            edge=fed_signal.get('edge', 0.0),
-                            side=side,
-                        )
-                    except Exception:
-                        pass
+                        # Baseline: log what pure CME-follow would have done
+                        try:
+                            from baselines import log_follow_cme_fed, log_uniform_sizing
+                            _cme_prob = fed_signal.get('prob', 0.5)
+                            _mkt_price_f = fed_signal.get('market_price', 0.5)
+                            log_follow_cme_fed(
+                                ticker=ticker,
+                                cme_prob=_cme_prob,
+                                market_price=_mkt_price_f,
+                                actual_action=side,
+                                actual_price=bet_price / 100,
+                                ensemble_prob=fed_signal.get('ensemble_prob'),
+                            )
+                            # Baseline: uniform sizing vs Kelly
+                            log_uniform_sizing(
+                                ticker=ticker,
+                                domain='fed',
+                                actual_action=side,
+                                actual_price=bet_price / 100,
+                                actual_size=actual_cost,
+                            )
+                        except Exception:
+                            pass
+                        # Log Brier prediction at trade entry
+                        try:
+                            from brier_tracker import log_prediction
+                            log_prediction(
+                                domain='fed',
+                                ticker=ticker,
+                                predicted_prob=fed_signal.get('prob', 0.5),
+                                market_price=fed_signal.get('market_price', 0.5),
+                                edge=fed_signal.get('edge', 0.0),
+                                side=side,
+                            )
+                        except Exception:
+                            pass
+                    else:
+                        log_activity(f"  [Fed] execute_opportunity failed for {ticker} — not deduped, may retry next cycle")
 
         elif fed_signal and fed_signal.get("skip_reason"):
             print(f"  Fed signal skipped: {fed_signal['skip_reason']}")
@@ -1072,7 +934,10 @@ def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
             }
             trade_opp['strategy_size'] = size
 
-            trader.execute_opportunity(trade_opp)
+            result = trader.execute_opportunity(trade_opp)
+            if not result:
+                log_activity(f"  [Geo] execute_opportunity failed for {ticker} — skipping accounting")
+                continue
 
             # Log Brier prediction at trade entry
             try:

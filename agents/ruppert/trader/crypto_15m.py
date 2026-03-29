@@ -57,11 +57,11 @@ ASSET_SYMBOLS = {
     'DOGE': 'DOGE-USDT-SWAP',
 }
 
-# Signal weights (fixed — autoresearcher will optimize)
+# Signal weights — sum to 1.0
 W_TFI  = 0.40
 W_OBI  = 0.25
-W_MACD = 0.15
-W_OI   = 0.10
+W_MACD = 0.20   # raised from 0.15 to 0.20
+W_OI   = 0.15   # raised from 0.10 to 0.15
 
 from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.strategist.strategy import should_enter
@@ -504,6 +504,42 @@ def _fetch_30d_avg_okx_vol(symbol: str) -> float | None:
     return None
 
 
+def _fetch_30d_avg_price_vol(symbol: str) -> float | None:
+    """Get 30-day average of 5-min price range ratio (high-low)/close, for R1 comparison."""
+    cached = _cache_get(f'avg_price_vol_30d_{symbol}', ttl=3600)
+    if cached is not _CACHE_MISS:
+        return cached
+
+    try:
+        r = requests.get(
+            f'{OKX_API}/market/candles',
+            params={'instId': symbol, 'bar': '5m', 'limit': '8640'},  # 30 days of 5-min candles
+            timeout=15,
+        )
+        r.raise_for_status()
+        resp = r.json()
+        data = resp.get('data', [])
+        if len(data) < 10:
+            return None
+        ratios = []
+        for candle in data:
+            try:
+                high = float(candle[2])
+                low = float(candle[3])
+                close_prev = float(candle[4])
+                if close_prev > 0:
+                    ratios.append((high - low) / close_prev)
+            except Exception:
+                continue
+        if not ratios:
+            return None
+        avg = statistics.mean(ratios)
+        _cache_set(f'avg_price_vol_30d_{symbol}', avg)
+        return avg
+    except Exception:
+        return None
+
+
 def _get_realized_5m_vol(symbol: str) -> tuple[float | None, float | None]:
     """Get 5-min realized vol from OKX candles."""
     try:
@@ -560,11 +596,13 @@ def check_risk_filters(
     except Exception:
         pass
 
-    # R1: Extreme realized vol
+    # R1: Extreme realized vol — compare price range ratio against its own 30-day average.
+    # vol_5m is a dimensionless price range ratio (high-low)/close_prev.
+    # avg_vol_30d was volume (contracts) — wrong units. Use a dedicated price-vol baseline instead.
     vol_5m, _ = _get_realized_5m_vol(symbol)
-    avg_vol_30d = _fetch_30d_avg_okx_vol(symbol)
-    if vol_5m is not None and avg_vol_30d is not None and avg_vol_30d > 0:
-        if vol_5m > 3.0 * avg_vol_30d:
+    avg_price_vol_30d = _fetch_30d_avg_price_vol(symbol)  # NEW function — see Notes
+    if vol_5m is not None and avg_price_vol_30d is not None and avg_price_vol_30d > 0:
+        if vol_5m > 3.0 * avg_price_vol_30d:
             return {'block': 'EXTREME_VOL', 'okx_volume_pct': okx_volume_pct}
 
     # R2: Wide spread — now config-driven (DEMO: 15c, PROD default: 8c)
@@ -608,8 +646,9 @@ def check_risk_filters(
     session_pnl = _get_session_pnl_15m()
     from agents.ruppert.data_scientist.capital import get_capital
     capital = get_capital()
-    daily_alloc = capital * getattr(config, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04)
-    if session_pnl < -0.05 * daily_alloc:
+    # R8: pause if session loss exceeds 5% of total capital (not 5% of daily_alloc).
+    # Prior formula used 5% of daily_alloc which was ~0.2% of capital — far too sensitive.
+    if session_pnl < -0.05 * capital:
         return {'block': 'DRAWDOWN_PAUSE', 'okx_volume_pct': okx_volume_pct}
 
     # R9: Macro event (reuse from main cycle if available)
