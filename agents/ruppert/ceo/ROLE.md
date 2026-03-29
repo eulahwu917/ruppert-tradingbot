@@ -12,7 +12,7 @@ You run the trading operation. You direct agents, report to David, and escalate 
 
 **Your files:**
 - `environments/demo/ruppert_cycle.py` — main cycle orchestration
-- `environments/demo/main.py` — scan execution
+- `agents/ruppert/trader/main.py` — scan execution (shared ownership with Trader)
 - `agents/ruppert/ceo/brief_generator.py` — daily progress reports
 - `environments/demo/logs/state.json` — cycle state
 

@@ -108,14 +108,17 @@ def _opp_to_signal(opp: dict, module: str = 'weather') -> dict:
 
 def run_exit_scan(dry_run=True):
     """
-    Check all open bot positions for exit signals and log to strategy_exits.jsonl.
-    Applies: 95¢ rule, 70% gain rule, near-settlement hold, reversal stop.
-
-    Entry metadata (entry_price, entry_edge) is loaded from logs/trades_*.jsonl
-    by matching ticker. Falls back to conservative defaults if no record found.
-    The 95¢ rule, 70% gain rule, and near-settlement hold fire on live bids.
-    Reversal rule fires using real entry edge vs current bid-derived edge.
+    DEPRECATED: Exits are now owned by ws_feed.py (position_tracker) + post_trade_monitor.py.
+    This function is retained for reference only. Will raise in live mode.
     """
+    import warnings
+    warnings.warn(
+        "run_exit_scan() is deprecated. Exits are handled by WS feed / position_tracker.",
+        DeprecationWarning, stacklevel=2,
+    )
+    log_activity("[ExitScan] WARNING: Deprecated run_exit_scan() called. Check caller.")
+    if not dry_run:
+        raise RuntimeError("run_exit_scan() is deprecated and must not run in live mode.")
     log_activity("[ExitScan] Checking open positions for exit signals...")
     os.makedirs(os.path.dirname(_STRATEGY_EXITS_LOG), exist_ok=True)
 
@@ -273,7 +276,7 @@ def run_weather_scan(dry_run=True):
                 "— using $10,000.00 fallback.",
                 file=_sys.stderr,
             )
-            total_capital = 10000.0  # Fresh start 2026-03-26 — was 400.0
+            total_capital = getattr(config, 'CAPITAL_FALLBACK', 10000.0)  # fallback when get_capital() fails
         deployed_today = get_daily_exposure()
         cap_remaining  = check_daily_cap(total_capital, deployed_today)
         log_activity(
@@ -641,7 +644,8 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
         _crypto_daily_cap = _total_capital * getattr(config, 'CRYPTO_DAILY_CAP_PCT', 0.07)
         _crypto_deployed_this_cycle = 0.0
         try:
-            _open_exposure = max(0.0, _total_capital - get_buying_power())
+            _api_exposure = max(0.0, _total_capital - get_buying_power())
+            _open_exposure = max(_api_exposure, open_position_value)
         except Exception:
             _open_exposure = open_position_value
 

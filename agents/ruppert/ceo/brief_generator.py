@@ -8,7 +8,7 @@ daily brief for David. Reads from truth files and raw logs.
 Writes to: reports/daily_brief_YYYY-MM-DD.md
 Sends via: Telegram
 
-Replaces: daily_progress_report.py (superseded by Phase 5)
+Coexists with daily_progress_report.py — both may be active.
 
 Usage:
   python -m agents.ruppert.ceo.brief_generator
@@ -142,7 +142,7 @@ def _compute_pnl_from_trades(trades: list[dict]) -> dict:
         ticker = t.get('ticker', '')
 
         if action in ('buy', 'open'):
-            open_positions[ticker] = size
+            open_positions[ticker] = open_positions.get(ticker, 0) + size
             open_cost += size
         elif action in ('exit', 'settle'):
             # Remove from open if present
@@ -491,14 +491,10 @@ def write_brief_to_file(content: str) -> Path:
     return path
 
 
-def send_brief_telegram(brief_text: str) -> bool:
-    """Send brief via Telegram. Returns True on success."""
+def send_brief_telegram(telegram_summary: str) -> bool:
+    """Send brief summary via Telegram. Pass the result of _build_telegram_summary()."""
     try:
         from agents.ruppert.data_scientist.logger import send_telegram
-
-        # Convert markdown table syntax for Telegram (it doesn't render MD tables)
-        # Strip header/footer, send just the narrative summary
-        telegram_summary = _build_telegram_summary()
         return send_telegram(telegram_summary)
     except Exception as e:
         print(f"[CEO] Telegram send failed: {e}")
@@ -600,7 +596,8 @@ def main():
     print(f"--- END PREVIEW ---\n")
 
     # Send via Telegram
-    ok = send_brief_telegram(brief_content)
+    telegram_content = _build_telegram_summary()
+    ok = send_brief_telegram(telegram_content)
     if ok:
         print('[CEO] Daily brief sent via Telegram.')
     else:

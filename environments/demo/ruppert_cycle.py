@@ -39,6 +39,19 @@ from agents.ruppert.strategist.strategy import check_daily_cap, check_open_expos
 from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 
 
+def _get_local_tz():
+    """Return the local timezone offset as a timezone object. Uses system DST state."""
+    import time as _t
+    _is_dst = _t.localtime().tm_isdst > 0
+    _offset = -7 if _is_dst else -8  # PDT / PST
+    return timezone(timedelta(hours=_offset))
+
+
+def _normalize_side(s: str) -> str:
+    s = (s or '').lower()
+    return 'yes' if s in ('yes', 'buy') else 'no'
+
+
 @dataclass
 class CycleState:
     """Mutable state bag passed through the cycle."""
@@ -213,7 +226,7 @@ def run_orphan_reconciliation(client, logs_dir):
         from agents.ruppert.trader.post_trade_monitor import load_open_positions as _load_log_positions
         _kalshi_positions = client.get_positions()
         _logged_positions = _load_log_positions()
-        _logged_keys = {(p.get('ticker', ''), p.get('side', '')) for p in _logged_positions}
+        _logged_keys = {(p.get('ticker', ''), _normalize_side(p.get('side', ''))) for p in _logged_positions}
 
         for _kpos in _kalshi_positions:
             try:
@@ -286,13 +299,27 @@ def run_position_check(client, state):
         from agents.ruppert.strategist.edge_detector import parse_date_from_ticker, parse_threshold_from_ticker
 
         from agents.ruppert.env_config import get_paths as _get_paths_pc
-        trade_log = _get_paths_pc()['trades'] / f"trades_{date.today().isoformat()}.jsonl"
-        open_positions = []
-        if trade_log.exists():
-            for line in trade_log.read_text(encoding='utf-8').splitlines():
-                try: open_positions.append(json.loads(line))
-                except: pass
-        open_positions = [p for p in open_positions if p.get('action') != 'exit']
+        # Load last N days of trade records to catch multi-day open positions
+        _LOOKBACK_DAYS = getattr(config, 'POSITION_CHECK_LOOKBACK_DAYS', 7)
+        open_positions_by_ticker: dict = {}
+        for _day_offset in range(_LOOKBACK_DAYS, -1, -1):
+            _day_str = (date.today() - timedelta(days=_day_offset)).isoformat()
+            _log = _get_paths_pc()['trades'] / f"trades_{_day_str}.jsonl"
+            if not _log.exists():
+                continue
+            for line in _log.read_text(encoding='utf-8').splitlines():
+                try:
+                    rec = json.loads(line.strip())
+                except Exception:
+                    continue
+                ticker = rec.get('ticker', '')
+                if not ticker:
+                    continue
+                if rec.get('action') in ('buy', 'open'):
+                    open_positions_by_ticker[ticker] = rec
+                elif rec.get('action') in ('exit', 'settle'):
+                    open_positions_by_ticker.pop(ticker, None)
+        open_positions = list(open_positions_by_ticker.values())
 
         print(f"  {len(open_positions)} open position(s)")
 
@@ -517,6 +544,7 @@ def run_econ_prescan_mode(client, state):
             state.traded_tickers.add(ticker)
             _econ_spent += actual_cost
             _econ_trades += 1
+            state.open_position_value += actual_cost
 
     except Exception as _e:
         print(f"  econ_prescan error: {_e}")
@@ -548,10 +576,7 @@ def run_weather_only_mode(state):
 
     # Scan summary notification
     try:
-        import time as _time
-        _is_dst = _time.daylight and _time.localtime().tm_isdst > 0
-        _offset = -7 if _is_dst else -8
-        _tz_pdt = timezone(timedelta(hours=_offset))
+        _tz_pdt = _get_local_tz()
         _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
         try:
             _capital  = get_capital()
@@ -571,9 +596,10 @@ def run_weather_only_mode(state):
             'weather_trades': _weather_count,
             'summary': _scan_msg,
         })
-        push_alert('warning', _scan_msg)
-        send_telegram(_scan_msg)
-        log_activity('[SCAN NOTIFY] weather_only summary sent via Telegram')
+        if _weather_count > 0:
+            send_telegram(_scan_msg)
+            log_activity('[SCAN NOTIFY] weather_only summary sent via Telegram')
+        push_alert('info', _scan_msg)
         print('  Scan summary sent via Telegram.')
     except Exception as _notify_ex:
         print(f'  Scan notify error (non-fatal): {_notify_ex}')
@@ -603,10 +629,7 @@ def run_crypto_only_mode(state):
 
     # Scan summary notification
     try:
-        import time as _time
-        _is_dst = _time.daylight and _time.localtime().tm_isdst > 0
-        _offset = -7 if _is_dst else -8
-        _tz_pdt = timezone(timedelta(hours=_offset))
+        _tz_pdt = _get_local_tz()
         _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
         try:
             _capital  = get_capital()
@@ -628,9 +651,10 @@ def run_crypto_only_mode(state):
             'crypto_trades': _crypto_count,
             'summary': _scan_msg,
         })
-        push_alert('warning', _scan_msg)
-        send_telegram(_scan_msg)
-        log_activity('[SCAN NOTIFY] crypto_only summary sent via Telegram')
+        if _crypto_count > 0:
+            send_telegram(_scan_msg)
+            log_activity('[SCAN NOTIFY] crypto_only summary sent via Telegram')
+        push_alert('info', _scan_msg)
         print('  Scan summary sent via Telegram.')
     except Exception as _notify_ex:
         print(f'  Scan notify error (non-fatal): {_notify_ex}')
@@ -754,6 +778,10 @@ def run_report_mode(state):
         if r.get('action') in ('buy', 'open')
     )
     total_exited = sum(r.get('size_dollars', 0.0) for r in exit_records)
+    _missing_pnl_count = sum(1 for r in exit_records if r.get('realized_pnl') is None)
+    if _missing_pnl_count > 0:
+        print(f"  [ReportWarn] {_missing_pnl_count} exit record(s) missing realized_pnl — P&L approximated from size_dollars")
+        log_activity(f"[Report] WARNING: {_missing_pnl_count} exit(s) missing realized_pnl field")
     net_pnl_approx = round(total_exited - total_deployed, 2)
 
     print(f"  Deployed: ${total_deployed:.2f}  "
@@ -859,6 +887,10 @@ def run_full_mode(client, state):
         from agents.ruppert.trader.main import run_weather_scan
         new_weather = run_weather_scan(dry_run=state.dry_run)
         if new_weather:
+            for _wt in new_weather:
+                _wtk = _wt.get('ticker')
+                if _wtk:
+                    state.traded_tickers.add(_wtk)
             print(f"  {len(new_weather)} new weather trade(s) executed")
             for t in new_weather:
                 print(f"    {t.get('ticker')} {t.get('side','').upper()} edge={t.get('edge',0)*100:.0f}%")
@@ -988,16 +1020,14 @@ def run_full_mode(client, state):
 
     # SCAN SUMMARY NOTIFICATION
     try:
-        import time as _time
-        is_dst = _time.daylight and _time.localtime().tm_isdst > 0
-        offset = -7 if is_dst else -8
-        tz_pdt = timezone(timedelta(hours=offset))
-        _time_str = datetime.now(tz_pdt).strftime('%I:%M %p')
+        _tz_pdt = _get_local_tz()
+        _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
 
         # Fed status
         _fed_status = 'no signal (outside window)'
         try:
-            _fed_latest_path = state.logs_dir / 'fed_scan_latest.json'
+            from agents.ruppert.env_config import get_paths as _get_paths_fed
+            _fed_latest_path = _get_paths_fed()['logs'] / 'fed_scan_latest.json'
             if _fed_latest_path.exists():
                 _fed_data = json.loads(_fed_latest_path.read_text(encoding='utf-8'))
                 _skip = _fed_data.get('skip_reason')
@@ -1114,12 +1144,13 @@ def run_cycle(mode):
     )
 
     try:
-        # Data Scientist: daily historical audit (once per day, non-fatal)
-        try:
-            from agents.ruppert.data_scientist.data_agent import run_historical_audit
-            run_historical_audit(since_date=(date.today() - timedelta(days=30)).isoformat())
-        except Exception as _ha_err:
-            log_activity(f'[DataAgent] Historical audit failed: {_ha_err}')
+        # Only run historical audit on substantive modes — skip for lightweight check/report/weather-only
+        if mode in ('full', 'smart', 'econ_prescan'):
+            try:
+                from agents.ruppert.data_scientist.data_agent import run_historical_audit
+                run_historical_audit(since_date=(date.today() - timedelta(days=30)).isoformat())
+            except Exception as _ha_err:
+                log_activity(f'[DataAgent] Historical audit failed: {_ha_err}')
 
         # Reconciliation (all modes)
         run_orphan_reconciliation(client, logs_dir)
@@ -1142,10 +1173,11 @@ def run_cycle(mode):
         elif mode == 'full':
             summary = run_full_mode(client, state)
         elif mode == 'smart':
-            # TODO (C4): 'smart' mode not yet implemented.
-            # Intended: lightweight refresh (smart money + position check only, no full scans).
-            # Not currently scheduled. Falls back to full mode to avoid silent no-ops.
-            summary = run_full_mode(client, state)
+            # 'smart' mode: smart money refresh + position check only (no new entries).
+            # Falls back to check_mode until fully implemented to avoid accidental full scan.
+            print("  [Smart] Smart-only mode not yet fully implemented — running check_mode only.")
+            log_activity("[Smart] WARNING: smart mode ran as check_mode (not full scan)")
+            summary = run_check_mode(state)
         else:
             raise ValueError(f'Unknown mode: {mode}')
 

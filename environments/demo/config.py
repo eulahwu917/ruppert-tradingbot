@@ -204,3 +204,6 @@ EXPANDED_CITIES_SKIP = [
     "KXHIGHTSATX",  # San Antonio
     "KXHIGHTATL",   # Atlanta
 ]
+
+# ── Capital Fallback ─────────────────────────────────────────────────────────
+CAPITAL_FALLBACK = 10000.0  # fallback capital when API unavailable
