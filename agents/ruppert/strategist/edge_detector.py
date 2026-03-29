@@ -78,8 +78,8 @@ def _city_has_trade_history(series: str) -> bool:
                 except Exception:
                     continue
     except Exception as e:
-        logger.warning(f"[Edge] Could not check trade history for {series}: {e}")
-        return True  # fail-open: allow trading if we can't check
+        logger.warning(f"[Edge] Could not check trade history for {series}: {e} — failing closed (blocking new city)")
+        return False  # fail-closed: block new city if we can't verify trade history
     return False
 
 
@@ -91,7 +91,9 @@ def _safe_int(val, default=0):
         return default
 
 
-# Map Kalshi series tickers to their Open-Meteo city records
+# Known Kalshi weather series — used for membership checks only.
+# Dict format kept for backwards compatibility; values are not used.
+# Future: may assign city metadata (lat/lon, bias station) as values.
 TICKER_TO_SERIES = {
     # Original cities
     "KXHIGHNY":   "KXHIGHNY",
@@ -154,7 +156,7 @@ def parse_temp_range_from_title(title: str):
     title_lower = title.lower()
 
     # Match "60-70" or "60 to 70" or "**60-70**"
-    range_match = re.search(r'(\d+)\s*[-–to]+\s*(\d+)', title_lower)
+    range_match = re.search(r'(\d+)\s*(?:[-–]|\bto\b)\s*(\d+)', title_lower)
     if range_match:
         return int(range_match.group(1)), int(range_match.group(2))
 
@@ -406,27 +408,23 @@ def analyze_market(market: dict) -> dict | None:
         logger.info(f"[Edge] {ticker}: skipping — low ensemble confidence ({confidence:.2f})")
         return None
 
+    # ── NOAA fallback confidence floor ────────────────────────────────────────
+    # NOAA single-model is explicitly lower quality. Enforce a hard minimum
+    # that cannot be loosened by config.MIN_CONFIDENCE['weather'].
+    _NOAA_MIN_CONFIDENCE = getattr(config, 'NOAA_FALLBACK_MIN_CONFIDENCE', 0.30)
+    if signal_src == "noaa_fallback" and confidence < _NOAA_MIN_CONFIDENCE:
+        logger.info(
+            f"[Edge] {ticker}: skipping — NOAA fallback confidence {confidence:.2f} "
+            f"< NOAA_FALLBACK_MIN_CONFIDENCE {_NOAA_MIN_CONFIDENCE:.2f}"
+        )
+        return None
+
     # ── Config confidence gate (MIN_CONFIDENCE from config) ──────────────────
     min_conf = getattr(config, 'MIN_CONFIDENCE', {}).get('weather', 0.50)
     if confidence < min_conf:
         logger.info(
             f"[Edge] {ticker}: skipping — confidence {confidence:.2f} < "
             f"MIN_CONFIDENCE['weather'] {min_conf:.3f}"
-        )
-        return None
-
-    # ── Model/market divergence gate ─────────────────────────────────────────
-    # If |model_prob - market_prob| > MAX_MODEL_MARKET_DIVERGENCE, the market
-    # is telling us something our model doesn't know (ghost market, unvalidated city,
-    # warm bias error). Skip rather than fight the tape.
-    # For T_lower markets, model_prob = P(high >= threshold) but market_prob = P(YES) = P(high < threshold).
-    # Use semantically equivalent probability for a fair divergence comparison.
-    _divergence_model = (1.0 - model_prob) if market_type == "T_lower" else model_prob
-    _divergence_gap = abs(_divergence_model - market_prob)
-    if _divergence_gap > config.MAX_MODEL_MARKET_DIVERGENCE:
-        logger.debug(
-            f"[Edge] {ticker}: skipping — model/market divergence "
-            f"{_divergence_gap:.0%} exceeds threshold"
         )
         return None
 
@@ -449,6 +447,20 @@ def analyze_market(market: dict) -> dict | None:
             f"[Edge] {ticker}: volume_tier={_volume_tier} (vol={_volume}) — "
             f"edge {_raw_edge:.4f} → {_adj_edge:.4f}"
         )
+
+    # ── Model/market divergence gate ─────────────────────────────────────────
+    # If |model_prob - market_prob| > MAX_MODEL_MARKET_DIVERGENCE, the market
+    # is telling us something our model doesn't know (ghost market, unvalidated city,
+    # warm bias error). Skip rather than fight the tape.
+    # NOTE: divergence check uses post-flip model_prob (T_lower already corrected above).
+    _divergence_gap = abs(model_prob - market_prob)
+    if _divergence_gap > config.MAX_MODEL_MARKET_DIVERGENCE:
+        logger.debug(
+            f"[Edge] {ticker}: skipping — model/market divergence "
+            f"{_divergence_gap:.0%} exceeds threshold"
+        )
+        return None
+
     # ── Edge calculation ──────────────────────────────────────────────────────
     edge = _adj_edge
 
@@ -466,7 +478,7 @@ def analyze_market(market: dict) -> dict | None:
     # Strong signals (|edge| > 0.30) are trusted as-is and override this prior.
     if is_t_market and abs(edge) <= 0.30:
         if side == 'no':
-            confidence = min(confidence * 1.15, 1.0)
+            confidence = min(confidence * 1.15, 1.0)  # hard cap at 1.0; intentional for max-confidence NO bets
         elif side == 'yes':
             confidence = confidence * 0.85
         logger.info(

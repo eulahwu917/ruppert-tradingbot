@@ -14,7 +14,6 @@ import sys, json
 from pathlib import Path
 from datetime import date, datetime, timezone, timedelta
 from dataclasses import dataclass, field
-from typing import Optional
 
 # Ensure env root is on path (for 'import config', scripts/, etc.)
 _ENV_ROOT = Path(__file__).parent
@@ -326,7 +325,7 @@ def run_position_check(client, state):
         for pos in open_positions:
             ticker = pos.get('ticker', '')
             source = pos.get('source', 'bot')
-            if source not in ('weather', 'bot'): continue
+            if source not in ('weather', 'bot', 'crypto', 'fed', 'geo'): continue
             if ticker in state.traded_tickers: continue
 
             # Get current market price
@@ -346,7 +345,7 @@ def run_position_check(client, state):
 
                 # Weather: check ensemble if close to expiry
                 alert_msg = None
-                if 'KXHIGH' in ticker:
+                if source in ('weather', 'bot') and 'KXHIGH' in ticker:
                     try:
                         # Derive correct args for get_full_weather_signal from the ticker
                         series_ticker = ticker.split('-')[0].upper()  # e.g. KXHIGHMIA
@@ -562,7 +561,11 @@ def run_weather_only_mode(state):
     _weather_count = 0
     try:
         from agents.ruppert.trader.main import run_weather_scan as _run_weather
-        _weather_results = _run_weather(dry_run=state.dry_run)
+        _weather_results = _run_weather(
+            dry_run=state.dry_run,
+            traded_tickers=state.traded_tickers,
+            open_position_value=state.open_position_value,
+        )
         _weather_count = len(_weather_results) if _weather_results else 0
         if _weather_count:
             print(f"  {_weather_count} weather trade(s) executed")
@@ -885,7 +888,11 @@ def run_full_mode(client, state):
     new_weather = []
     try:
         from agents.ruppert.trader.main import run_weather_scan
-        new_weather = run_weather_scan(dry_run=state.dry_run)
+        new_weather = run_weather_scan(
+            dry_run=state.dry_run,
+            traded_tickers=state.traded_tickers,
+            open_position_value=state.open_position_value,
+        )
         if new_weather:
             for _wt in new_weather:
                 _wtk = _wt.get('ticker')
@@ -1185,7 +1192,9 @@ def run_cycle(mode):
         save_state(logs_dir, state.traded_tickers, mode)
 
         # ── Data Scientist: post-scan audit (non-fatal) ─────────────────────────────
-        # Note: 'smart' mode triggers lighter synthesis (pnl_cache + positions only)
+        # Note: 'smart' mode currently runs as check_mode (position check only).
+        # TODO: implement smart money refresh + light synthesis when ready.
+        # Until then, the data agent audit still runs (line below) as a lightweight signal.
         if mode in ('full', 'smart', 'crypto_only', 'weather_only', 'econ_prescan'):
             try:
                 from agents.ruppert.data_scientist.data_agent import run_post_scan_audit

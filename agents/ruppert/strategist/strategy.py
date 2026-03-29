@@ -13,6 +13,7 @@ Signal dict contract (produced by each module):
         'hours_to_settlement': float,   # hours until market settles
         'module':              str,     # 'weather' | 'crypto'
         'vol_ratio':           float,   # optional; 1.0 = normal vol (default)
+        'open_position_value': float,   # REQUIRED: total open position value ($); fail-closed if absent
     }
 """
 
@@ -328,7 +329,8 @@ def should_enter(
     if module is not None:
         _module_key = module.upper() + '_DAILY_CAP_PCT'
         _module_cap = getattr(config, _module_key, None)
-        if _module_cap is not None:
+        _module_cap_missing = _module_cap is None
+        if not _module_cap_missing:
             # NOTE: Setting MODULE_DAILY_CAP_PCT = 0.0 will ALWAYS block the module (0.0 >= 0.0 is True).
             # To disable a module, set it to a very high value (e.g. 99.0) or remove the config key entirely.
             # cap=0 does NOT mean "unlimited" — it means "never trade".
@@ -388,7 +390,10 @@ def should_enter(
                 'market_impact_reason': market_impact_reason}
 
     # --- Minimum viable trade ---
-    min_viable = round(max(5.0, capital * 0.01), 2)
+    # min_viable: hard floor of $5, or 10% of the per-trade cap — whichever is larger.
+    # Decoupled from capital * MAX_POSITION_PCT to avoid shrinking the viable window at scale.
+    _position_cap = capital * getattr(_cfg, 'MAX_POSITION_PCT', 0.01)
+    min_viable = round(max(5.0, _position_cap * 0.10), 2)
     if size < min_viable:
         return {'enter': False, 'size': 0.0,
                 'reason': f'below_min_viable (${size:.2f} < ${min_viable:.2f})',
@@ -403,10 +408,8 @@ def should_enter(
         'market_impact_reason': market_impact_reason,
     }
     # Propagate warning flag if module had no cap config (so caller can notify)
-    if module is not None:
-        _module_key = module.upper() + '_DAILY_CAP_PCT'
-        if getattr(config, _module_key, None) is None:
-            _result['warning'] = f'no_daily_cap_config_for_{module} ({_module_key} missing from config)'
+    if module is not None and _module_cap_missing:
+        _result['warning'] = f'no_daily_cap_config_for_{module} ({_module_key} missing from config)'
     return _result
 
 
@@ -567,7 +570,7 @@ def get_strategy_summary() -> dict:
         'kelly_fraction_tier_40_50':    0.07,
         'kelly_fraction_tier_25_40':    0.05,
         'max_position_pct':         getattr(_cfg, 'MAX_POSITION_PCT', 0.01),
-        'pct_capital_cap':          getattr(_cfg, 'MAX_POSITION_PCT', 0.01),
+        'max_add_allocation':       getattr(_cfg, 'MAX_ADD_ALLOCATION', 50.0),
         'daily_cap_ratio':          DAILY_CAP_RATIO,
         'min_edge_weather':         MIN_EDGE['weather'],
         'min_edge_crypto':          MIN_EDGE['crypto'],
@@ -696,6 +699,7 @@ if __name__ == '__main__':
     good_signal = {
         'edge': 0.20, 'win_prob': 0.70, 'confidence': 0.80,
         'hours_to_settlement': 6.0, 'module': 'weather', 'vol_ratio': 1.0,
+        'open_position_value': 0.0,
     }
     e1 = should_enter(good_signal, CAPITAL, deployed_today=0.0)
     print(f"  Good weather signal:  {e1}")
@@ -771,6 +775,14 @@ if __name__ == '__main__':
 
     x6 = should_exit(65, 60, cur_sig, entry_sig2, 5.0, 'weather')
     print(f"  No exit trigger (hold): {x6}")
+
+    # ------------------------------------------------------------------
+    # 7. check_loss_circuit_breaker
+    # ------------------------------------------------------------------
+    print("\n[7] check_loss_circuit_breaker")
+    cb = check_loss_circuit_breaker(CAPITAL)
+    print(f"  Circuit breaker status: tripped={cb['tripped']}, reason={cb['reason']}, loss_today=${cb['loss_today']:.2f}")
+    print("  (Expected: tripped=False if no trade log exists for today, or within threshold)")
 
     # ------------------------------------------------------------------
     # 6. get_strategy_summary

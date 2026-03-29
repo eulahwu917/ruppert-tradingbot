@@ -37,6 +37,11 @@ from agents.ruppert.strategist.edge_detector import find_opportunities
 from agents.ruppert.trader.trader import Trader
 from agents.ruppert.data_scientist.logger import log_activity, log_trade, get_daily_summary, get_daily_exposure
 from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
+# economics_scanner and geopolitical_scanner live in environments/demo/
+# Add env root to path if not already present (mirrors ruppert_cycle.py bootstrap)
+_DEMO_ENV_ROOT = _WORKSPACE_ROOT / 'environments' / 'demo'
+if str(_DEMO_ENV_ROOT) not in sys.path:
+    sys.path.insert(0, str(_DEMO_ENV_ROOT))
 from economics_scanner import find_econ_opportunities
 from geopolitical_scanner import run_geo_scan, format_geo_brief
 import config
@@ -108,18 +113,16 @@ def _opp_to_signal(opp: dict, module: str = 'weather') -> dict:
 
 def run_exit_scan(dry_run=True):
     """
-    DEPRECATED: Exits are owned by ws_feed.py (position_tracker) + post_trade_monitor.py.
-    This function is a no-op stub kept to avoid ImportError from any external caller.
-    Do not call this function. It will be removed in a future cleanup.
+    ARCHIVED: This function has been moved to archive/run_exit_scan_archived.py.
+    Exits are owned exclusively by ws_feed.py (position_tracker) + post_trade_monitor.py.
+    Do not call this function. It will raise in all modes.
+    Archived: 2026-03-29 per CEO spec CEO-L3.
     """
-    import warnings
-    warnings.warn(
-        "run_exit_scan() is deprecated and is a no-op. Exits are handled by WS feed / position_tracker.",
-        DeprecationWarning, stacklevel=2,
+    raise RuntimeError(
+        "run_exit_scan() is archived. "
+        "See archive/run_exit_scan_archived.py for historical reference. "
+        "Exits are handled by ws_feed.py / post_trade_monitor.py."
     )
-    log_activity("[ExitScan] DEPRECATED run_exit_scan() called — no-op. Check caller.")
-    if not dry_run:
-        raise RuntimeError("run_exit_scan() is deprecated and must not run in live mode.")
 
 
 def test_connection():
@@ -140,7 +143,7 @@ def test_connection():
 
 # ─── WEATHER MODULE ───────────────────────────────────────────────────────────
 
-def run_weather_scan(dry_run=True):
+def run_weather_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
     """Run weather market scan and execute trades."""
     log_activity("[Weather] Starting scan...")
     try:
@@ -239,10 +242,13 @@ def run_weather_scan(dry_run=True):
         # ── Strategy gate: filter opportunities through should_enter() ────────
         # Compute weather daily cap and open exposure dynamically
         _weather_daily_cap = total_capital * getattr(config, 'WEATHER_DAILY_CAP_PCT', 0.07)
-        try:
-            _open_exposure = max(0.0, total_capital - get_buying_power())
-        except Exception:
-            _open_exposure = 0.0
+        if open_position_value > 0.0:
+            _open_exposure = open_position_value
+        else:
+            try:
+                _open_exposure = max(0.0, total_capital - get_buying_power())
+            except Exception:
+                _open_exposure = 0.0
 
         approved_opps = []
         _weather_deployed_this_cycle = 0.0
@@ -266,7 +272,7 @@ def run_weather_scan(dry_run=True):
                 signal, total_capital, deployed_today,
                 module='weather',
                 module_deployed_pct=_weather_deployed_this_cycle / total_capital if total_capital > 0 else 0.0,
-                traded_tickers=None,
+                traded_tickers=traded_tickers,
             )
             if decision.get('warning'):
                 log_activity(f"  [Strategy] WARNING: {decision['warning']}")

@@ -196,10 +196,17 @@ def _summarize_trades_by_module(trades: list[dict]) -> dict:
     return by_module
 
 
-def _get_open_positions_summary(today_trades: list[dict]) -> dict:
-    """Compute open positions from today's trade activity."""
+def _get_open_positions_summary(today_trades: list[dict]) -> dict:  # noqa: ARG001
+    """Compute open positions from last 7 days of trade activity.
+
+    today_trades parameter is retained for signature compatibility but ignored;
+    the function now reads the full 7-day lookback to catch multi-day positions.
+    """
+    all_trades = _load_all_trades_for_pnl()  # 7-day lookback
+    # Sort by timestamp ascending so later records override earlier ones
+    all_trades_sorted = sorted(all_trades, key=lambda t: t.get('timestamp', ''))
     open_pos = {}
-    for t in today_trades:
+    for t in all_trades_sorted:
         action = t.get('action', 'buy')
         ticker = t.get('ticker', '')
         size = float(t.get('size_dollars', 0) or 0)
@@ -301,7 +308,9 @@ def build_brief() -> str:
     Returns markdown string.
     """
     today_str = date.today().isoformat()
-    now_str = datetime.now().strftime('%H:%M PDT')
+    import time as _time
+    _tz_abbr = 'PDT' if _time.localtime().tm_isdst > 0 else 'PST'
+    now_str = datetime.now().strftime(f'%H:%M {_tz_abbr}')
 
     # Load all data
     events = _load_today_events()
@@ -507,7 +516,9 @@ def _build_telegram_summary() -> str:
     Telegram doesn't render MD tables, so we use bullets.
     """
     today_str = date.today().isoformat()
-    now_str = datetime.now().strftime('%H:%M PDT')
+    import time as _time
+    _tz_abbr = 'PDT' if _time.localtime().tm_isdst > 0 else 'PST'
+    now_str = datetime.now().strftime(f'%H:%M {_tz_abbr}')
 
     events = _load_today_events()
     today_trades = _load_today_trades()

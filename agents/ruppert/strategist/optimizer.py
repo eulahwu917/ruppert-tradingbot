@@ -34,6 +34,7 @@ _capital = _get_capital()
 DAILY_CAP = _capital * (
     getattr(_config, 'WEATHER_DAILY_CAP_PCT', 0.07) +
     getattr(_config, 'CRYPTO_DAILY_CAP_PCT', 0.07) +
+    getattr(_config, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04) +
     getattr(_config, 'GEO_DAILY_CAP_PCT', 0.04) +
     getattr(_config, 'ECON_DAILY_CAP_PCT', 0.04)
 )
@@ -267,10 +268,18 @@ def analyze_exit_timing(trades: list):
 
 
 def analyze_brier_score(trades: list):
-    """Returns {brier_score, count} for trades with win_prob and outcome."""
+    """Returns {brier_score, count} for trades with win_prob and outcome.
+
+    IMPORTANT: This function requires ENRICHED trades as input (output of enrich_trades()).
+    Calling it on raw trade log records will silently exclude all pre-2026-03-26 records
+    that only have 'noaa_prob' (not 'win_prob') as a direct field.
+    """
     squared_errors = []
     for t in trades:
         wp = t.get("win_prob")
+        if wp is None:
+            # Fallback: accept noaa_prob for records that weren't enriched
+            wp = t.get("noaa_prob")
         outcome = t.get("outcome")
         if wp is None or outcome is None:
             continue
@@ -697,10 +706,15 @@ def main():
     print()
 
     if eligible_domains:
-        print("Running experiments for eligible domains...")
         experiment_results = run_domain_experiments(eligible_domains)
-        for domain, result in experiment_results.items():
-            print(f"  {domain}: {result}")
+        all_placeholder = all(r.get("experiments_run", 0) == 0 for r in experiment_results.values())
+        if all_placeholder:
+            print("[Placeholder] Domain experiments not yet implemented — skipping.")
+            print(f"  Eligible domains: {eligible_domains} (need implementation in run_domain_experiments)")
+        else:
+            print("Running experiments for eligible domains...")
+            for domain, result in experiment_results.items():
+                print(f"  {domain}: {result}")
     else:
         print("No domains eligible for experiments yet (need 30 scored trades each).")
 
