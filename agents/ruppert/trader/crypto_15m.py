@@ -900,6 +900,8 @@ def evaluate_crypto_15m_entry(
     from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_exp
     _deployed_today = _get_exp()
     _module_deployed_pct = _deployed_today / capital if capital > 0 else 0.0
+    from agents.ruppert.data_scientist.capital import get_buying_power as _get_bp
+    _bp = _get_bp()
     _signal_dict = {
         'ticker': ticker,
         'side': direction,
@@ -910,6 +912,7 @@ def evaluate_crypto_15m_entry(
         'yes_ask': yes_ask,
         'yes_bid': yes_bid,
         'hours_to_settlement': max(0, (900 - elapsed_secs) / 3600),
+        'open_position_value': max(0.0, capital - _bp),
     }
     _se_decision = should_enter(
         _signal_dict, capital, _deployed_today,

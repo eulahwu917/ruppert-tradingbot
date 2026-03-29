@@ -560,7 +560,7 @@ def get_strategy_summary() -> dict:
 # 7. Loss Circuit Breaker
 # ---------------------------------------------------------------------------
 
-def check_loss_circuit_breaker(logs_dir: str, capital: float) -> dict:
+def check_loss_circuit_breaker(capital: float) -> dict:
     """
     Check if today's realized losses exceed the circuit breaker threshold.
     Returns: {'tripped': bool, 'reason': str, 'loss_today': float}

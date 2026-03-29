@@ -175,7 +175,7 @@ def check_circuit_breaker(logs_dir, capital):
     Prints status to stdout.
     """
     try:
-        _cb = check_loss_circuit_breaker(str(logs_dir), capital)
+        _cb = check_loss_circuit_breaker(capital)
         if _cb['tripped']:
             print(f"  [CIRCUIT BREAKER] {_cb['reason']}")
             log_event('CIRCUIT_BREAKER', {

@@ -129,6 +129,16 @@ def _build_opportunity(market: dict, signal: dict, market_prob: float) -> dict:
         bet_price = fair_no_price  # use theoretical price, not ask
         implied_return = round((100 - fair_no_price) / fair_no_price, 3) if fair_no_price > 0 else None
 
+    import datetime as _dt
+    _close_str = market.get('close_time', '')
+    _hours_to_settlement = 48.0
+    if _close_str:
+        try:
+            _close_dt = _dt.datetime.fromisoformat(_close_str.replace('Z', '+00:00'))
+            _hours_to_settlement = max(0.0, (_close_dt - _dt.datetime.now(_dt.timezone.utc)).total_seconds() / 3600)
+        except Exception:
+            pass
+
     return {
         'ticker': market.get('ticker'),
         'title': market.get('title'),
@@ -150,6 +160,7 @@ def _build_opportunity(market: dict, signal: dict, market_prob: float) -> dict:
         'type': 'economics',
         'auto_trade': config.ECON_AUTO_TRADE,
         'flagged_at': datetime.now().isoformat(),
+        'hours_to_settlement': round(_hours_to_settlement, 2),
     }
 
 
