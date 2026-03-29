@@ -1,6 +1,0 @@
-{
-  "note": "This file marks this process as LIVE. Do not edit unless you know what you are doing.",
-  "environment": "live",
-  "dashboard_port": 8766,
-  "logs_dir": "logs-live"
-}

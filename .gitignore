@@ -26,3 +26,10 @@ __pycache__/
 
 # Dashboard cache
 dashboard/__pycache__/
+
+# Local-only folders
+.openclaw/
+archive/
+memory/
+skills/
+.clawhub/
