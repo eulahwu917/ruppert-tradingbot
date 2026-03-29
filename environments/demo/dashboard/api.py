@@ -156,7 +156,7 @@ def read_crypto_15m_summary() -> dict:
                     'direction': rec.get('direction', rec.get('side', '')),
                     'ts': ts_val,
                 }
-        elif decision == 'SKIP_LATE' or rec.get('reason') == 'LATE_WINDOW':
+        elif decision == 'SKIP_LATE' or rec.get('skip_reason') == 'LATE_WINDOW':
             today_skips_late += 1
         else:
             # Any non-ENTER, non-SKIP_LATE decision is "other skip"

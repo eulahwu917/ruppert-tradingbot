@@ -678,7 +678,7 @@ def _build_crypto_15m_block() -> str:
                 ts_val = rec.get('ts', '')
                 if last_entry_rec is None or ts_val > last_entry_rec.get('ts', ''):
                     last_entry_rec = rec
-            elif decision == 'SKIP_LATE' or rec.get('reason') == 'LATE_WINDOW':
+            elif decision == 'SKIP_LATE' or rec.get('skip_reason') == 'LATE_WINDOW':
                 late_skips += 1
             elif decision and decision != 'ENTER':
                 other_skips += 1

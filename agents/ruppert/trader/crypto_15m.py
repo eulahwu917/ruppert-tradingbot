@@ -1016,6 +1016,6 @@ def evaluate_crypto_15m_entry(
     # ── Log decision ──
     _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
                    signals, kalshi_info,
-                   direction.upper(), None,
+                   'ENTER', None,
                    edge, entry_price, position_usd)
 
