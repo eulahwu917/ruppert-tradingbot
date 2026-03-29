@@ -134,6 +134,7 @@ def _build_opportunity(market: dict, signal: dict, market_prob: float) -> dict:
         'title': market.get('title'),
         'series': market.get('series_ticker'),
         'yes_ask': yes_ask,
+        'yes_bid': market.get('yes_bid', market.get('yes_ask', 50)),
         'no_ask': no_ask,
         'volume': market.get('volume', 0),
         'market_prob': round(market_prob, 3),

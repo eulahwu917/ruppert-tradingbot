@@ -168,7 +168,7 @@ async def _rest_refresh_stale() -> None:
 
     for ticker in tracked:
         try:
-            _, is_stale = market_cache.get_with_staleness(ticker)
+            _, _, is_stale = market_cache.get_with_staleness(ticker)
             if not is_stale:
                 continue
             # Lazy import — only instantiate when a stale ticker is found

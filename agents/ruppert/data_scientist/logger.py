@@ -208,8 +208,7 @@ def get_daily_exposure(module: str = None) -> float:
                         if module is not None:
                             entry_module = entry.get('module', '')
                             if not (entry_module == module or
-                                    entry_module.startswith(module + '_') or
-                                    entry_module.startswith(module)):
+                                    entry_module.startswith(module + '_')):
                                 continue
                         entries[key] = entry.get('size_dollars', 0)
                 except:

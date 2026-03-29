@@ -273,7 +273,7 @@ def check_daily_cap_violations(trades_today: list[dict]) -> list[dict]:
         'weather': capital * getattr(cfg, 'WEATHER_DAILY_CAP_PCT', 0.07),
         'crypto': capital * getattr(cfg, 'CRYPTO_DAILY_CAP_PCT', 0.07),
         'econ': capital * getattr(cfg, 'ECON_DAILY_CAP_PCT', 0.04),
-        'fed': capital * getattr(cfg, 'GEO_DAILY_CAP_PCT', 0.04),
+        'fed': capital * getattr(cfg, 'FED_DAILY_CAP_PCT', 0.03),
         'crypto_15m': capital * getattr(cfg, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04),
         'crypto_long': capital * getattr(cfg, 'LONG_HORIZON_DAILY_CAP_PCT', 0.10),
     }

@@ -472,7 +472,7 @@ def run_polling_scan(client: KalshiClient, run_settlement_check: bool = True):
     # Settlement check
     if run_settlement_check:
         try:
-            check_settlements(client, LOGS_DIR)
+            check_settlements(client)
         except Exception as e:
             print(f"  [Settlement Checker] ERROR: {e}")
     

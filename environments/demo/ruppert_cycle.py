@@ -285,7 +285,8 @@ def run_position_check(client, state):
         from agents.ruppert.data_analyst.openmeteo_client import get_full_weather_signal
         from agents.ruppert.strategist.edge_detector import parse_date_from_ticker, parse_threshold_from_ticker
 
-        trade_log = state.logs_dir / f"trades_{date.today().isoformat()}.jsonl"
+        from agents.ruppert.env_config import get_paths as _get_paths_pc
+        trade_log = _get_paths_pc()['trades'] / f"trades_{date.today().isoformat()}.jsonl"
         open_positions = []
         if trade_log.exists():
             for line in trade_log.read_text(encoding='utf-8').splitlines():
@@ -712,8 +713,10 @@ def run_report_mode(state):
 
     # Load all trades: today + yesterday
     all_records: list = []
+    from agents.ruppert.env_config import get_paths as _get_paths_rpt
+    _rpt_trades_dir = _get_paths_rpt()['trades']
     for day_str in [yesterday_str, today_str]:
-        log_path = state.logs_dir / f'trades_{day_str}.jsonl'
+        log_path = _rpt_trades_dir / f'trades_{day_str}.jsonl'
         if log_path.exists():
             for line in log_path.read_text(encoding='utf-8').splitlines():
                 line = line.strip()
@@ -921,11 +924,11 @@ def run_full_mode(client, state):
     # STEP 4c: GEOPOLITICAL SCAN
     print("\n[4c] Scanning for geopolitical opportunities...")
     new_geo = []
+    # Always update exposure after Fed trades
+    state.open_position_value += sum(t.get('size_dollars', 0) for t in new_fed)
     if getattr(config, 'GEO_AUTO_TRADE', False):
         try:
             from agents.ruppert.trader.main import run_geo_trades as _run_geo_trades
-            # Refresh open exposure after Fed trades
-            state.open_position_value += sum(t.get('size_dollars', 0) for t in new_fed)
             new_geo = _run_geo_trades(
                 dry_run=state.dry_run,
                 traded_tickers=state.traded_tickers,

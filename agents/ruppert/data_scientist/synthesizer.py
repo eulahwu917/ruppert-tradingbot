@@ -191,11 +191,10 @@ def synthesize_state(events: list = None) -> dict | None:
     return state
 
 
-def synthesize_optimizer_review():
+def synthesize_optimizer_review(event_date=None):
     """Synthesize OPTIMIZER_REVIEW_NEEDED events → logs/truth/pending_optimizer_review.json"""
-    import json
-    from datetime import date
-    today = date.today().isoformat()
+    target_date = event_date if event_date is not None else date.today()
+    today = target_date.isoformat()
     events_file = RAW_DIR / f'events_{today}.jsonl'
     if not events_file.exists():
         return
@@ -220,8 +219,7 @@ def synthesize_optimizer_review():
         'losses': latest.get('losses', []),
         'total_loss': latest.get('total_loss', 0.0),
     }
-    out = TRUTH_DIR / 'pending_optimizer_review.json'
-    out.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+    _write_truth('pending_optimizer_review.json', payload)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
@@ -241,7 +239,7 @@ def run_synthesis(event_date: date = None) -> dict:
     pnl = synthesize_pnl_cache(events)
     new_alerts = synthesize_alerts(events)
     state = synthesize_state(events)
-    synthesize_optimizer_review()
+    synthesize_optimizer_review(event_date)
 
     return {
         'events_read': len(events),

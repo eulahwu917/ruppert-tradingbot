@@ -49,6 +49,7 @@ from agents.ruppert.env_config import get_paths as _get_paths
 _env_paths = _get_paths()
 _STRATEGY_EXITS_LOG = str(_env_paths['logs'] / 'strategy_exits.jsonl')
 _LOGS_DIR = str(_env_paths['logs'])
+_TRADES_DIR = str(_env_paths['trades'])
 
 
 def _load_trade_record(ticker: str) -> dict | None:
@@ -58,7 +59,7 @@ def _load_trade_record(ticker: str) -> dict | None:
     Records are returned sorted by timestamp descending (most recent first).
     """
     import glob
-    pattern = os.path.join(_LOGS_DIR, 'trades_*.jsonl')
+    pattern = os.path.join(_TRADES_DIR, 'trades_*.jsonl')
     files = sorted(glob.glob(pattern), reverse=True)  # newest file first
 
     best = None
@@ -960,7 +961,7 @@ def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
                 log_activity(f"  [DailyCap] STOP: geo budget ${_geo_daily_cap:.0f} exhausted")
                 break
 
-            side = opp.get('side', 'yes')
+            side = opp.get('side', opp.get('direction', 'yes')).lower()
             yes_ask = int(opp.get('yes_ask', 50))
             yes_bid = int(opp.get('yes_bid', yes_ask))
             bet_price = yes_ask if side == 'yes' else 100 - yes_ask
@@ -971,7 +972,7 @@ def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
 
             signal = {
                 'edge':                opp.get('edge', 0.0),
-                'win_prob':            opp.get('win_prob', opp.get('model_prob', 0.5)),
+                'win_prob':            opp.get('win_prob', opp.get('estimated_prob', 0.5)),
                 'confidence':          min(opp.get('confidence', 0.0),
                                           getattr(config, 'GEO_MAX_CONFIDENCE', 0.85)),
                 'hours_to_settlement': _geo_hours,
@@ -1034,7 +1035,7 @@ def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
                 log_prediction(
                     domain='geo',
                     ticker=ticker,
-                    predicted_prob=opp.get('win_prob', opp.get('model_prob', 0.5)),
+                    predicted_prob=opp.get('win_prob', opp.get('estimated_prob', 0.5)),
                     market_price=yes_ask / 100,
                     edge=opp.get('edge', 0.0),
                     side=side,

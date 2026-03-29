@@ -43,7 +43,7 @@ def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
-def check_settlements(client, logs_dir: Path):
+def check_settlements(client):
     """Check for settled DEMO positions and compute simulated P&L.
 
     Runs each monitor cycle before position checks. Loads open buys from
@@ -427,7 +427,7 @@ def run_monitor():
 
     # Run settlement checker first — resolves DEMO positions that have expired
     try:
-        check_settlements(client, TRADES_DIR)
+        check_settlements(client)
     except Exception as e:
         print(f"  [Settlement Checker] ERROR (non-fatal): {e}")
 

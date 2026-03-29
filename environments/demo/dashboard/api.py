@@ -687,8 +687,6 @@ def get_crypto_scan():
     """Crypto markets scan — BTC/ETH/XRP price + smart money signal + opportunities.
     Prices served from cache (crypto_prices.json). Scanner runs with timeout guard.
     """
-    import requests as req
-
     result = {"btc": None, "eth": None, "xrp": None, "smart_money": None, "opportunities": [], "signal": "neutral"}
 
     # ── Live prices from cache (written by background scan) ──────────────────
@@ -737,37 +735,8 @@ def get_crypto_scan():
 
     # Always supplement with raw Kalshi markets (fast, no edge calc)
     if len(result["opportunities"]) < 3:
-        BASE = "https://api.elections.kalshi.com/trade-api/v2/markets"
-        btc_price = result["btc"]["price"] if result["btc"] else None
-        eth_price = result["eth"]["price"] if result["eth"] else None
-        xrp_price = result["xrp"]["price"] if result["xrp"] else None
-
-        PRICE_MAP = {"KXBTC": btc_price, "KXETH": eth_price, "KXXRP": xrp_price}
-        for series in ["KXBTC", "KXETH", "KXXRP"]:
-            try:
-                r = req.get(BASE, params={"series_ticker": series, "status": "open", "limit": 8}, timeout=5)
-                if r.status_code == 200:
-                    markets = r.json().get("markets", [])
-                    # Sort by volume desc, take top 3
-                    markets.sort(key=lambda m: m.get("volume", 0), reverse=True)
-                    for m in markets[:3]:
-                        yes_ask = m.get("yes_ask") or 50
-                        no_ask  = m.get("no_ask") or 50
-                        result["opportunities"].append({
-                            "ticker":      m.get("ticker"),
-                            "title":       m.get("title"),
-                            "market_prob": yes_ask / 100,
-                            "model_prob":  None,
-                            "edge":        None,
-                            "direction":   "--",
-                            "yes_price":   yes_ask,
-                            "no_price":    no_ask,
-                            "volume":      m.get("volume", 0),
-                            "spot_price":  PRICE_MAP.get(series),
-                            "note":        "Run bot scan for edge analysis",
-                        })
-            except Exception:
-                pass
+        result["is_stale"] = True
+        result["note"] = "Crypto scan cache stale or empty. Run ruppert_cycle.py to refresh."
 
     return result
 

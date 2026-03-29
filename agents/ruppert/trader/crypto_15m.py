@@ -1002,7 +1002,11 @@ def evaluate_crypto_15m_entry(
             fill_contracts = int(order_result.get('contracts', order_result.get('count', contracts)) or contracts)
         fill_price_pt = fill_price if fill_price else entry_price
         fill_contracts_pt = fill_contracts if fill_contracts else contracts
-        position_tracker.add_position(ticker, fill_contracts_pt, direction, fill_price_pt)
+        position_tracker.add_position(
+            ticker, fill_contracts_pt, direction, fill_price_pt,
+            module='crypto_15m',
+            title=f'{asset} 15m direction',
+        )
     except Exception as _pt_err:
         logger.warning(f'[15m] position_tracker.add_position failed: {_pt_err}')
 
