@@ -30,6 +30,7 @@ dashboard/__pycache__/
 # Local-only folders
 .openclaw/
 archive/
+!agents/ruppert/trader/archive/
 memory/
 skills/
 .clawhub/
