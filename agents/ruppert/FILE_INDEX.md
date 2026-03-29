@@ -14,10 +14,16 @@ _Maintained by: CEO. Update during Phase 5 housekeeping after every audit loop._
 - Convention: `{AGENT}-SPECS-{BATCH}.md` or `{topic}-spec.md`
 - Audit-cycle specs (temp): `memory/agents/specs-{agent}-YYYY-MM-DD.md` (archived after Dev→QA completes)
 
+## Audit Log (permanent record)
+- CHANGELOG: `memory/audit-log/CHANGELOG.md` — compact index, read before every audit
+- Domain detail files: `memory/audit-log/YYYY-MM-DD-{domain}.md` — full finding detail per domain per loop
+- Archive: `memory/audit-log/archive/` — Fixed+QA-passed entries older than 60 days
+
 ## Agent Memory
 - Long-term: `agents/ruppert/{agent}/MEMORY.md`
 - Daily session logs: `memory/YYYY-MM-DD.md` (Ruppert main session)
-- Audit findings (temp): `memory/agents/audit-{agent}-YYYY-MM-DD.md`
+- Audit findings (temp): `memory/agents/audit-{agent}-YYYY-MM-DD.md` — **archived to `memory/agents/archive/` after Phase 6**
+- Audit specs (temp): `memory/agents/specs-{agent}-YYYY-MM-DD.md` — **archived to `memory/agents/archive/` after Phase 6**
 - Shared team context: superseded by `PIPELINE.md` (do not create new team_context.md)
 
 ## Research Reports
