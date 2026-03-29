@@ -198,10 +198,12 @@ def check_settlements():
 
         # Build settle record matching spec schema
         original_date = pos.get('date', date.today().isoformat())
+        today_date = date.today().isoformat()
         settle_record = {
             "trade_id": str(uuid.uuid4()),
             "timestamp": datetime.now(_PDT).isoformat(),
-            "date": original_date,
+            "date": today_date,
+            "entry_date": original_date,
             "ticker": ticker,
             "title": pos.get("title", ""),
             "side": side,
@@ -222,8 +224,8 @@ def check_settlements():
             "order_result": {"dry_run": not _is_live_enabled(), "status": "settled"},
         }
 
-        # Write to original trade date's log file
-        log_path = TRADES_DIR / f'trades_{original_date}.jsonl'
+        # Write to today's log file (not entry date's) so get_daily_exposure() can find it
+        log_path = TRADES_DIR / f'trades_{today_date}.jsonl'
         try:
             with open(log_path, 'a', encoding='utf-8') as f:
                 f.write(json.dumps(settle_record) + '\n')

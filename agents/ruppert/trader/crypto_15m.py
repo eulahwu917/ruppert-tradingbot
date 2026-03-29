@@ -888,7 +888,7 @@ def evaluate_crypto_15m_entry(
     # ── Daily cap check ──
     capital = get_capital()
     daily_cap = capital * getattr(config, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04)
-    current_exposure = get_daily_exposure()
+    current_exposure = get_daily_exposure('crypto_15m')
 
     if current_exposure >= daily_cap:
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
