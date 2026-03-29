@@ -153,6 +153,37 @@ async def handle_message(msg: dict):
                     logger.warning('[WS Feed] Crypto eval error: %s', e)
 
 
+# ─────────────────────────────── REST Stale Heal ────────────────────────────
+
+async def _rest_refresh_stale() -> None:
+    """Refresh stale tracked-ticker cache entries via Kalshi REST.
+    Called once per 5-minute heartbeat cycle from inside run_ws_feed().
+    Only refreshes tickers actively tracked by position_tracker.
+    """
+    try:
+        tracked = position_tracker.get_tracked()
+    except Exception as e:
+        logger.warning('[WS Feed] _rest_refresh_stale: could not get tracked: %s', e)
+        return
+
+    for ticker in tracked:
+        try:
+            _, is_stale = market_cache.get_with_staleness(ticker)
+            if not is_stale:
+                continue
+            # Lazy import — only instantiate when a stale ticker is found
+            from agents.ruppert.data_analyst.kalshi_client import KalshiClient
+            kalshi_client = KalshiClient()
+            result = kalshi_client.get_market(ticker)
+            if result and result.get('yes_bid') is not None and result.get('yes_ask') is not None:
+                bid_d = result['yes_bid'] / 100
+                ask_d = result['yes_ask'] / 100
+                market_cache.update(ticker, bid_d, ask_d, source='rest_heal')
+                logger.debug('[WS Feed] REST heal: %s', ticker)
+        except Exception as e:
+            logger.warning('[WS Feed] _rest_refresh_stale error for %s: %s', ticker, e)
+
+
 # ─────────────────────────────── Main WS Loop ────────────────────────────────
 
 async def run_ws_feed():
@@ -198,6 +229,7 @@ async def run_ws_feed():
                 }))
 
                 last_purge = time.time()
+                last_persist = time.time()
                 msg_count = 0
 
                 async for raw in ws:
@@ -209,10 +241,17 @@ async def run_ws_feed():
                     if msg_count % 100 == 0:
                         await asyncio.sleep(0)
 
-                    # Periodic purge every 5 min
                     now = time.time()
+
+                    # Periodic persist every 60s
+                    if now - last_persist >= 60:
+                        market_cache.persist()
+                        last_persist = now
+
+                    # Periodic purge every 5 min
                     if now - last_purge > 300:
                         market_cache.purge_stale()
+                        await _rest_refresh_stale()
                         cache_size = len(market_cache.snapshot())
                         tracked_count = len(position_tracker.get_tracked())
                         print(
