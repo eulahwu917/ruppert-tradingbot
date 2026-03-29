@@ -53,6 +53,8 @@ from agents.ruppert.env_config import get_paths as _get_paths
 LOGS = _get_paths()['logs']
 LOGS.mkdir(exist_ok=True)
 LOGS_DIR = LOGS
+TRADES_DIR = _get_paths()['trades']
+TRADES_DIR.mkdir(parents=True, exist_ok=True)
 
 import config
 from scripts.event_logger import log_event
@@ -99,8 +101,8 @@ def load_open_positions():
     today = date.today().isoformat()
 
     logs_to_check = [
-        LOGS / f"trades_{yesterday}.jsonl",
-        LOGS / f"trades_{today}.jsonl",
+        TRADES_DIR / f"trades_{yesterday}.jsonl",
+        TRADES_DIR / f"trades_{today}.jsonl",
     ]
 
     entries_by_key = {}
@@ -132,7 +134,7 @@ def load_open_positions():
 def load_traded_tickers() -> set:
     """Load set of already-traded tickers for dedup."""
     today = date.today().isoformat()
-    trade_log = LOGS / f"trades_{today}.jsonl"
+    trade_log = TRADES_DIR / f"trades_{today}.jsonl"
     tickers = set()
     
     if trade_log.exists():
@@ -193,7 +195,7 @@ def _settle_single_ticker(ticker: str, result: str, pos: Optional[dict] = None):
             pnl = -(entry_price * contracts / 100)
     
     # Write settle record
-    log_path = LOGS_DIR / f'trades_{date.today().isoformat()}.jsonl'
+    log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
     settle_record = {
         "trade_id": str(uuid.uuid4()),
         "timestamp": datetime.now().isoformat(),

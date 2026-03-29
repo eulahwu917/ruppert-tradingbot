@@ -28,7 +28,6 @@ def _pdt_today() -> date:
 _env_paths = _get_paths()
 LOG_DIR = str(_env_paths['logs'])
 TRADES_DIR = str(_env_paths['trades'])  # P0-1 fix: trade files go to logs/trades/
-LIVE_LOG_DIR = str(_env_paths['logs'])  # Phase 6: single logs dir per environment
 os.makedirs(LOG_DIR, exist_ok=True)
 os.makedirs(TRADES_DIR, exist_ok=True)
 
@@ -178,7 +177,7 @@ def log_activity(message):
         f.write(entry + '\n')
 
 
-def get_daily_exposure():
+def get_daily_exposure(module: str = None) -> float:
     """Calculate total $ exposure from today's open positions.
 
     Also reads yesterday's log to catch multi-day positions that were entered
@@ -206,6 +205,12 @@ def get_daily_exposure():
                     if action in ('exit', 'settle'):
                         exit_keys.add(key)
                     else:
+                        if module is not None:
+                            entry_module = entry.get('module', '')
+                            if not (entry_module == module or
+                                    entry_module.startswith(module + '_') or
+                                    entry_module.startswith(module)):
+                                continue
                         entries[key] = entry.get('size_dollars', 0)
                 except:
                     pass

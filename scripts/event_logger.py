@@ -7,7 +7,12 @@ import json
 from datetime import datetime, date
 from pathlib import Path
 
-LOGS_DIR = Path(__file__).parent.parent / 'logs' / 'raw'
+import sys as _sys
+_WORKSPACE_ROOT = Path(__file__).parent.parent
+if str(_WORKSPACE_ROOT) not in _sys.path:
+    _sys.path.insert(0, str(_WORKSPACE_ROOT))
+from agents.ruppert.env_config import get_paths as _get_event_paths
+LOGS_DIR = _get_event_paths()['logs'] / 'raw'
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 
 

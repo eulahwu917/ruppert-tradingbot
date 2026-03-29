@@ -29,6 +29,8 @@ from agents.ruppert.env_config import get_paths as _get_paths
 LOGS = _get_paths()['logs']
 LOGS.mkdir(exist_ok=True)
 LOGS_DIR = LOGS  # alias used by settlement checker
+TRADES_DIR = _get_paths()['trades']
+TRADES_DIR.mkdir(parents=True, exist_ok=True)
 
 import config
 from scripts.event_logger import log_event
@@ -55,8 +57,8 @@ def check_settlements(client, logs_dir: Path):
     yesterday = today - timedelta(days=1)
 
     logs_to_check = [
-        logs_dir / f"trades_{yesterday.isoformat()}.jsonl",
-        logs_dir / f"trades_{today.isoformat()}.jsonl",
+        TRADES_DIR / f"trades_{yesterday.isoformat()}.jsonl",
+        TRADES_DIR / f"trades_{today.isoformat()}.jsonl",
     ]
 
     # Build open positions (same logic as load_open_positions)
@@ -187,7 +189,7 @@ def check_settlements(client, logs_dir: Path):
             entry_dt = None
 
         # Write settle record directly to avoid build_trade_entry() schema stripping
-        log_path = logs_dir / f'trades_{date.today().isoformat()}.jsonl'
+        log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
         settle_record = {
             "trade_id": str(uuid.uuid4()),
             "timestamp": datetime.now().isoformat(),
@@ -262,8 +264,8 @@ def load_open_positions():
     today = date.today().isoformat()
 
     logs_to_check = [
-        LOGS / f"trades_{yesterday}.jsonl",
-        LOGS / f"trades_{today}.jsonl",
+        TRADES_DIR / f"trades_{yesterday}.jsonl",
+        TRADES_DIR / f"trades_{today}.jsonl",
     ]
 
     # P1-2 fix: key by (ticker, side) tuple instead of ticker alone.
@@ -425,7 +427,7 @@ def run_monitor():
 
     # Run settlement checker first — resolves DEMO positions that have expired
     try:
-        check_settlements(client, LOGS_DIR)
+        check_settlements(client, TRADES_DIR)
     except Exception as e:
         print(f"  [Settlement Checker] ERROR (non-fatal): {e}")
 

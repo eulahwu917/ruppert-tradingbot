@@ -444,6 +444,10 @@ def get_active_positions():
     Deduplicates by ticker (first open/buy entry per ticker).
     Skips tickers that have a corresponding action=exit entry.
     """
+    global _positions_cache
+    if _positions_cache["data"] is not None and (time.time() - _positions_cache["ts"]) < 30:
+        return _positions_cache["data"]
+
     current_mode = get_mode()
 
     if current_mode == 'live':
@@ -552,6 +556,8 @@ def get_active_positions():
             "market_prob": t.get('market_prob'),
         })
 
+    _positions_cache["ts"] = time.time()
+    _positions_cache["data"] = positions
     return positions
 
 
@@ -589,6 +595,7 @@ def get_live_prices():
                 'no_bid':     _cached['no_bid'],
                 'source':     source,
                 'updated_at': updated_at,
+                'is_stale':   is_stale,
             }
         else:
             prices[ticker] = {
@@ -598,6 +605,7 @@ def get_live_prices():
                 'no_bid':     None,
                 'source':     None,
                 'updated_at': None,
+                'is_stale':   True,
             }
     return prices
 
@@ -634,10 +642,8 @@ def get_weather_markets():
     """
     Weather markets — served from scanner cache for speed.
     Background scanner (ruppert_cycle.py) writes logs/weather_scan.jsonl.
-    Fallback: raw Kalshi markets with no edge calc (fast, no NOAA calls).
+    Fallback: stale indicator (no direct REST calls from dashboard).
     """
-    import requests as req
-
     # 1. Try cache first (written by background scanner)
     cache = LOGS_DIR / "weather_scan.jsonl"
     if cache.exists():
@@ -651,52 +657,18 @@ def get_weather_markets():
             if markets:
                 return markets
 
-    # 2. Fast fallback: raw Kalshi markets, no blocking NOAA/ensemble calls
-    try:
-        series = ['KXHIGHNY', 'KXHIGHLA', 'KXHIGHCHI', 'KXHIGHHOU', 'KXHIGHMIA', 'KXHIGHPHX']
-        markets = []
-        for s in series:
-            try:
-                resp = req.get(
-                    'https://api.elections.kalshi.com/trade-api/v2/markets',
-                    params={'series_ticker': s, 'status': 'open', 'limit': 8},
-                    timeout=5
-                )
-                if resp.status_code == 200:
-                    for m in resp.json().get('markets', []):
-                        m['_has_edge']  = False
-                        m['_edge']      = None
-                        m['_noaa_prob'] = None
-                        m['kalshi_url'] = f"https://kalshi.com/markets/{m.get('ticker','')}"
-                        markets.append(m)
-            except Exception:
-                pass
-        return markets[:30]
-    except Exception as e:
-        return {"error": str(e)}
+    # 2. Cache unavailable — return stale indicator
+    return {"markets": [], "is_stale": True, "note": "Weather scan cache unavailable. Run ruppert_cycle.py to refresh."}
 
 
 @app.get("/api/scout/geo")
 def get_geo_scout():
     """Geopolitical markets — includes settlement rules."""
     entries = read_geo_log()
-    # Enrich with rules if missing
     for e in entries:
-        if not e.get('rules') and e.get('ticker'):
-            try:
-                import requests as req
-                resp = req.get(
-                    f"https://api.elections.kalshi.com/trade-api/v2/markets/{e['ticker']}",
-                    timeout=3
-                )
-                if resp.status_code == 200:
-                    m = resp.json().get('market', {})
-                    e['rules']      = m.get('rules_primary', '')
-                    e['kalshi_url'] = f"https://kalshi.com/markets/{e['ticker']}"
-            except Exception:
-                pass
         if not e.get('kalshi_url'):
             e['kalshi_url'] = f"https://kalshi.com/markets/{e.get('ticker','')}"
+        e['rules_available'] = bool(e.get('rules'))
     return entries
 
 
@@ -713,30 +685,23 @@ def get_crypto_15m_summary():
 @app.get("/api/crypto/scan")
 def get_crypto_scan():
     """Crypto markets scan — BTC/ETH/XRP price + smart money signal + opportunities.
-    Uses Kraken for prices (Binance geo-blocked in US). Scanner runs with timeout guard.
+    Prices served from cache (crypto_prices.json). Scanner runs with timeout guard.
     """
     import requests as req
-    import concurrent.futures, time
 
     result = {"btc": None, "eth": None, "xrp": None, "smart_money": None, "opportunities": [], "signal": "neutral"}
 
-    # ── Live prices from Kraken (reliable, no geo-block) ─────────────────────
-    KRAKEN_PAIRS = {"btc": "XBTUSD", "eth": "ETHUSD", "xrp": "XRPUSD"}
-    for key, pair in KRAKEN_PAIRS.items():
+    # ── Live prices from cache (written by background scan) ──────────────────
+    _prices_cache = LOGS_DIR / "truth" / "crypto_prices.json"
+    if _prices_cache.exists():
         try:
-            r = req.get(f"https://api.kraken.com/0/public/Ticker?pair={pair}", timeout=5)
-            if r.status_code == 200:
-                data = r.json().get("result", {})
-                t = list(data.values())[0] if data else {}
-                price = float(t.get("c", [0])[0])
-                open_p = float(t.get("o", price) or price)
-                chg = ((price - open_p) / open_p * 100) if open_p else 0
-                result[key] = {
-                    "price": round(price, 4 if key == "xrp" else 2),
-                    "change_24h_pct": round(chg, 2),
-                    "high_24h": float(t.get("h", [0,0])[1]),
-                    "low_24h":  float(t.get("l", [0,0])[1]),
-                }
+            import time as _time
+            _cache_age = _time.time() - _prices_cache.stat().st_mtime
+            _price_data = json.loads(_prices_cache.read_text(encoding='utf-8'))
+            for _key in ("btc", "eth", "xrp"):
+                if _key in _price_data:
+                    result[_key] = _price_data[_key]
+                    result[_key]["is_stale"] = _cache_age > 300
         except Exception:
             pass
 
@@ -820,6 +785,10 @@ def get_pnl_history():
     Settled = past-date tickers that already resolved on Kalshi.
     Open    = current positions still trading.
     """
+    global _pnl_cache
+    if _pnl_cache["data"] is not None and (time.time() - _pnl_cache["ts"]) < 30:
+        return _pnl_cache["data"]
+
     from collections import defaultdict
 
     all_trades = read_all_trades()
@@ -1117,12 +1086,16 @@ def get_pnl_history():
         "man_cost_basis": round(manual_cost_basis, 2),
         "modules": modules_out,
     }
+    _pnl_cache["ts"] = time.time()
+    _pnl_cache["data"] = pnl_result
     return pnl_result
 
 
 # ─── /api/state — single snapshot endpoint ────────────────────────────────────
 
 _state_cache: dict = {"ts": 0.0, "data": None}
+_pnl_cache: dict = {"ts": 0.0, "data": None}
+_positions_cache: dict = {"ts": 0.0, "data": None}
 
 
 def _build_state():
@@ -1427,10 +1400,10 @@ def _build_state():
 def get_state():
     """Single snapshot endpoint: account, positions, module stats, smart money.
     Fetches Kalshi orderbook once per position — no duplicate network calls.
-    Results cached for 15 seconds.
+    Results cached for 30 seconds.
     """
     global _state_cache
-    if _state_cache["data"] is not None and (time.time() - _state_cache["ts"]) < 15:
+    if _state_cache["data"] is not None and (time.time() - _state_cache["ts"]) < 30:
         return _state_cache["data"]
     result = _build_state()
     _state_cache["ts"] = time.time()

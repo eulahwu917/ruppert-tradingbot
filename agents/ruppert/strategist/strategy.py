@@ -284,6 +284,17 @@ def should_enter(
         return {'enter': False, 'size': 0.0,
                 'reason': f'low_confidence ({confidence:.2f} < {MIN_CONFIDENCE})'}
 
+    # --- Per-module confidence gate ---
+    # config.MIN_CONFIDENCE is a dict; fall back to universal MIN_CONFIDENCE if module not listed
+    _module_min_conf_map = getattr(config, 'MIN_CONFIDENCE', {})
+    if isinstance(_module_min_conf_map, dict):
+        _per_module_thresh = _module_min_conf_map.get(signal_module, MIN_CONFIDENCE)
+    else:
+        _per_module_thresh = MIN_CONFIDENCE  # safety: config.MIN_CONFIDENCE not a dict
+    if confidence < _per_module_thresh:
+        return {'enter': False, 'size': 0.0,
+                'reason': f'low_confidence_module ({confidence:.2f} < {_per_module_thresh} for {signal_module})'}
+
     # --- Edge gate (module-specific) ---
     min_edge = MIN_EDGE.get(signal_module, MIN_EDGE['weather'])
     if edge < min_edge:

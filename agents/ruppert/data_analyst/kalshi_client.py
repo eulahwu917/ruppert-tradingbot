@@ -209,7 +209,7 @@ class KalshiClient:
                                 print(f"  [Warning] Orderbook fetch failed for {ticker}: HTTP {ob_resp.status_code} — bid/ask will be null")
                         except Exception as e:
                             print(f"  [Warning] Orderbook error for {ticker}: {e} — bid/ask will be null")
-                        time.sleep(0.05)  # 20 req/sec rate limit
+                        time.sleep(0.1)  # 20 req/sec rate limit
 
                     all_markets.extend(markets)
             except Exception as e:
@@ -240,7 +240,7 @@ class KalshiClient:
             cursor = data.get('cursor')
             if not cursor or not batch:
                 break
-            time.sleep(0.05)  # rate limit courtesy
+            time.sleep(0.1)  # rate limit courtesy
         return all_markets
 
     def enrich_orderbook(self, market):
@@ -268,7 +268,7 @@ class KalshiClient:
                 print(f"  [Warning] Orderbook fetch failed for {ticker}: HTTP {ob_resp.status_code if ob_resp else 'timeout'}")
         except Exception as e:
             print(f"  [Warning] Orderbook error for {ticker}: {e}")
-        time.sleep(0.05)
+        time.sleep(0.1)
         return market
 
     def get_markets(self, series_ticker, status='open', limit=30):
@@ -306,7 +306,7 @@ class KalshiClient:
                     print(f"  [Warning] Orderbook fetch failed for {ticker}: HTTP {ob_resp.status_code if ob_resp else 'timeout'}")
             except Exception as e:
                 print(f"  [Warning] Orderbook error for {ticker}: {e}")
-            time.sleep(0.05)
+            time.sleep(0.1)
 
         return markets
 
@@ -446,3 +446,4 @@ if __name__ == '__main__':
     print(f"Found {len(markets)} weather markets")
     for m in markets[:5]:
         print(f"  - {m.get('ticker')}: {m.get('title')}")
+

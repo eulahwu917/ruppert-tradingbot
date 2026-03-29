@@ -25,6 +25,13 @@ Weight rationale (per SA-2 Researcher scope report 2026-03-12):
   Weights: ECMWF 40% | GEFS 40% | ICON 20%
 """
 
+import sys
+from pathlib import Path
+_AGENTS_ROOT = Path(__file__).parent.parent.parent
+_WORKSPACE_ROOT = _AGENTS_ROOT.parent
+if str(_WORKSPACE_ROOT) not in sys.path:
+    sys.path.insert(0, str(_WORKSPACE_ROOT))
+
 import requests
 import logging
 from datetime import date, datetime, timedelta
@@ -269,7 +276,7 @@ def _get_bias(series_ticker: str) -> float:
     Fallback: hardcoded CITY_BIAS_F offsets.
     """
     try:
-        from ghcnd_client import get_bias as _ghcnd_bias
+        from agents.ruppert.data_analyst.ghcnd_client import get_bias as _ghcnd_bias
         return _ghcnd_bias(series_ticker)
     except Exception:
         return CITY_BIAS_F.get(series_ticker, DEFAULT_BIAS_F)
@@ -555,7 +562,7 @@ def get_current_conditions(series_ticker: str) -> dict:
 
         # Apply GHCND-based bias correction (falls back to hardcoded if needed)
         try:
-            from ghcnd_client import get_bias as _ghcnd_bias, get_bias_source
+            from agents.ruppert.data_analyst.ghcnd_client import get_bias as _ghcnd_bias, get_bias_source
             bias        = _ghcnd_bias(series_ticker)
             bias_source = get_bias_source(series_ticker)
         except Exception:
@@ -736,7 +743,7 @@ def get_full_weather_signal(series_ticker: str, threshold_f: float, target_date:
 
     # Bias: GHCND (dynamic) preferred, hardcoded fallback
     try:
-        from ghcnd_client import get_bias as _ghcnd_bias, get_bias_source
+        from agents.ruppert.data_analyst.ghcnd_client import get_bias as _ghcnd_bias, get_bias_source
         bias        = _ghcnd_bias(series_ticker)
         bias_source = get_bias_source(series_ticker)
     except Exception:

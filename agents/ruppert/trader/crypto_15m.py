@@ -64,6 +64,7 @@ W_MACD = 0.15
 W_OI   = 0.10
 
 from agents.ruppert.env_config import get_paths as _get_paths
+from agents.ruppert.strategist.strategy import should_enter
 LOGS_DIR = _get_paths()['logs']
 LOGS_DIR.mkdir(exist_ok=True)
 DECISION_LOG = LOGS_DIR / 'decisions_15m.jsonl'
@@ -692,7 +693,7 @@ def evaluate_crypto_15m_entry(
     from agents.ruppert.data_scientist.capital import get_capital
     from agents.ruppert.data_scientist.logger import log_trade, log_activity, get_daily_exposure
     from agents.ruppert.data_analyst.kalshi_client import KalshiClient
-    from position_monitor import load_traded_tickers, push_alert
+    from agents.ruppert.trader.position_monitor import load_traded_tickers, push_alert
 
     asset = _parse_asset_from_ticker(ticker)
     if not asset:
@@ -893,6 +894,33 @@ def evaluate_crypto_15m_entry(
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
                        signals, kalshi_info, 'SKIP', 'DAILY_CAP',
                        edge, entry_price, None)
+        return
+
+    # Strategy gate: global 70% deployment cap + strategy filters
+    from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_exp
+    _deployed_today = _get_exp()
+    _module_deployed_pct = _deployed_today / capital if capital > 0 else 0.0
+    _signal_dict = {
+        'ticker': ticker,
+        'side': direction,
+        'edge': round(edge, 4),
+        'win_prob': round(P_win, 4),
+        'confidence': round(abs(raw_score), 3),
+        'module': 'crypto_15m',
+        'yes_ask': yes_ask,
+        'yes_bid': yes_bid,
+        'hours_to_settlement': max(0, (900 - elapsed_secs) / 3600),
+    }
+    _se_decision = should_enter(
+        _signal_dict, capital, _deployed_today,
+        module='crypto',
+        module_deployed_pct=_module_deployed_pct,
+        traded_tickers=None,
+    )
+    if not _se_decision['enter']:
+        _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
+                      signals, kalshi_info, 'SKIP', f'STRATEGY_GATE:{_se_decision["reason"]}',
+                      edge, entry_price, None)
         return
 
     # ── Position Sizing: Half-Kelly, capped ──

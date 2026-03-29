@@ -424,6 +424,20 @@ def run_weather_scan(dry_run=True):
                         )
                     except Exception:
                         pass
+                    # Baseline: uniform sizing vs Kelly
+                    try:
+                        from baselines import log_uniform_sizing
+                        _actual_price_f = opp.get('yes_ask', 50) / 100 if opp.get('side') == 'yes' \
+                                          else (100 - opp.get('yes_ask', 50)) / 100
+                        log_uniform_sizing(
+                            ticker=opp.get('ticker', ''),
+                            domain='weather',
+                            actual_action=opp.get('side', 'no'),
+                            actual_price=_actual_price_f,
+                            actual_size=opp.get('strategy_size', opp.get('size_dollars', 0)),
+                        )
+                    except Exception:
+                        pass
             except Exception as exec_err:
                 log_activity(f"[Weather] Execution error (trades may be partially logged): {exec_err}")
                 import traceback
@@ -683,6 +697,32 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
             opp['module'] = 'crypto'
             trader.execute_opportunity(opp)
 
+            # Log Brier prediction at trade entry
+            try:
+                from brier_tracker import log_prediction
+                log_prediction(
+                    domain='crypto',
+                    ticker=t['ticker'],
+                    predicted_prob=t['prob_model'],
+                    market_price=t['yes_ask'] / 100,
+                    edge=t['edge'],
+                    side=t['side'],
+                )
+            except Exception:
+                pass
+            # Baseline: log uniform sizing vs actual Kelly sizing
+            try:
+                from baselines import log_uniform_sizing
+                log_uniform_sizing(
+                    ticker=t['ticker'],
+                    domain='crypto',
+                    actual_action=t['side'],
+                    actual_price=t['price'] / 100,
+                    actual_size=actual_cost,
+                )
+            except Exception:
+                pass
+
             traded_tickers.add(t['ticker'])
             _crypto_deployed_this_cycle += actual_cost
             _open_exposure += actual_cost
@@ -814,6 +854,43 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
                     traded_tickers.add(ticker)
                     executed.append(opp)
 
+                    # Baseline: log what pure CME-follow would have done
+                    try:
+                        from baselines import log_follow_cme_fed, log_uniform_sizing
+                        _cme_prob = fed_signal.get('prob', 0.5)
+                        _mkt_price_f = fed_signal.get('market_price', 0.5)
+                        log_follow_cme_fed(
+                            ticker=ticker,
+                            cme_prob=_cme_prob,
+                            market_price=_mkt_price_f,
+                            actual_action=side,
+                            actual_price=bet_price / 100,
+                            ensemble_prob=fed_signal.get('ensemble_prob'),
+                        )
+                        # Baseline: uniform sizing vs Kelly
+                        log_uniform_sizing(
+                            ticker=ticker,
+                            domain='fed',
+                            actual_action=side,
+                            actual_price=bet_price / 100,
+                            actual_size=actual_cost,
+                        )
+                    except Exception:
+                        pass
+                    # Log Brier prediction at trade entry
+                    try:
+                        from brier_tracker import log_prediction
+                        log_prediction(
+                            domain='fed',
+                            ticker=ticker,
+                            predicted_prob=fed_signal.get('prob', 0.5),
+                            market_price=fed_signal.get('market_price', 0.5),
+                            edge=fed_signal.get('edge', 0.0),
+                            side=side,
+                        )
+                    except Exception:
+                        pass
+
         elif fed_signal and fed_signal.get("skip_reason"):
             print(f"  Fed signal skipped: {fed_signal['skip_reason']}")
         else:
@@ -824,6 +901,159 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
         import traceback
         traceback.print_exc()
 
+    return executed
+
+
+# ─── GEOPOLITICAL TRADES MODULE ───────────────────────────────────────────────
+
+def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
+    """Run geopolitical market scan and execute trades. Returns list of executed opp dicts."""
+    if traded_tickers is None:
+        traded_tickers = set()
+
+    executed = []
+
+    if not getattr(config, 'GEO_AUTO_TRADE', False):
+        log_activity("[Geo] GEO_AUTO_TRADE=False — skipping")
+        return executed
+
+    log_activity("[Geo] Starting geopolitical trade scan...")
+
+    try:
+        geo_markets = run_geo_scan()
+        if not geo_markets:
+            log_activity("[Geo] No geo opportunities returned by scanner")
+            return executed
+
+        log_activity(f"[Geo] Scanner returned {len(geo_markets)} market(s)")
+
+        try:
+            _geo_capital  = get_capital()
+            _geo_deployed = get_daily_exposure()
+        except Exception:
+            _geo_capital  = 10000.0
+            _geo_deployed = 0.0
+
+        _geo_daily_cap = _geo_capital * getattr(config, 'GEO_DAILY_CAP_PCT', 0.04)
+        _geo_deployed_this_cycle = 0.0
+
+        try:
+            _geo_open_exposure = max(0.0, _geo_capital - get_buying_power())
+        except Exception:
+            _geo_open_exposure = open_position_value
+
+        trader = Trader(dry_run=dry_run)
+
+        for opp in geo_markets:
+            ticker = opp.get('ticker', '')
+            if not ticker:
+                continue
+            if ticker in traded_tickers:
+                log_activity(f"  [Geo] Already traded {ticker} — skipping")
+                continue
+
+            if not check_open_exposure(_geo_capital, _geo_open_exposure):
+                log_activity(f"  [GlobalCap] STOP: open exposure ${_geo_open_exposure:.2f} >= 70% of capital")
+                break
+
+            if _geo_deployed_this_cycle >= _geo_daily_cap:
+                log_activity(f"  [DailyCap] STOP: geo budget ${_geo_daily_cap:.0f} exhausted")
+                break
+
+            side = opp.get('side', 'yes')
+            yes_ask = int(opp.get('yes_ask', 50))
+            yes_bid = int(opp.get('yes_bid', yes_ask))
+            bet_price = yes_ask if side == 'yes' else 100 - yes_ask
+
+            # Geo: hours_to_settlement from opp or fallback to GEO_MIN_DAYS_TO_EXPIRY
+            _geo_days = opp.get('days_to_expiry', getattr(config, 'GEO_MIN_DAYS_TO_EXPIRY', 1))
+            _geo_hours = max(24.0, float(_geo_days) * 24)
+
+            signal = {
+                'edge':                opp.get('edge', 0.0),
+                'win_prob':            opp.get('win_prob', opp.get('model_prob', 0.5)),
+                'confidence':          min(opp.get('confidence', 0.0),
+                                          getattr(config, 'GEO_MAX_CONFIDENCE', 0.85)),
+                'hours_to_settlement': _geo_hours,
+                'module':              'geo',
+                'vol_ratio':           1.0,
+                'side':                side,
+                'yes_ask':             yes_ask,
+                'yes_bid':             yes_bid,
+                'open_position_value': _geo_open_exposure,
+            }
+
+            decision = should_enter(
+                signal, _geo_capital, _geo_deployed,
+                module='geo',
+                module_deployed_pct=_geo_deployed_this_cycle / _geo_capital if _geo_capital > 0 else 0.0,
+                traded_tickers=traded_tickers,
+            )
+
+            if not decision['enter']:
+                log_activity(f"  [Strategy] SKIP {ticker}: {decision['reason']}")
+                continue
+
+            if _geo_deployed_this_cycle + decision['size'] > _geo_daily_cap:
+                log_activity(f"  [DailyCap] SKIP {ticker}: would exceed geo daily cap")
+                continue
+
+            size = min(decision['size'], check_daily_cap(_geo_capital, _geo_deployed))
+            contracts = max(1, int(size / bet_price * 100))
+            actual_cost = round(contracts * bet_price / 100, 2)
+
+            trade_opp = {
+                'ticker':       ticker,
+                'title':        opp.get('title', ticker),
+                'side':         side,
+                'action':       'buy',
+                'yes_price':    yes_ask,
+                'market_prob':  yes_ask / 100,
+                'noaa_prob':    None,
+                'edge':         opp.get('edge'),
+                'confidence':   opp.get('confidence'),
+                'size_dollars': actual_cost,
+                'contracts':    contracts,
+                'source':       'geo',
+                'module':       'geo',
+                'scan_price':   bet_price,
+                'fill_price':   bet_price,
+                'scan_contracts': contracts,
+                'fill_contracts': contracts,
+                'note':         opp.get('reasoning', '')[:200],
+                'timestamp':    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'date':         str(date.today()),
+            }
+            trade_opp['strategy_size'] = size
+
+            trader.execute_opportunity(trade_opp)
+
+            # Log Brier prediction at trade entry
+            try:
+                from brier_tracker import log_prediction
+                log_prediction(
+                    domain='geo',
+                    ticker=ticker,
+                    predicted_prob=opp.get('win_prob', opp.get('model_prob', 0.5)),
+                    market_price=yes_ask / 100,
+                    edge=opp.get('edge', 0.0),
+                    side=side,
+                )
+            except Exception:
+                pass
+
+            traded_tickers.add(ticker)
+            _geo_deployed_this_cycle += actual_cost
+            _geo_open_exposure += actual_cost
+            executed.append(trade_opp)
+            log_activity(f"  [Geo] ENTERED {ticker} {side.upper()} {contracts}@{bet_price}c ${actual_cost:.2f}")
+
+    except Exception as e:
+        log_activity(f"[Geo] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+
+    log_activity(f"[Geo] Done — {len(executed)} trade(s) executed")
     return executed
 
 

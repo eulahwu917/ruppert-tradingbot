@@ -45,26 +45,34 @@ _tracked = {}
 
 
 def _persist():
-    """Write tracked positions to disk."""
+    """Write tracked positions to disk. Keys are serialized as 'ticker::side' strings."""
     if get_current_env() == 'live':
         require_live_enabled()  # Raises RuntimeError if enabled=false in mode.json
     try:
         TRACKER_FILE.parent.mkdir(exist_ok=True)
         tmp = TRACKER_FILE.with_suffix('.tmp')
-        tmp.write_text(json.dumps(_tracked, indent=2), encoding='utf-8')
+        serialized = {f'{k[0]}::{k[1]}': v for k, v in _tracked.items()}
+        tmp.write_text(json.dumps(serialized, indent=2), encoding='utf-8')
         tmp.replace(TRACKER_FILE)
     except Exception as e:
         logger.warning('[PositionTracker] Persist failed: %s', e)
 
 
 def _load():
-    """Load tracked positions from disk on startup."""
+    """Load tracked positions from disk on startup. Handles legacy (ticker-only) keys."""
     global _tracked
     if not TRACKER_FILE.exists():
         return
     try:
         data = json.loads(TRACKER_FILE.read_text(encoding='utf-8'))
-        _tracked.update(data)
+        for key_str, value in data.items():
+            if '::' in key_str:
+                parts = key_str.split('::', 1)
+                key = (parts[0], parts[1])
+            else:
+                # Legacy key: ticker string only — use side from value
+                key = (key_str, value.get('side', 'yes'))
+            _tracked[key] = value
         logger.info('[PositionTracker] Loaded %d tracked positions from disk', len(_tracked))
     except Exception as e:
         logger.warning('[PositionTracker] Load failed: %s', e)
@@ -125,7 +133,7 @@ def add_position(ticker: str, quantity: int, side: str, entry_price: float,
                     'compare': 'lte',
                 })
 
-    _tracked[ticker] = {
+    _tracked[(ticker, side)] = {
         'quantity': quantity,
         'side': side,
         'entry_price': entry_price,
@@ -138,19 +146,19 @@ def add_position(ticker: str, quantity: int, side: str, entry_price: float,
     logger.info('[PositionTracker] Tracking %s %s @ %dc (%d contracts)', ticker, side, entry_price, quantity)
 
 
-def remove_position(ticker: str):
+def remove_position(ticker: str, side: str):
     """Call after exit execution."""
-    _tracked.pop(ticker, None)
+    _tracked.pop((ticker, side), None)
     _persist()
 
 
 def get_tracked() -> dict:
-    """Return copy of tracked positions (for diagnostics)."""
-    return dict(_tracked)
+    """Return copy of tracked positions (for diagnostics). Keys serialized as 'ticker::side'."""
+    return {f'{k[0]}::{k[1]}': v for k, v in _tracked.items()}
 
 
-def is_tracked(ticker: str) -> bool:
-    return ticker in _tracked
+def is_tracked(ticker: str, side: str) -> bool:
+    return (ticker, side) in _tracked
 
 
 async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None):
@@ -158,36 +166,41 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None):
     Called by WS feed on every tick for tracked tickers.
     yes_bid/yes_ask in cents (as received from WS, already divided by 100 not needed).
     """
-    pos = _tracked.get(ticker)
-    if not pos or yes_bid is None:
+    if yes_bid is None:
         return
 
-    for threshold in pos['exit_thresholds']:
-        compare = threshold.get('compare', 'gte')
-        price_target = threshold['price']
-        triggered = False
+    matching_keys = [k for k in _tracked if k[0] == ticker]
+    for key in matching_keys:
+        pos = _tracked.get(key)
+        if not pos:
+            continue
 
-        if compare == 'lte':
-            # For NO positions: trigger when yes_bid drops below threshold
-            triggered = yes_bid <= price_target
-        else:
-            # For YES positions: trigger when yes_bid rises above threshold
-            triggered = yes_bid >= price_target
+        for threshold in pos['exit_thresholds']:
+            compare = threshold.get('compare', 'gte')
+            price_target = threshold['price']
+            triggered = False
 
-        if triggered:
-            rule = threshold.get('rule', 'threshold')
-            log_activity(
-                f'[WS Exit] {ticker} hit {rule} (bid={yes_bid}c, target={price_target}c) — exiting'
-            )
-            await execute_exit(ticker, pos, yes_bid, rule)
-            return
+            if compare == 'lte':
+                # For NO positions: trigger when yes_bid drops below threshold
+                triggered = yes_bid <= price_target
+            else:
+                # For YES positions: trigger when yes_bid rises above threshold
+                triggered = yes_bid >= price_target
+
+            if triggered:
+                rule = threshold.get('rule', 'threshold')
+                log_activity(
+                    f'[WS Exit] {ticker} hit {rule} (bid={yes_bid}c, target={price_target}c) — exiting'
+                )
+                await execute_exit(key, pos, yes_bid, rule)
+                break
 
 
-async def execute_exit(ticker: str, pos: dict, current_bid: int, rule: str):
+async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str):
     """Execute the exit order via REST."""
     from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 
-    side = pos['side']
+    ticker, side = key
     entry_price = pos['entry_price']
     quantity = pos['quantity']
     module = pos.get('module', '')
@@ -237,7 +250,7 @@ async def execute_exit(ticker: str, pos: dict, current_bid: int, rule: str):
     log_activity(f'[WS EXIT] {ticker} {side.upper()} @ {current_bid}c | {rule} | P&L=${pnl:+.2f}')
     print(f'  [WS EXIT] {ticker} {side.upper()} @ {current_bid}c | {rule} | P&L=${pnl:+.2f}')
 
-    remove_position(ticker)
+    remove_position(ticker, side)
 
 
 async def recovery_poll_positions():
@@ -254,7 +267,8 @@ async def recovery_poll_positions():
         logger.error('[PositionTracker] Recovery poll: client init failed: %s', e)
         return
 
-    for ticker in list(_tracked.keys()):
+    for key in list(_tracked.keys()):
+        ticker = key[0]
         try:
             market = client.get_market(ticker)
             if not market:

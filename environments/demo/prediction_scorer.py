@@ -142,18 +142,35 @@ def score_new_settlements():
         if predicted_prob is None:
             predicted_prob = buy_rec.get('market_prob')
 
+        # Derive outcome (int 0/1) from settlement_result
+        _settlement_result = rec.get('settlement_result')
+        if _settlement_result is not None:
+            _sr_str = str(_settlement_result).strip().lower()
+            if _sr_str in ('yes', '1', 'true'):
+                _outcome = 1
+            elif _sr_str in ('no', '0', 'false'):
+                _outcome = 0
+            else:
+                _outcome = None
+        else:
+            _outcome = None
+
+        # Compute Brier score
+        _brier = None
+        if _outcome is not None and predicted_prob is not None:
+            _brier = round((_outcome - float(predicted_prob)) ** 2, 4)
+
         scored = {
             "domain":          module or None,
             "ticker":          ticker,
             "predicted_prob":  round(float(predicted_prob), 4) if predicted_prob is not None else None,
-            "actual_result":   rec.get('settlement_result') or None,
+            "outcome":         _outcome,
+            "brier_score":     _brier,
             "edge":            round(float(buy_rec.get('edge', 0)), 4) if buy_rec.get('edge') is not None else None,
             "confidence":      round(float(buy_rec.get('confidence', 0)), 4) if buy_rec.get('confidence') is not None else None,
-            "entry_price":     buy_rec.get('fill_price') or buy_rec.get('scan_price') or None,
-            "pnl":             round(float(rec.get('pnl', 0)), 2) if rec.get('pnl') is not None else None,
-            "city":            city,
             "date":            trade_date,
             "settlement_date": rec.get('date', trade_date),
+            "pnl":             round(float(rec.get('pnl', 0)), 2) if rec.get('pnl') is not None else None,
         }
         new_scored.append(scored)
         processed.add(key)

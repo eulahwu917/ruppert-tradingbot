@@ -246,6 +246,7 @@ async def run_ws_feed():
                     # Periodic persist every 60s
                     if now - last_persist >= 60:
                         market_cache.persist()
+                        _write_heartbeat()
                         last_persist = now
 
                     # Periodic purge every 5 min

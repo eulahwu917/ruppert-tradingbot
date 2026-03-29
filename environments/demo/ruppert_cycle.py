@@ -126,7 +126,8 @@ def load_traded_tickers(logs_dir):
     traded_tickers = set()
 
     # Populate from today's trade log
-    _trade_log_path = logs_dir / f'trades_{date.today().isoformat()}.jsonl'
+    from agents.ruppert.env_config import get_paths as _get_env_paths
+    _trade_log_path = _get_env_paths()['trades'] / f'trades_{date.today().isoformat()}.jsonl'
     if _trade_log_path.exists():
         try:
             for _line in _trade_log_path.read_text(encoding='utf-8').splitlines():
@@ -404,6 +405,11 @@ def run_econ_prescan_mode(client, state):
     print("\n[econ_prescan] Checking for econ releases today...")
     _econ_trades = 0
     try:
+        # Path guard: economics modules live in environments/demo/, not agents/ruppert/
+        import sys as _sys
+        _econ_env_root = str(Path(__file__).parent)
+        if _econ_env_root not in _sys.path:
+            _sys.path.insert(0, _econ_env_root)
         from economics_client import get_upcoming_releases as _get_upcoming
         from economics_scanner import find_econ_opportunities as _find_econ
         from agents.ruppert.data_scientist.capital import get_capital as _get_cap_econ
@@ -428,7 +434,7 @@ def run_econ_prescan_mode(client, state):
                 print(f"  Already traded {ticker} — skipping")
                 continue
 
-            side = opp.get('bet_direction', 'yes')
+            side = opp.get('bet_direction', 'yes').lower()
             mkt_price = int(opp.get('yes_ask', 50) if side == 'yes' else opp.get('no_ask', 50))
             bet_price = mkt_price if side == 'yes' else 100 - mkt_price
             hours_left = max(1.0, opp.get('hours_to_settlement', 48))
@@ -778,15 +784,12 @@ def run_report_mode(state):
     if losses:
         total_loss = round(sum(l['realized_pnl'] for l in losses), 2)
 
-        review_file = state.logs_dir / 'pending_optimizer_review.json'
-        review_data = {
-            'date':       today_str,
-            'losses':     losses,
+        log_event('OPTIMIZER_REVIEW_NEEDED', {
+            'date': today_str,
+            'losses': losses,
             'total_loss': total_loss,
-        }
-        review_file.write_text(json.dumps(review_data, indent=2), encoding='utf-8')
-        print(f"  Wrote pending_optimizer_review.json \u2014 "
-              f"{len(losses)} loss(es) totaling ${total_loss:.2f}")
+        })
+        print(f"  Emitted OPTIMIZER_REVIEW_NEEDED — {len(losses)} loss(es) totaling ${total_loss:.2f}")
 
         # Append optimizer alert
         alert_msg = (
@@ -915,6 +918,33 @@ def run_full_mode(client, state):
         print(f"  Fed scan error: {e}")
         import traceback; traceback.print_exc()
 
+    # STEP 4c: GEOPOLITICAL SCAN
+    print("\n[4c] Scanning for geopolitical opportunities...")
+    new_geo = []
+    if getattr(config, 'GEO_AUTO_TRADE', False):
+        try:
+            from agents.ruppert.trader.main import run_geo_trades as _run_geo_trades
+            # Refresh open exposure after Fed trades
+            state.open_position_value += sum(t.get('size_dollars', 0) for t in new_fed)
+            new_geo = _run_geo_trades(
+                dry_run=state.dry_run,
+                traded_tickers=state.traded_tickers,
+                open_position_value=state.open_position_value,
+            )
+            if new_geo:
+                print(f"  {len(new_geo)} geo trade(s) executed")
+                for t in new_geo:
+                    print(f"    {t.get('ticker')} {t.get('side','').upper()} edge={t.get('edge',0)*100:.0f}%")
+            else:
+                print("  No geo opportunities above threshold")
+        except Exception as e:
+            print(f"  Geo scan error: {e}")
+            import traceback; traceback.print_exc()
+    else:
+        print("  GEO_AUTO_TRADE=False — skipping")
+
+    state.open_position_value += sum(t.get('size_dollars', 0) for t in new_geo)
+
     # STEP 5: SECURITY AUDIT (weekly — Sunday only)
     if datetime.now().weekday() == 6:  # Sunday
         print("\n[5] Weekly security audit...")
@@ -937,6 +967,7 @@ def run_full_mode(client, state):
         'crypto_trades':  len(new_crypto) if new_crypto else 0,
         'long_horizon_trades': len(new_long_horizon) if new_long_horizon else 0,
         'fed_trades':     len(new_fed) if new_fed else 0,
+        'geo_trades':     len(new_geo) if new_geo else 0,
         'smart_money':    direction,
         'auto_exits':     len(state.actions_taken),
     }
@@ -944,7 +975,7 @@ def run_full_mode(client, state):
 
     print(f"\n{'='*60}")
     print(f"  CYCLE COMPLETE  {ts()}")
-    print(f"  Weather: {summary['weather_trades']} new | Crypto: {summary['crypto_trades']} new | LongHorizon: {summary['long_horizon_trades']} new | Fed: {summary['fed_trades']} new")
+    print(f"  Weather: {summary['weather_trades']} new | Crypto: {summary['crypto_trades']} new | LongHorizon: {summary['long_horizon_trades']} new | Fed: {summary['fed_trades']} new | Geo: {summary['geo_trades']} new")
     print(f"  Auto-exits: {summary['auto_exits']} | Signal: {direction.upper()}")
     print(f"{'='*60}\n")
 
@@ -990,12 +1021,14 @@ def run_full_mode(client, state):
         _c_opps   = len(new_crypto) if isinstance(new_crypto, list) else 0
         _c_trades = summary['crypto_trades']
         _c_dir    = direction.upper() if direction else 'NEUTRAL'
+        _geo_trades = summary.get('geo_trades', 0)
 
         _15m_block = _build_crypto_15m_block()
         _scan_msg = (
             f"\U0001f4ca Ruppert Scan \u2014 {_time_str} PDT\n\n"
             f"\U0001f324 Weather: {_w_opps} opportunities | {_w_trades} trades placed\n"
             f"\u20bf Crypto: {_c_dir} | {_c_opps} opportunities | {_c_trades} trades placed\n"
+            f"\U0001f30d Geo: {_geo_trades} trade(s) placed\n"
             f"\U0001f3db Fed: {_fed_status}"
             f"{_15m_block}\n\n"
             f"\U0001f4b0 Capital: {_cap_line}"
@@ -1007,6 +1040,7 @@ def run_full_mode(client, state):
             'crypto_trades': summary['crypto_trades'],
             'long_horizon_trades': summary.get('long_horizon_trades', 0),
             'fed_trades': summary['fed_trades'],
+            'geo_trades': summary['geo_trades'],
             'smart_money': summary['smart_money'],
             'summary': _scan_msg,
         })
@@ -1072,50 +1106,60 @@ def run_cycle(mode):
         buying_power=buying_power,
     )
 
-    # Data Agent: daily historical audit (once per day, non-fatal)
     try:
-        from agents.ruppert.data_scientist.data_agent import run_historical_audit
-        run_historical_audit(since_date=(date.today() - timedelta(days=30)).isoformat())
-    except Exception as _ha_err:
-        log_activity(f'[DataAgent] Historical audit failed: {_ha_err}')
-
-    # Reconciliation (all modes)
-    run_orphan_reconciliation(client, logs_dir)
-    run_exposure_reconciliation(logs_dir, capital, buying_power)
-
-    # Position check (all modes)
-    state.actions_taken = run_position_check(client, state)
-
-    # Dispatch
-    if mode == 'check':
-        summary = run_check_mode(state)
-    elif mode == 'econ_prescan':
-        summary = run_econ_prescan_mode(client, state)
-    elif mode == 'weather_only':
-        summary = run_weather_only_mode(state)
-    elif mode == 'crypto_only':
-        summary = run_crypto_only_mode(state)
-    elif mode == 'report':
-        summary = run_report_mode(state)
-    elif mode in ('full', 'smart'):
-        summary = run_full_mode(client, state)
-    else:
-        raise ValueError(f'Unknown mode: {mode}')
-
-    # ── Data Agent: post-scan audit (non-fatal) ─────────────────────────────
-    # Note: 'smart' mode triggers lighter synthesis (pnl_cache + positions only)
-    if mode in ('full', 'smart', 'crypto_only', 'weather_only', 'econ_prescan'):
+        # Data Agent: daily historical audit (once per day, non-fatal)
         try:
-            from agents.ruppert.data_scientist.data_agent import run_post_scan_audit
-            _audit = run_post_scan_audit(mode='post_cycle')
-            _iss = _audit.get('issues_found', 0)
-            if _iss:
-                print(f'  [DataAgent] {_iss} issue(s) found and handled')
-        except Exception as _da_err:
-            log_activity(f'[DataAgent] Post-scan audit failed: {_da_err}')
+            from agents.ruppert.data_scientist.data_agent import run_historical_audit
+            run_historical_audit(since_date=(date.today() - timedelta(days=30)).isoformat())
+        except Exception as _ha_err:
+            log_activity(f'[DataAgent] Historical audit failed: {_ha_err}')
 
-    save_state(logs_dir, state.traded_tickers, mode)
-    log_cycle(mode, 'done', summary)
+        # Reconciliation (all modes)
+        run_orphan_reconciliation(client, logs_dir)
+        run_exposure_reconciliation(logs_dir, capital, buying_power)
+
+        # Position check (all modes)
+        state.actions_taken = run_position_check(client, state)
+
+        # Dispatch
+        if mode == 'check':
+            summary = run_check_mode(state)
+        elif mode == 'econ_prescan':
+            summary = run_econ_prescan_mode(client, state)
+        elif mode == 'weather_only':
+            summary = run_weather_only_mode(state)
+        elif mode == 'crypto_only':
+            summary = run_crypto_only_mode(state)
+        elif mode == 'report':
+            summary = run_report_mode(state)
+        elif mode == 'full':
+            summary = run_full_mode(client, state)
+        elif mode == 'smart':
+            # TODO (C4): 'smart' mode not yet implemented.
+            # Intended: lightweight refresh (smart money + position check only, no full scans).
+            # Not currently scheduled. Falls back to full mode to avoid silent no-ops.
+            summary = run_full_mode(client, state)
+        else:
+            raise ValueError(f'Unknown mode: {mode}')
+
+        # ── Data Agent: post-scan audit (non-fatal) ─────────────────────────────
+        # Note: 'smart' mode triggers lighter synthesis (pnl_cache + positions only)
+        if mode in ('full', 'smart', 'crypto_only', 'weather_only', 'econ_prescan'):
+            try:
+                from agents.ruppert.data_scientist.data_agent import run_post_scan_audit
+                _audit = run_post_scan_audit(mode='post_cycle')
+                _iss = _audit.get('issues_found', 0)
+                if _iss:
+                    print(f'  [DataAgent] {_iss} issue(s) found and handled')
+            except Exception as _da_err:
+                log_activity(f'[DataAgent] Post-scan audit failed: {_da_err}')
+
+        save_state(logs_dir, state.traded_tickers, mode)
+        log_cycle(mode, 'done', summary)
+
+    except Exception as e:
+        log_cycle(mode, 'error', {'exception': str(e)})
+        raise
 
 
 if __name__ == '__main__':

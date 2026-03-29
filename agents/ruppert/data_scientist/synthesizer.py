@@ -1,12 +1,10 @@
 """
-synthesizer.py — Data Scientist event synthesizer.
+Scans trade log files and raw event logs to produce authoritative truth files:
+  - logs/trades/trades_YYYY-MM-DD.jsonl → logs/truth/pnl_cache.json  (exit/settle records)
+  - logs/raw/events_YYYY-MM-DD.jsonl    → logs/truth/pending_alerts.json  (ALERT_CANDIDATE events)
+  - logs/raw/events_YYYY-MM-DD.jsonl    → logs/truth/state.json  (STATE_UPDATE events)
 
-Reads raw event logs and synthesizes truth files:
-  - ALERT_CANDIDATE events  → logs/truth/pending_alerts.json
-  - SETTLEMENT events       → logs/truth/pnl_cache.json
-  - STATE_UPDATE events     → logs/truth/state.json
-
-Called by data_agent.py after each scan cycle.
+Execution model: called by data_agent.py after each scan cycle (poll-based, not event-driven).
 Also runnable standalone: python -m agents.ruppert.data_scientist.synthesizer
 
 Data Scientist is the SOLE writer of these truth files.
@@ -32,10 +30,8 @@ LOGS_DIR = _env_paths['logs']
 RAW_DIR = _env_paths['raw']
 TRUTH_DIR = _env_paths['truth']
 
-# Trades may live in logs/ (current) or logs/trades/ (after Phase 3 migration)
 _TRADES_DIRS = [
-    LOGS_DIR / 'trades',   # Phase 3 target
-    LOGS_DIR,              # current location
+    LOGS_DIR / 'trades',   # sole location — flat fallback removed (DS9)
 ]
 
 
@@ -195,6 +191,39 @@ def synthesize_state(events: list = None) -> dict | None:
     return state
 
 
+def synthesize_optimizer_review():
+    """Synthesize OPTIMIZER_REVIEW_NEEDED events → logs/truth/pending_optimizer_review.json"""
+    import json
+    from datetime import date
+    today = date.today().isoformat()
+    events_file = RAW_DIR / f'events_{today}.jsonl'
+    if not events_file.exists():
+        return
+    review_events = []
+    try:
+        with open(events_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    ev = json.loads(line)
+                    if ev.get('type') == 'OPTIMIZER_REVIEW_NEEDED':
+                        review_events.append(ev)
+                except Exception:
+                    pass
+    except Exception:
+        return
+    if not review_events:
+        return
+    # Take latest event (by timestamp)
+    latest = sorted(review_events, key=lambda x: x.get('ts', ''))[-1]
+    payload = {
+        'date': latest.get('date', today),
+        'losses': latest.get('losses', []),
+        'total_loss': latest.get('total_loss', 0.0),
+    }
+    out = TRUTH_DIR / 'pending_optimizer_review.json'
+    out.write_text(json.dumps(payload, indent=2), encoding='utf-8')
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def run_synthesis(event_date: date = None) -> dict:
@@ -212,6 +241,7 @@ def run_synthesis(event_date: date = None) -> dict:
     pnl = synthesize_pnl_cache(events)
     new_alerts = synthesize_alerts(events)
     state = synthesize_state(events)
+    synthesize_optimizer_review()
 
     return {
         'events_read': len(events),

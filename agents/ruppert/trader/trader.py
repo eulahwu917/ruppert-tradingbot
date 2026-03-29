@@ -73,19 +73,18 @@ class Trader:
             opportunity['scan_price'] = price_cents
             opportunity['fill_price'] = price_cents
             log_trade(opportunity, size, contracts, {'dry_run': True, 'status': 'simulated'})
-            if not self.dry_run:  # Never track positions in dry-run mode (phantom position guard)
-                try:
-                    from agents.ruppert.trader import position_tracker
-                    position_tracker.add_position(
-                        ticker=ticker,
-                        quantity=contracts,
-                        side=side,
-                        entry_price=price_cents,
-                        module=opportunity.get('module', ''),
-                        title=opportunity.get('title', ticker),
-                    )
-                except Exception as e:
-                    log_activity(f"[Trader] Warning: could not register {ticker} in position tracker: {e}")
+            try:
+                from agents.ruppert.trader import position_tracker
+                position_tracker.add_position(
+                    ticker=ticker,
+                    quantity=contracts,
+                    side=side,
+                    entry_price=price_cents,
+                    module=opportunity.get('module', ''),
+                    title=opportunity.get('title', ticker),
+                )
+            except Exception as e:
+                log_activity(f"[Trader] Warning: could not register {ticker} in position tracker: {e}")
             return True
 
         try:

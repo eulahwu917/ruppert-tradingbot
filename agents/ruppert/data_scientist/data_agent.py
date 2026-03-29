@@ -257,7 +257,14 @@ def check_entry_price_spread(trade: dict) -> bool:
 def check_daily_cap_violations(trades_today: list[dict]) -> list[dict]:
     try:
         from agents.ruppert.data_scientist.capital import get_capital
-        import config as cfg
+        import importlib.util as _ilu
+        from agents.ruppert.env_config import get_env_root as _get_env_root
+        _cfg_path = _get_env_root() / 'config.py'
+        if not _cfg_path.exists():
+            return []
+        _spec = _ilu.spec_from_file_location('config', _cfg_path)
+        cfg = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(cfg)
         capital = get_capital()
     except Exception:
         return []

@@ -39,7 +39,14 @@ def get_capital() -> float:
     """
     try:
         # Try Kalshi API first (LIVE mode)
-        import config
+        import importlib.util as _ilu
+        from agents.ruppert.env_config import get_env_root as _get_env_root
+        _cfg_path = _get_env_root() / 'config.py'
+        if not _cfg_path.exists():
+            return _DEFAULT_CAPITAL
+        _spec = _ilu.spec_from_file_location('config', _cfg_path)
+        config = _ilu.module_from_spec(_spec)
+        _spec.loader.exec_module(config)
         if getattr(config, 'DRY_RUN', True) is False:
             try:
                 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
@@ -99,7 +106,7 @@ def get_daily_exposure() -> float:
 def get_pnl() -> dict:
     """
     Return P&L summary: {'closed': float, 'open': float, 'total': float}
-    Reads from pnl_cache.json (written by dashboard).
+    Reads from pnl_cache.json (written by synthesizer.py via Data Scientist). Dashboard is read-only.
     """
     result = {'closed': 0.0, 'open': 0.0, 'total': 0.0}
     try:
