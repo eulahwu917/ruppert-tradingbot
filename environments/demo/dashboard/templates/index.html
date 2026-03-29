@@ -890,11 +890,11 @@ async function loadLivePrices(positions) {
 }
 
 function updateAccountValue() {
-  // Single source of truth: $400 base + open P&L + closed P&L
-  const base     = window._kalshiBalance || 400;
-  const openPnl  = window._openPnl  || 0;
-  const closedPnl= window._closedPnl || 0;
-  document.getElementById('av').textContent = dollar(base + openPnl + closedPnl);
+  // Account Value = balance + open P&L
+  // balance (window._kalshiBalance) = get_capital() = deposits + closed_pnl already included
+  const base    = window._kalshiBalance || 400;
+  const openPnl = window._openPnl  || 0;
+  document.getElementById('av').textContent = dollar(base + openPnl);
 }
 
 // ── Trades ─────────────────────────────────────────────────────────────────────
@@ -1107,8 +1107,9 @@ function renderState(state) {
   window._openPnl       = acct.open_pnl  || 0;
   window._closedPnl     = acct.closed_pnl || 0;
 
-  // Account Value = balance + open P&L + closed P&L
-  $('av').textContent = dollar((acct.balance||0) + (acct.open_pnl||0) + (acct.closed_pnl||0));
+  // Account Value = balance + open P&L
+  // balance = get_capital() = deposits + closed_pnl (closed_pnl already included)
+  $('av').textContent = dollar((acct.balance||0) + (acct.open_pnl||0));
 
   // Open P&L
   setPnl('opnl', 'opnl-pct', acct.open_pnl || 0, acct.open_cost || 0);
