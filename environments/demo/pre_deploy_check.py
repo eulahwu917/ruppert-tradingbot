@@ -8,6 +8,7 @@ Usage: python pre_deploy_check.py
 """
 import subprocess
 import sys
+from pathlib import Path
 
 
 def main():
