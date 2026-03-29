@@ -44,10 +44,13 @@ _Maintained by: CEO. Update during Phase 5 housekeeping after every audit loop._
 - `agents/ruppert/RULES.md` — standing rules for all agents
 
 ## Archive
-- `environments/demo/archive/` — old environment files (includes `pre-phase6-demo-root-2026-03-28/`, `ruppert-backtest-old/`, `dead-backtest-code/`)
-- `environments/demo/logs/archive/` — old log files
-- `environments/demo/logs/archive/stale-2026-03-28/` — stale logs swept 2026-03-28
-- `environments/demo/memory/agents/archive/` — completed/superseded agent spec/audit files
+Archive destinations by type — always use the location closest to the source:
+- Environment scripts/specs → `environments/demo/archive/` (includes `pre-phase6-demo-root-2026-03-28/`, `ruppert-backtest-old/`, `dead-backtest-code/`)
+- Log files → `environments/demo/logs/archive/` (e.g. `stale-2026-03-28/`)
+- Agent session artifacts → `environments/demo/memory/agents/archive/`
+- Workspace memory notes → `memory/archive/`
+- Trader-specific archived code → `agents/ruppert/trader/archive/`
+- **Never use `workspace/archive/`** — that folder has been removed. Route to the appropriate domain folder above.
 - Never delete — archive only. Always verify a file is no longer in use before archiving.
 
 ## Completed Specs (archived, not active)
