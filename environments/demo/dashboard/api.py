@@ -20,6 +20,17 @@ from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 from agents.ruppert.data_scientist.logger import classify_module
 import agents.ruppert.data_analyst.market_cache as market_cache
 
+# Initialize Kalshi REST client once at startup for market_cache fallback.
+# When the WS cache is stale/missing, get_market_price(ticker, fallback_client=kalshi_client)
+# will call kalshi_client.get_market(ticker) to fetch live prices via REST.
+try:
+    from agents.ruppert.data_analyst.kalshi_client import KalshiClient as _KalshiClient
+    kalshi_client = _KalshiClient()
+except Exception as _e:
+    import logging as _logging
+    _logging.getLogger(__name__).warning('[Dashboard] Kalshi REST client init failed: %s', _e)
+    kalshi_client = None
+
 app = FastAPI(title="Ruppert Trading Dashboard")
 LOGS_DIR = Path(__file__).parent.parent / "logs"
 MODE_FILE = Path(__file__).parent.parent / "mode.json"
@@ -559,7 +570,7 @@ def get_live_prices():
         ticker = t.get('ticker','')
         if not ticker or ticker in prices:
             continue
-        _cached = market_cache.get_market_price(ticker)
+        _cached = market_cache.get_market_price(ticker, fallback_client=kalshi_client)
         if _cached:
             prices[ticker] = {
                 'yes_ask': _cached['yes_ask'],
@@ -648,7 +659,7 @@ def get_position_statuses():
         seen.add(ticker)
         try:
             # Check WS cache first — if we have fresh prices, market is likely open
-            _cached = market_cache.get_market_price(ticker)
+            _cached = market_cache.get_market_price(ticker, fallback_client=kalshi_client)
             if _cached and _cached.get('source') == 'ws_cache':
                 statuses[ticker] = {
                     'status': 'open',
@@ -1038,7 +1049,7 @@ def get_pnl_history():
     for ticker, t in open_tickers.items():
         try:
             # WS cache first, REST orderbook fallback
-            _cached = market_cache.get_market_price(ticker)
+            _cached = market_cache.get_market_price(ticker, fallback_client=kalshi_client)
             if _cached:
                 yes_bid = _cached['yes_bid']
                 yes_ask = _cached['yes_ask']
@@ -1250,7 +1261,7 @@ def _build_state():
     # ── Fetch prices ONCE per open position (WS cache first, REST fallback) ──
     prices: dict = {}
     for ticker in open_pos_tickers:
-        _cached = market_cache.get_market_price(ticker)
+        _cached = market_cache.get_market_price(ticker, fallback_client=kalshi_client)
         if _cached:
             prices[ticker] = {
                 'yes_ask': _cached['yes_ask'], 'yes_bid': _cached['yes_bid'],
