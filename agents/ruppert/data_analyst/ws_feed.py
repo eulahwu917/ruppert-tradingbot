@@ -195,7 +195,7 @@ async def run_ws_feed():
                 'wss://api.elections.kalshi.com/trade-api/ws/v2',
                 additional_headers=headers,
                 ping_interval=30,
-                ping_timeout=10,
+                ping_timeout=30,
             ) as ws:
                 reconnect_delay = 1  # reset on successful connect
                 print(f'  [WS Feed] Connected at {ts()}')
@@ -234,8 +234,8 @@ async def run_ws_feed():
                         last_purge = now
 
         except Exception as e:
-            print(f'  [WS Feed] Disconnected: {e} — reconnecting in {reconnect_delay}s')
-            log_activity(f'[WS Feed] Disconnected: {e}')
+            print(f'  [WS Feed] Disconnected: {e} (ping_interval=30, ping_timeout=30) — reconnecting in {reconnect_delay}s')
+            log_activity(f'[WS Feed] Disconnected: {e} (ping_interval=30, ping_timeout=30)')
 
             # On disconnect: REST-poll tracked positions to catch missed moves
             try:
