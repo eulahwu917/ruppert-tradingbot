@@ -1,6 +1,0 @@
-# QA REPORT — Trades Count + Label Fix
-_SA-4 QA | Date: 2026-03-12 | Commit: a50a78b_
-
-**Status: ✅ PASS**
-
-All six checks verified against `dashboard/templates/index.html`. (1) Both Bot and Manual cards now read "Open Capital Deployed" (max-width 110px) — confirmed at lines 356 and 374. (2) Both cards now read "Total Trades" (max-width 70px) — confirmed at lines 360 and 378. (3) The overwriting lines (`$('bot-cnt').textContent = acct.bot_trade_count || 0` and `$('man-cnt').textContent = acct.manual_trade_count || 0`) are absent from `loadAccount()` — their removal is replaced by a clear explanatory comment at lines 612–614 directing future readers to `loadClosedPnl()`. (4) `bot-cnt` and `man-cnt` remain correctly set in `loadClosedPnl()` at lines 1151 and 1153 from `pnl.bot_trades` and `pnl.man_trades` respectively — untouched. (5) `loadAccount()` still correctly sets all its other fields: mode via `applyMode()`, buying power via `$('bp')`, the global `window._kalshiBalance`, and the timestamp `$('ts')` — no regressions. (6) No out-of-scope changes detected; only the four label strings and the removal of the two overwrite lines are present as described in the developer summary. Ready for CEO approval.
