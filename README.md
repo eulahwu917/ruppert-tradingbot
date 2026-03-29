@@ -12,7 +12,7 @@ CEO (Ruppert) — ruppert_cycle.py
 ├── Strategist — strategy.py, edge_detector.py, optimizer.py
 ├── Data Scientist — capital.py, logger.py, data_agent.py, dashboard
 │   ├── Data Analyst — market_cache.py, kalshi_client.py, ws_feed.py, wallet_updater.py
-│   └── Researcher — autoresearch.py (backlog)
+│   └── Researcher — research_agent.py, market_scanner.py
 └── Trader — trader.py, position_monitor.py, position_tracker.py
 ```
 
