@@ -1,6 +1,6 @@
 """
 research_agent.py — Researcher agent for Ruppert trading bot.
-Owner: Researcher (Sonnet). Runs weekly (Sunday 8AM via Task Scheduler).
+Owner: Researcher (Sonnet). Runs weekly (Sunday 8AM via Ruppert-Research-Weekly Task Scheduler task).
 
 Discovers new Kalshi market opportunities and new data sources.
 - Scans Kalshi API for market categories not currently traded

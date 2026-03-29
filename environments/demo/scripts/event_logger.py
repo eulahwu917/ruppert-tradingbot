@@ -8,7 +8,7 @@ from datetime import datetime, date
 from pathlib import Path
 
 LOGS_DIR = Path(__file__).parent.parent / 'logs' / 'raw'
-LOGS_DIR.mkdir(parents=True, exist_ok=True)
+# Directory created on first write (see log_event)
 
 
 def log_event(event_type: str, data: dict, source: str = None) -> None:
@@ -41,6 +41,7 @@ def log_event(event_type: str, data: dict, source: str = None) -> None:
         **data,
     }
 
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOGS_DIR / f'events_{date.today().isoformat()}.jsonl'
     with open(log_path, 'a', encoding='utf-8') as f:
         f.write(json.dumps(event) + '\n')

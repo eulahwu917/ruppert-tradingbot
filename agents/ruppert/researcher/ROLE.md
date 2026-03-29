@@ -37,7 +37,7 @@ You find new market opportunities and produce research reports. You do not trade
 
 ## Responsibilities
 
-- Weekly light scan (Sundays 8am via Ruppert-ArchitectureResearch task)
+- Weekly light scan (Sundays 8am via Ruppert-Research-Weekly task)
 - Monthly deep scan (first Sunday of month)
 - Discover new Kalshi market categories worth trading
 - Flag opportunities with: expected edge, data requirements, implementation complexity

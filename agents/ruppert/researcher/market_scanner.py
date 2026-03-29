@@ -53,10 +53,6 @@ CANDIDATE_SERIES_TO_SCAN = [
     'KXPRECIP', 'KXSNOW', 'KXRAIN',
     # Macro
     'KXGDP', 'KXPCE', 'KXPPI', 'KXNFP', 'KXJOBLESSCLAIMS',
-    # Politics
-    'KXPRES', 'KXSEC', 'KXHOUSE', 'KXSENATE',
-    # Sports
-    'KXNFL', 'KXNBA', 'KXMLB', 'KXNHL',
     # Market / Equities
     'KXSPY', 'KXNDX', 'KXDOW', 'KXVIX',
     # Crypto — additional
@@ -65,6 +61,7 @@ CANDIDATE_SERIES_TO_SCAN = [
     'KXOIL', 'KXGAS',
     # Tech events
     'KXAI', 'KXAPPLE', 'KXNVIDIA',
+    # NOTE: CA_RESTRICTED_SERIES (sports + elections) intentionally excluded
 ]
 
 # Public API — no auth needed for market discovery
@@ -145,9 +142,16 @@ def scan_all_candidates(candidates: list[str] | None = None) -> list[dict]:
     """
     Scan a list of series candidates for open market opportunities.
     Returns list of result dicts sorted by volume descending.
+    Skips any series in CA_RESTRICTED_SERIES before making API calls.
     """
     targets = candidates or CANDIDATE_SERIES_TO_SCAN
     results = []
+
+    # Pre-filter: skip California-restricted series before hitting API
+    restricted_skipped = [s for s in targets if s in CA_RESTRICTED_SERIES]
+    targets = [s for s in targets if s not in CA_RESTRICTED_SERIES]
+    if restricted_skipped:
+        print(f"[Scanner] Skipping {len(restricted_skipped)} CA-restricted series: {restricted_skipped}")
 
     print(f"[Scanner] Probing {len(targets)} candidate series...")
     for series in targets:
@@ -253,20 +257,22 @@ def classify_opportunity(result: dict) -> dict:
 def check_economic_calendar_gaps() -> list[dict]:
     """
     Identify economic indicator categories on Kalshi that we don't cover.
-    Placeholder — expands as we discover more series.
+    Known series list is manually maintained — update when new Kalshi econ series are discovered.
     Returns list of gap findings.
     """
     gaps = []
 
     covered_econ_series = {'KXFOMC', 'KXFED', 'KXCPI', 'KXUNRATE'}
 
-    # Known Kalshi econ series (expand this list as discovered)
+    # Known Kalshi econ series — manually maintained, update as new series are listed on Kalshi
+    # Last reviewed: 2026-03-29
+    # To add a new series: append {'KXSERIES': 'description'} and add to CANDIDATE_SERIES_TO_SCAN
     known_econ_series = {
         'KXGDP': 'GDP growth rate',
         'KXPCE': 'PCE inflation',
         'KXPPI': 'Producer Price Index',
         'KXNFP': 'Non-Farm Payrolls',
-        'KXJOBLESSCLAIMS': 'Initial Jobless Claims',
+        'KXJOBLESSCLAIMS': 'Initial Jobless Claims',  # was KXISA (incorrect) — corrected 2026-03-29
         'KXCPI': 'CPI (covered)',
         'KXFOMC': 'FOMC rate decision (covered)',
         'KXUNRATE': 'Unemployment rate (covered)',
@@ -311,7 +317,7 @@ def generate_signal_hypotheses() -> list[dict]:
             'category': 'NFP (Non-Farm Payrolls)',
             'signal_sources': ['ADP employment report', 'weekly jobless claims', 'ISM employment subindex'],
             'hypothesis': 'ADP payroll data releases 2 days before NFP and is correlated. If ADP surprised high/low, NFP Kalshi markets may not have updated. Early-mover edge possible.',
-            'data_source_needed': 'BLS ADP data (free), already partially covered in economics_client.py',
+            'data_source_needed': 'BLS ADP data (free), already partially covered in environments/demo/economics_client.py — not yet importable from researcher package',
             'effort': 'low',
             'priority': 'high',
         },

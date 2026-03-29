@@ -26,7 +26,7 @@ WORKSPACE_ROOT = Path(os.environ.get(
     Path.home() / '.openclaw' / 'workspace'
 ))
 
-PYTHON_EXE = r'C:\Users\David Wu\AppData\Local\Programs\Python\Python312\python.exe'
+PYTHON_EXE = os.environ.get('RUPPERT_PYTHON_EXE', sys.executable)
 
 
 def get_env():
@@ -41,9 +41,9 @@ def get_heartbeat_file():
     return get_env_root() / 'logs' / 'ws_feed_heartbeat.json'
 
 
-def get_ws_feed_script():
-    # ws_feed.py is in the environment root (runs as -m agents.data_analyst.ws_feed)
-    return get_env_root()
+# get_ws_feed_script() removed — was dead code (never called).
+# ws_feed is launched via module invocation in start_ws_feed():
+#   python -m agents.ruppert.data_analyst.ws_feed
 
 
 def log(msg):
