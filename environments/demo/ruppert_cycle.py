@@ -1114,7 +1114,7 @@ def run_cycle(mode):
     )
 
     try:
-        # Data Agent: daily historical audit (once per day, non-fatal)
+        # Data Scientist: daily historical audit (once per day, non-fatal)
         try:
             from agents.ruppert.data_scientist.data_agent import run_historical_audit
             run_historical_audit(since_date=(date.today() - timedelta(days=30)).isoformat())
@@ -1149,7 +1149,7 @@ def run_cycle(mode):
         else:
             raise ValueError(f'Unknown mode: {mode}')
 
-        # ── Data Agent: post-scan audit (non-fatal) ─────────────────────────────
+        # ── Data Scientist: post-scan audit (non-fatal) ─────────────────────────────
         # Note: 'smart' mode triggers lighter synthesis (pnl_cache + positions only)
         if mode in ('full', 'smart', 'crypto_only', 'weather_only', 'econ_prescan'):
             try:
