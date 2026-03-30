@@ -39,6 +39,7 @@ from scripts.event_logger import log_event
 
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from agents.ruppert.data_scientist.logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock, normalize_entry_price
+from agents.ruppert.trader import position_tracker
 
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -316,6 +317,11 @@ def check_settlements(client):
         })
         print(f"  [Settlement] {ticker} {side.upper()} → {result.upper()} | P&L=${pnl:+.2f}")
         settled_count += 1
+
+        try:
+            position_tracker.remove_position(ticker, side)
+        except Exception as _pt_err:
+            print(f"  [Settlement Checker] WARN: could not remove {ticker} {side} from tracker: {_pt_err}")
 
         # Accumulate 15m crypto settlements by window for circuit breaker update
         if pos.get('module') == 'crypto_15m':
