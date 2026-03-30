@@ -140,7 +140,7 @@ def apply_market_impact_ceiling(
         reason = f"moderate_spread({spread}c)"
     else:
         size = min(base_size, 25.0)
-        reason = f"thin_spread({spread}c)_floored"
+        reason = f"thin_spread({spread}c)_capped"
 
     # Phase 2: OI cap (when open_interest available)
     if open_interest is not None and open_interest > 0:

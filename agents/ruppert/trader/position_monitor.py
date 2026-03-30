@@ -314,7 +314,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
             close_dt = datetime.fromisoformat(close_time.replace('Z', '+00:00'))
             now = datetime.now(timezone.utc)
             hours_left = max((close_dt - now).total_seconds() / 3600, 0.1)
-        except:
+        except Exception:
             pass
     
     sigma = current_price * realized_vol * math.sqrt(max(hours_left, 0.1))

@@ -190,7 +190,6 @@ HARDCODED_BIAS_F = {
     "KXHIGHNY":  2.0,
     "KXHIGHCHI": 4.0,
     "KXHIGHMIA": 4.0,
-    "KXHIGHLA":  3.0,
     "KXHIGHHOU": 3.0,
     "KXHIGHPHX": 3.0,
     "KXHIGHAUS": 3.0,
