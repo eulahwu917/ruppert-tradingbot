@@ -197,6 +197,38 @@ memory/changelog/
 
 ---
 
+## Phase 7 — System Restart Check
+
+After the audit log is written, CEO checks whether any persistent processes need restarting due to code changes in this session.
+
+**Persistent processes to check:**
+- `ws_feed.py` (WS feed) — PID in `logs/ws_feed_heartbeat.json`
+- `ws_feed_watchdog.py` (Watchdog) — Task Scheduler task `Ruppert-WS-Watchdog`
+- Dashboard (`uvicorn`) — Task Scheduler task `RuppertDashboard`
+
+**Files that trigger a restart if changed:**
+- ws_feed.py → restart WS feed (watchdog will do it automatically if killed)
+- ws_feed_watchdog.py → restart watchdog Task Scheduler task
+- dashboard/api.py → restart dashboard
+
+**Procedure:**
+1. Check which files were modified this audit session (from git log or commit messages)
+2. For each modified file, check if the corresponding process is running the OLD code:
+   - WS feed: compare heartbeat PID start time vs commit time
+   - Watchdog: `Get-ScheduledTaskInfo -TaskName Ruppert-WS-Watchdog | Select LastRunTime`
+   - Dashboard: check process start time
+3. If any process needs restart:
+   - **WS feed**: kill the old PID — watchdog will auto-restart it within 10 min (or trigger watchdog manually via `Start-ScheduledTask Ruppert-WS-Watchdog`)
+   - **Watchdog**: `Stop-ScheduledTask` then `Start-ScheduledTask -TaskName Ruppert-WS-Watchdog`
+   - **Dashboard**: `Stop-ScheduledTask` then `Start-ScheduledTask -TaskName RuppertDashboard`
+4. Verify fresh heartbeat written within 2 min after restart
+
+**If no code changes this session:** Skip this phase — output "Phase 7: No restarts needed."
+
+**Note (from 2026-03-29b):** The watchdog can die if ws_feed.py is edited mid-run (import error propagates back). If both watchdog AND ws_feed are dead after an audit, restart the watchdog via Task Scheduler first — it will auto-restart ws_feed.
+
+---
+
 ## Full workflow summary
 
 ```
@@ -207,6 +239,7 @@ Phase 3:  Dev→QA batches (sequential, criticals-first domain order)
 Phase 4:  Verification loop (re-audit → fix → repeat until clean)
 Phase 5:  CEO housekeeping (stale files/code sweep, archive only)
 Phase 6:  CEO writes audit log (CHANGELOG + domain files + archive temp files)
+Phase 7:  System restart check (restart any processes whose code was changed)
 ```
 
 ---
@@ -219,3 +252,9 @@ Phase 6:  CEO writes audit log (CHANGELOG + domain files + archive temp files)
 - Specs resolved-via-parent: always note in Dev task (saves QA confusion).
 - config_audit.py (Researcher): always query actual Task Scheduler before populating REQUIRED_TASKS.
 - After the audit loop, check for duplicate Task Scheduler registrations — these don't break anything but should be cleaned up.
+
+## Tips from 2026-03-29b session
+
+- **Always run Phase 7.** Code changes to ws_feed.py or watchdog will leave persistent processes running on old code. Discovered when WS feed died at 4:16pm and watchdog had also died — neither restarted because Task Scheduler only fires watchdog on boot. Fixed: Task Scheduler now retries watchdog on failure (10x, every 2 min).
+- If watchdog log shows only one run from morning boot, it crashed. Check with `Get-Process python*` — if only dashboard is running, both are dead.
+- Killing the old ws_feed PID is enough — the watchdog detects stale heartbeat within 10 min and auto-restarts.
