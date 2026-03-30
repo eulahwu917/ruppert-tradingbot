@@ -250,47 +250,7 @@ def _translate_15m_side(ticker: str, side: str) -> str:
     return side
 
 
-def is_settled_ticker(ticker: str) -> bool:
-    """Return True if ticker contains a past date (market already settled).
-    Handles both date-only (26MAR11) and date+time (26MAR1117) formats.
-    """
-    import re as _re
-    from datetime import date, datetime
-    today = date.today()
-    months = {'JAN':1,'FEB':2,'MAR':3,'APR':4,'MAY':5,'JUN':6,
-              'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
-    parts = ticker.upper().split('-')
-    for part in parts:
-        # Match 26MAR11 (date only), 26MAR1117 (date + 2-digit hour), or 26MAR111300 (date + 4-digit HHMM)
-        m = _re.match(r'^(\d{2})([A-Z]{3})(\d{2})(\d{2}|\d{4})?$', part)
-        if m:
-            yy, mon, dd = m.group(1), m.group(2), m.group(3)
-            month_num = months.get(mon)
-            if month_num:
-                try:
-                    mkt_date = date(2000 + int(yy), month_num, int(dd))
-                    if mkt_date < today:
-                        return True
-                    # Same day but with hour — check if settlement time has passed
-                    if mkt_date == today and m.group(4):
-                        time_str = m.group(4)
-                        # W6 fix: use full EDT datetime comparison to avoid midnight
-                        # crossover bug where (utc_hour - 4) % 24 wraps 0-2 and
-                        # fails the >= check against settlement hours like 17.
-                        from datetime import datetime as _dt, timedelta as _td
-                        now_edt = _dt.utcnow() - _td(hours=4)
-                        if len(time_str) == 2:
-                            hour = int(time_str)
-                            settle_edt = _dt(mkt_date.year, mkt_date.month, mkt_date.day, hour)
-                        else:  # 4-digit HHMM
-                            hour = int(time_str[:2])
-                            minute = int(time_str[2:])
-                            settle_edt = _dt(mkt_date.year, mkt_date.month, mkt_date.day, hour, minute)
-                        if now_edt >= settle_edt:
-                            return True
-                except Exception:
-                    pass
-    return False
+from agents.ruppert.data_scientist.ticker_utils import is_settled_ticker  # noqa: F401
 
 @app.get("/api/summary")
 def get_summary():

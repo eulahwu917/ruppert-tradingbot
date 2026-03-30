@@ -252,7 +252,19 @@ def run_weather_scan(dry_run=True, traded_tickers=None, open_position_value=0.0)
                 _open_exposure = 0.0
 
         approved_opps = []
-        _weather_deployed_this_cycle = 0.0
+        try:
+            from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_daily_exp
+            _weather_deployed_this_cycle = _get_daily_exp(module='weather')
+        except Exception:
+            _weather_deployed_this_cycle = 0.0
+
+        if _weather_deployed_this_cycle >= _weather_daily_cap:
+            log_activity(
+                f"[Weather] Daily cap already reached: ${_weather_deployed_this_cycle:.2f} deployed "
+                f"(cap ${_weather_daily_cap:.0f}). Skipping scan."
+            )
+            return []
+
         for opp in opportunities:
             # ── Global 70% open exposure check ──
             if not check_open_exposure(total_capital, _open_exposure):
@@ -547,7 +559,17 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
             _deployed_today = 0.0
 
         _crypto_daily_cap = _total_capital * getattr(config, 'CRYPTO_DAILY_CAP_PCT', 0.07)
-        _crypto_deployed_this_cycle = 0.0
+        try:
+            from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_daily_exp
+            _crypto_deployed_this_cycle = _get_daily_exp(module='crypto')
+        except Exception:
+            _crypto_deployed_this_cycle = 0.0
+
+        if _crypto_deployed_this_cycle >= _crypto_daily_cap:
+            print(f"  [DailyCap] Crypto daily cap already reached: ${_crypto_deployed_this_cycle:.2f} deployed "
+                  f"(cap ${_crypto_daily_cap:.0f}). Skipping scan.")
+            return []
+
         try:
             _api_exposure = max(0.0, _total_capital - get_buying_power())
             _open_exposure = max(_api_exposure, open_position_value)
@@ -677,7 +699,11 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
             return []
 
         fed_signal = _run_fed_scan_inner()
-        _fed_deployed_this_cycle = 0.0
+        try:
+            from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_daily_exp
+            _fed_deployed_this_cycle = _get_daily_exp(module='fed')
+        except Exception:
+            _fed_deployed_this_cycle = 0.0
 
         if fed_signal and not fed_signal.get("skip_reason"):
             ticker    = fed_signal.get("ticker", "KXFEDDECISION-?")
@@ -698,6 +724,12 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
                 _fed_cap_ok   = 25.0
 
             _fed_daily_cap   = _fed_capital * getattr(config, 'FED_DAILY_CAP_PCT', 0.03)
+
+            if _fed_deployed_this_cycle >= _fed_daily_cap:
+                print(f"  [DailyCap] Fed daily cap already reached: ${_fed_deployed_this_cycle:.2f} deployed "
+                      f"(cap ${_fed_daily_cap:.0f}). Skipping scan.")
+                return []
+
             _days_to_meeting = fed_signal.get('days_to_meeting', 5)
             _fed_hours       = max(1.0, _days_to_meeting * 24)
 
@@ -860,7 +892,18 @@ def run_geo_trades(dry_run=True, traded_tickers=None, open_position_value=0.0):
             _geo_deployed = 0.0
 
         _geo_daily_cap = _geo_capital * getattr(config, 'GEO_DAILY_CAP_PCT', 0.04)
-        _geo_deployed_this_cycle = 0.0
+        try:
+            from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_daily_exp
+            _geo_deployed_this_cycle = _get_daily_exp(module='geo')
+        except Exception:
+            _geo_deployed_this_cycle = 0.0
+
+        if _geo_deployed_this_cycle >= _geo_daily_cap:
+            log_activity(
+                f"[Geo] Daily cap already reached: ${_geo_deployed_this_cycle:.2f} deployed "
+                f"(cap ${_geo_daily_cap:.0f}). Skipping scan."
+            )
+            return executed
 
         try:
             _geo_open_exposure = max(0.0, _geo_capital - get_buying_power())

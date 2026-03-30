@@ -240,6 +240,13 @@ def get_daily_exposure(module: str = None) -> float:
                             if not (entry_module == module or
                                     entry_module.startswith(module + '_')):
                                 continue
+                        # Skip tickers whose settlement time has already passed (aligns with dashboard)
+                        try:
+                            from agents.ruppert.data_scientist.ticker_utils import is_settled_ticker as _is_settled
+                            if _is_settled(ticker):
+                                continue
+                        except Exception:
+                            pass  # on import failure, include position (conservative)
                         entries[key] = entries.get(key, 0) + entry.get('size_dollars', 0)
                 except Exception:
                     pass
