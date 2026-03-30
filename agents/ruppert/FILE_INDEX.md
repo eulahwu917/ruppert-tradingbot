@@ -1,6 +1,6 @@
 # FILE_INDEX.md — Where Everything Lives
 _Every agent reads this to know where to put and find things._
-_Last updated: 2026-03-29 (CEO housekeeping sweep — paths corrected, stale entries removed)_
+_Last updated: 2026-03-29b (CEO housekeeping sweep #2 — audit fixes noted, stale entries updated)_
 _Maintained by: CEO. Update during Phase 5 housekeeping after every audit loop._
 
 ---
@@ -48,6 +48,7 @@ _Maintained by: CEO. Update during Phase 5 housekeeping after every audit loop._
 
 ## Pipeline / Org Docs
 - `agents/ruppert/PIPELINE.md` — roles, pipelines, escalation rules (⚠️ known stale — still references old Architect/Optimizer org; update pending)
+- `environments/demo/scripts/ws_feed_watchdog.py` — WS feed watchdog script (**lives in demo/scripts/, NOT researcher folder**)
 - `agents/ruppert/RULES.md` — standing rules for all agents
 
 ## Archive
@@ -64,3 +65,7 @@ Archive destinations by type — always use the location closest to the source:
 - `environments/demo/specs/` — active specs only; completed specs moved to `environments/demo/archive/`
 - Note: `remove_shims_spec.md` → COMPLETED 2026-03-29 (archived)
 - Note: `data_agent_spec.md` → SUPERSEDED 2026-03-29 (code built with different API; archived)
+
+## Known Deferred Items (as of 2026-03-29b)
+- TRADER-V1 deferred: **RESOLVED** 2026-03-29b — barrier_boost logic simplified (no longer deferred)
+- DS-V2 deferred: **STILL OPEN** — Data Scientist V2 work not yet started; track in next audit cycle
