@@ -14,8 +14,11 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import time
+import zoneinfo
+from collections import Counter
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
@@ -507,6 +510,242 @@ def check_decision_log_orphans() -> list[dict]:
         if d_date == date.today().isoformat() and ticker not in trade_tickers:
             orphans.append(d)
     return orphans
+
+
+def _read_pending_alerts() -> list[dict]:
+    """Read pending_alerts.json; return [] if missing or corrupt."""
+    path = TRUTH_DIR / 'pending_alerts.json'
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _write_pending_alerts(alerts: list[dict]):
+    """Atomically write pending_alerts.json."""
+    path = TRUTH_DIR / 'pending_alerts.json'
+    tmp = path.with_suffix('.tmp')
+    tmp.write_text(json.dumps(alerts, indent=2), encoding='utf-8')
+    tmp.replace(path)
+
+
+def _append_pending_alert(alert: dict):
+    """Read → append → write to pending_alerts.json (never overwrites)."""
+    alerts = _read_pending_alerts()
+    alerts.append(alert)
+    _write_pending_alerts(alerts)
+
+
+def check_ws_stability():
+    """Monitor 1: WS Disconnect Frequency / Crash Loop Detection.
+
+    Reads today's activity log, counts [WS Feed] Disconnected: lines in the
+    last 10 minutes, and writes a warning/exit alert to pending_alerts.json
+    if a crash loop is detected (>= 5 disconnects in 10 min).
+    """
+    log_path = LOGS_DIR / f'activity_{date.today().isoformat()}.log'
+    if not log_path.exists():
+        return
+
+    now = datetime.now()
+    window_start = now - timedelta(minutes=10)
+
+    # Parse disconnect lines
+    # Expected format: <timestamp> ... [WS Feed] Disconnected: <reason>
+    disconnect_re = re.compile(r'^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}).*\[WS Feed\] Disconnected:\s*(.*)$')
+    disconnects = []  # list of (datetime, reason)
+
+    try:
+        for line in log_path.read_text(encoding='utf-8').splitlines():
+            m = disconnect_re.match(line.strip())
+            if not m:
+                continue
+            try:
+                ts_str = m.group(1).replace(' ', 'T')
+                ts = datetime.fromisoformat(ts_str)
+            except Exception:
+                continue
+            if ts >= window_start:
+                disconnects.append((ts, m.group(2).strip()))
+    except Exception as e:
+        logger.warning('[DataAgent] check_ws_stability: could not read log: %s', e)
+        return
+
+    count = len(disconnects)
+    if count < 5:
+        return  # Normal reconnects — no alert
+
+    last_reason = disconnects[-1][1] if disconnects else ''
+
+    # Determine if this is a code crash
+    code_crash_indicators = ('exit_thresholds', 'KeyError')
+    is_code_crash = any(ind in last_reason for ind in code_crash_indicators)
+
+    # Deduplication: check if an identical WS crash alert already exists
+    # for the same source within this 10-min window (keyed by window_start minute)
+    window_key = window_start.strftime('%Y-%m-%dT%H:%M')
+    dedup_prefix = f'WS crash loop'
+    existing = _read_pending_alerts()
+    for existing_alert in existing:
+        if (
+            existing_alert.get('source') == 'data_scientist'
+            and existing_alert.get('message', '').startswith(dedup_prefix)
+        ):
+            try:
+                alert_ts = datetime.fromisoformat(existing_alert['ts'])
+                if alert_ts >= window_start:
+                    return  # Already alerted in this window — skip
+            except Exception:
+                pass
+
+    ts_iso = now.isoformat()
+    if is_code_crash:
+        level = 'exit'
+        message = (
+            f"WS crash loop — CODE ERROR detected: '{last_reason}'. "
+            f"CEO + DS to triage. Immediate triage required."
+        )
+    else:
+        level = 'warning'
+        message = (
+            f"WS crash loop detected: {count} disconnects in last 10 min. "
+            f"Last error: '{last_reason}'. CEO + DS to triage."
+        )
+
+    alert = {
+        'level': level,
+        'source': 'data_scientist',
+        'message': message,
+        'ts': ts_iso,
+    }
+    _append_pending_alert(alert)
+    log_activity(f'[DataAgent] WS stability alert written (level={level}, count={count})')
+
+
+def check_15m_entry_drought():
+    """Monitor 2: 15m Entry Drought.
+
+    Only runs during trading hours (06:00–22:00 PDT). Reads decisions_15m.jsonl
+    and writes a warning alert to pending_alerts.json if no ENTER decisions
+    have occurred in the last 4 hours despite normal feed activity, or if the
+    feed appears stalled (< 10 decisions in last 1 hour).
+    """
+    # Trading hours check — America/Los_Angeles (PDT/PST aware)
+    try:
+        tz_la = zoneinfo.ZoneInfo('America/Los_Angeles')
+    except Exception:
+        try:
+            import pytz
+            tz_la = pytz.timezone('America/Los_Angeles')
+        except Exception:
+            logger.warning('[DataAgent] check_15m_entry_drought: could not load LA timezone, skipping')
+            return
+
+    now_utc = datetime.utcnow().replace(tzinfo=zoneinfo.ZoneInfo('UTC'))
+    now_la = now_utc.astimezone(tz_la)
+    if not (6 <= now_la.hour < 22):
+        return  # Outside trading hours
+
+    decisions_path = LOGS_DIR / 'decisions_15m.jsonl'
+    if not decisions_path.exists():
+        return
+
+    now_naive = datetime.now()
+    cutoff_4h = now_naive - timedelta(hours=4)
+    cutoff_1h = now_naive - timedelta(hours=1)
+
+    decisions_4h = []
+    decisions_1h = []
+    try:
+        for line in decisions_path.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+            except Exception:
+                continue
+            ts_str = d.get('ts') or d.get('timestamp') or ''
+            try:
+                ts = datetime.fromisoformat(str(ts_str)[:19])
+            except Exception:
+                continue
+            if ts >= cutoff_4h:
+                decisions_4h.append(d)
+            if ts >= cutoff_1h:
+                decisions_1h.append(d)
+    except Exception as e:
+        logger.warning('[DataAgent] check_15m_entry_drought: could not read decisions: %s', e)
+        return
+
+    total_4h = len(decisions_4h)
+    total_1h = len(decisions_1h)
+    enter_4h = sum(1 for d in decisions_4h if str(d.get('decision', '')).upper() == 'ENTER')
+
+    # Deduplication: don't alert if we already alerted within the last 2 hours
+    dedup_drought_prefix = '15m crypto: 0 entries'
+    dedup_stall_prefix = '15m crypto feed appears stalled'
+    existing = _read_pending_alerts()
+    two_hours_ago = now_naive - timedelta(hours=2)
+
+    def _recently_alerted(prefix: str) -> bool:
+        for a in existing:
+            if (
+                a.get('source') == 'data_scientist'
+                and a.get('message', '').startswith(prefix)
+            ):
+                try:
+                    if datetime.fromisoformat(a['ts']) >= two_hours_ago:
+                        return True
+                except Exception:
+                    pass
+        return False
+
+    # Check 1: Feed stall (< 10 decisions in last 1 hour)
+    if total_1h < 10:
+        if not _recently_alerted(dedup_stall_prefix):
+            alert = {
+                'level': 'warning',
+                'source': 'data_scientist',
+                'message': (
+                    f'15m crypto feed appears stalled — only {total_1h} decisions in last 1h. '
+                    f'WS feed may be down.'
+                ),
+                'ts': now_naive.isoformat(),
+            }
+            _append_pending_alert(alert)
+            log_activity(f'[DataAgent] 15m feed stall alert written (decisions_1h={total_1h})')
+        return  # Don't also fire drought alert when feed is stalled
+
+    # Check 2: Entry drought (0 ENTERs in 4h but module IS running)
+    if enter_4h == 0 and total_4h > 50:
+        if not _recently_alerted(dedup_drought_prefix):
+            # Compute top skip reason
+            skip_reasons = [
+                d.get('reason') or d.get('skip_reason') or 'unknown'
+                for d in decisions_4h
+                if str(d.get('decision', '')).upper() != 'ENTER'
+            ]
+            top_reason = Counter(skip_reasons).most_common(1)[0][0] if skip_reasons else 'unknown'
+
+            alert = {
+                'level': 'warning',
+                'source': 'data_scientist',
+                'message': (
+                    f'15m crypto: 0 entries in last 4h during trading hours. '
+                    f'{total_4h} decisions logged. Top skip reason: {top_reason}. '
+                    f'CEO + DS to investigate.'
+                ),
+                'ts': now_naive.isoformat(),
+            }
+            _append_pending_alert(alert)
+            log_activity(
+                f'[DataAgent] 15m entry drought alert written '
+                f'(total_4h={total_4h}, enter_4h=0, top_reason={top_reason})'
+            )
 
 
 def check_ws_stale_trades(trades: list[dict]) -> list[dict]:
@@ -1074,6 +1313,16 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
         log_activity(f'[DataAgent] Synthesis complete: {synth_result}')
     except Exception as e:
         log_activity(f'[DataAgent] Synthesis failed: {e}')
+
+    # ── Post-scan monitors ─────────────────────────────────────────────────
+    try:
+        check_ws_stability()
+    except Exception as e:
+        log_activity(f'[DataAgent] check_ws_stability failed: {e}')
+    try:
+        check_15m_entry_drought()
+    except Exception as e:
+        log_activity(f'[DataAgent] check_15m_entry_drought failed: {e}')
 
     return {
         'issues_found': len(issues),
