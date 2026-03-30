@@ -148,7 +148,7 @@ OPTIMIZER_HOLD_TIME_FLAG_HRS = 12    # flag if avg hold time above this
 OPTIMIZER_CAP_UTIL_FLAG      = 0.30  # flag if avg cap utilization below 30%
 OPTIMIZER_MAX_AVG_SIZE       = 40.0  # flag if avg position size above this
 
-# ── 15-Min Crypto Direction (KXBTC15M / KXETH15M / KXXRP15M / KXDOGE15M) ────
+# ── 15-Min Crypto Direction (KXBTC15M / KXETH15M / KXXRP15M / KXDOGE15M / KXSOL15M) ────
 CRYPTO_15M_MIN_EDGE          = 0.02   # DATA COLLECTION: 2% min edge (was 0.05)
 CRYPTO_15M_LIQUIDITY_MIN_PCT = 0.0005 # DATA COLLECTION: 0.05% of OI (was 0.001)
 CRYPTO_15M_SIGMOID_SCALE     = 1.0    # sigmoid scale factor (autoresearcher-tunable)
@@ -177,7 +177,7 @@ WS_ACTIVE_SERIES = [
     # Crypto hourly bands
     'KXBTC', 'KXETH', 'KXXRP', 'KXDOGE', 'KXSOL',
     # Crypto 15m direction
-    'KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M',
+    'KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M',
     # Crypto long-horizon (monthly/annual)
     'KXBTCMAXM', 'KXBTCMAXY', 'KXBTCMINY', 'KXBTC2026250', 'KXBTCMAX100',
     'KXETHMAXM', 'KXETHMINY', 'KXETHMAXY',

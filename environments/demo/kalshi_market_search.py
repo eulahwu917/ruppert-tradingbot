@@ -105,7 +105,7 @@ def search_geo_markets(kalshi_client, max_markets=50):
     3. Deduplicate, filter to open markets with orderbook data
     Returns up to max_markets market dicts with live yes_ask/yes_bid prices.
     """
-    from logger import log_activity
+    from agents.ruppert.data_scientist.logger import log_activity
     seen_tickers = set()
     all_markets = []
 

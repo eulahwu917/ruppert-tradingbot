@@ -49,13 +49,14 @@ logger = logging.getLogger(__name__)
 OKX_API      = 'https://www.okx.com/api/v5'
 COINBASE_API = 'https://api.coinbase.com/v2/prices'
 
-CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M']
+CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M']
 
 ASSET_SYMBOLS = {
     'BTC':  'BTC-USDT-SWAP',
     'ETH':  'ETH-USDT-SWAP',
     'XRP':  'XRP-USDT-SWAP',
     'DOGE': 'DOGE-USDT-SWAP',
+    'SOL':  'SOL-USDT-SWAP',
 }
 
 # Signal weights — must sum to 1.0
@@ -798,7 +799,7 @@ def is_15m_ticker(ticker: str) -> bool:
 def _parse_asset_from_ticker(ticker: str) -> str | None:
     """Extract asset name from 15-min ticker (KXBTC15M-... → BTC)."""
     series = ticker.split('-')[0].upper()
-    for prefix in ('KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M'):
+    for prefix in ('KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M'):
         if series == prefix:
             asset = prefix.replace('KX', '').replace('15M', '')
             return asset
