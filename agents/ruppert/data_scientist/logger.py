@@ -120,6 +120,23 @@ def build_trade_entry(opportunity, size, contracts, order_result):
     else:
         action = raw_lower
 
+    # Resolve entry_price: use explicit entry_price if set, else fall back to fill_price.
+    # fill_price is set by trader.py before calling log_trade(), so this is always available
+    # for new buys. Cast to float to normalize int/float/string variants.
+    _fill = opportunity.get('fill_price')
+    _entry = opportunity.get('entry_price')
+    entry_price_val = None
+    if _entry is not None:
+        try:
+            entry_price_val = float(_entry)
+        except (TypeError, ValueError):
+            entry_price_val = None
+    if entry_price_val is None and _fill is not None:
+        try:
+            entry_price_val = float(_fill)
+        except (TypeError, ValueError):
+            entry_price_val = None
+
     return {
         'trade_id':     str(uuid.uuid4()),
         'timestamp':    opportunity.get('timestamp') or datetime.now().isoformat(),
@@ -136,6 +153,7 @@ def build_trade_entry(opportunity, size, contracts, order_result):
         'edge':         opportunity.get('edge'),
         'confidence':   opportunity.get('confidence') if opportunity.get('confidence') is not None
                         else abs(opportunity.get('edge') or 0),
+        'entry_price':  entry_price_val,          # ← NEW: was absent
         'size_dollars': size,
         'contracts':    contracts,
         'scan_contracts': opportunity.get('scan_contracts'),

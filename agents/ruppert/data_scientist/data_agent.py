@@ -343,6 +343,30 @@ def check_pnl_consistency() -> tuple:
     return delta > 0.10, cached, computed
 
 
+def _parse_ticker_expiry(ticker: str) -> date | None:
+    """Parse expiry date from Kalshi weather ticker format.
+
+    Example: KXHIGHTSEA-26MAR29-B46.5  ->  date(2026, 3, 29)
+    Format: {EVENT}-{YY}{MON}{DD}-{STRIKE}
+    """
+    MONTH_MAP = {
+        'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+        'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12,
+    }
+    m = re.search(r'-(\d{2})([A-Z]{3})(\d{2})-', ticker.upper())
+    if not m:
+        return None
+    try:
+        yy, mon_str, dd = int(m.group(1)), m.group(2), int(m.group(3))
+        month = MONTH_MAP.get(mon_str)
+        if not month:
+            return None
+        year = 2000 + yy
+        return date(year, month, dd)
+    except (ValueError, KeyError):
+        return None
+
+
 def get_open_positions_from_logs() -> list[dict]:
     """Get open positions by scanning all trade files.
 
@@ -389,7 +413,19 @@ def get_open_positions_from_logs() -> list[dict]:
                             (old_price * old_contracts + new_price * new_contracts) / total_contracts, 2
                         )
 
-    return [rec for key, rec in entries.items() if key not in exits]
+    # Filter out positions where the ticker's market has already expired
+    today = date.today()
+    open_records = []
+    for key, rec in entries.items():
+        if key in exits:
+            continue
+        ticker = rec.get('ticker', '')
+        expiry = _parse_ticker_expiry(ticker)
+        if expiry is not None and expiry < today:
+            # Market expired in the past — skip (should have been settled)
+            continue
+        open_records.append(rec)
+    return open_records
 
 
 def compute_win_rate_from_logs(module: str) -> float | None:
