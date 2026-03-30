@@ -345,7 +345,7 @@ def run_position_check(client, state):
 
                 # Weather: check ensemble if close to expiry
                 alert_msg = None
-                if source in ('weather', 'bot') and 'KXHIGH' in ticker:
+                if source in ('weather', 'bot'):
                     try:
                         # Derive correct args for get_full_weather_signal from the ticker
                         series_ticker = ticker.split('-')[0].upper()  # e.g. KXHIGHMIA
@@ -581,6 +581,8 @@ def run_weather_only_mode(state):
     try:
         _tz_pdt = _get_local_tz()
         _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
+        import time as _time
+        _tz_abbr = 'PDT' if _time.localtime().tm_isdst > 0 else 'PST'
         try:
             _capital  = get_capital()
             _deployed = get_daily_exposure()
@@ -589,7 +591,7 @@ def run_weather_only_mode(state):
         except Exception:
             _cap_line = 'N/A'
         _scan_msg = (
-            f'\U0001f4ca Ruppert Scan \u2014 {_time_str} PDT\n\n'
+            f'\U0001f4ca Ruppert Scan \u2014 {_time_str} {_tz_abbr}\n\n'
             f'\U0001f324 Weather-only scan\n'
             f'{_weather_count} trade(s) placed\n\n'
             f'\U0001f4b0 Capital: {_cap_line}'
@@ -634,6 +636,8 @@ def run_crypto_only_mode(state):
     try:
         _tz_pdt = _get_local_tz()
         _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
+        import time as _time
+        _tz_abbr = 'PDT' if _time.localtime().tm_isdst > 0 else 'PST'
         try:
             _capital  = get_capital()
             _deployed = get_daily_exposure()
@@ -643,7 +647,7 @@ def run_crypto_only_mode(state):
             _cap_line = 'N/A'
         _15m_block = _build_crypto_15m_block()
         _scan_msg = (
-            f'\U0001f4ca Ruppert Scan \u2014 {_time_str} PDT\n\n'
+            f'\U0001f4ca Ruppert Scan \u2014 {_time_str} {_tz_abbr}\n\n'
             f'\u20bf Crypto-only scan\n'
             f'{_crypto_count} trade(s) placed'
             f'{_15m_block}\n\n'
@@ -739,14 +743,18 @@ def run_report_mode(state):
     """
     print("\n[7AM REPORT] P&L Summary + Loss Detection...")
 
-    today_str     = date.today().isoformat()
-    yesterday_str = (date.today() - timedelta(days=1)).isoformat()
+    today_str = date.today().isoformat()
 
-    # Load all trades: today + yesterday
+    # Load all trades: rolling 7-day window (matches run_position_check lookback)
     all_records: list = []
     from agents.ruppert.env_config import get_paths as _get_paths_rpt
     _rpt_trades_dir = _get_paths_rpt()['trades']
-    for day_str in [yesterday_str, today_str]:
+    _lookback_days = 7
+    _day_strs = [
+        (date.today() - timedelta(days=i)).isoformat()
+        for i in range(_lookback_days - 1, -1, -1)
+    ]
+    for day_str in _day_strs:
         log_path = _rpt_trades_dir / f'trades_{day_str}.jsonl'
         if log_path.exists():
             for line in log_path.read_text(encoding='utf-8').splitlines():
@@ -758,7 +766,7 @@ def run_report_mode(state):
                 except Exception:
                     pass
 
-    print(f"  Loaded {len(all_records)} record(s) from today + yesterday")
+    print(f"  Loaded {len(all_records)} record(s) from past {_lookback_days} days")
 
     # Group records: latest entry per ticker, all exits
     entries_by_ticker: dict = {}
@@ -1029,6 +1037,8 @@ def run_full_mode(client, state):
     try:
         _tz_pdt = _get_local_tz()
         _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
+        import time as _time
+        _tz_abbr = 'PDT' if _time.localtime().tm_isdst > 0 else 'PST'
 
         # Fed status
         _fed_status = 'no signal (outside window)'
@@ -1069,7 +1079,7 @@ def run_full_mode(client, state):
 
         _15m_block = _build_crypto_15m_block()
         _scan_msg = (
-            f"\U0001f4ca Ruppert Scan \u2014 {_time_str} PDT\n\n"
+            f"\U0001f4ca Ruppert Scan \u2014 {_time_str} {_tz_abbr}\n\n"
             f"\U0001f324 Weather: {_w_opps} opportunities | {_w_trades} trades placed\n"
             f"\u20bf Crypto: {_c_dir} | {_c_opps} opportunities | {_c_trades} trades placed\n"
             f"\U0001f30d Geo: {_geo_trades} trade(s) placed\n"

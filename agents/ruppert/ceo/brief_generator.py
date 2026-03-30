@@ -213,7 +213,8 @@ def _get_open_positions_summary(today_trades: list[dict]) -> dict:  # noqa: ARG0
         module = t.get('module') or t.get('source', 'unknown')
 
         if action in ('buy', 'open'):
-            open_pos[ticker] = {'size': size, 'module': module}
+            prev_size = open_pos.get(ticker, {}).get('size', 0)
+            open_pos[ticker] = {'size': prev_size + size, 'module': module}
         elif action in ('exit', 'settle'):
             open_pos.pop(ticker, None)
 

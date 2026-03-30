@@ -297,6 +297,7 @@ def run_weather_scan(dry_run=True, traded_tickers=None, open_position_value=0.0)
             else:
                 log_activity(f"  [Strategy] SKIP  {opp['ticker']}: {decision['reason']}")
 
+        executed: list = []
         if approved_opps:
             try:
                 # Phase 7c: add signal provenance to weather trade logs
@@ -307,9 +308,17 @@ def run_weather_scan(dry_run=True, traded_tickers=None, open_position_value=0.0)
                         'model': 'open_meteo_multi_model',
                     }
                 trader = Trader(dry_run=dry_run)
-                trader.execute_all(approved_opps)
-                # Log Brier predictions for each executed weather trade
                 for opp in approved_opps:
+                    try:
+                        result = trader.execute_opportunity(opp)
+                        if not result:
+                            log_activity(f"[Weather] execute_opportunity returned falsy for {opp.get('ticker')} — skipping post-trade logging")
+                            continue
+                        executed.append(opp)
+                    except Exception as _opp_err:
+                        log_activity(f"[Weather] execute_opportunity failed for {opp.get('ticker')}: {_opp_err}")
+                        continue
+                    # Log Brier predictions for each executed weather trade
                     try:
                         from brier_tracker import log_prediction
                         log_prediction(
@@ -345,7 +354,7 @@ def run_weather_scan(dry_run=True, traded_tickers=None, open_position_value=0.0)
         else:
             log_activity("[Weather] No opportunities approved by strategy layer.")
 
-        return approved_opps
+        return executed
 
     except Exception as e:
         log_activity(f"[Weather] ERROR: {e}")
