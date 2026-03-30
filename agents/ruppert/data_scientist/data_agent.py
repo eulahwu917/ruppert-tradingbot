@@ -608,6 +608,70 @@ def _flag_trade(path: Path, trade_id: str, flag_key: str, flag_value=True):
         _write_trades_file(path, trades)
 
 
+def _register_missing_positions(missing_tickers: list, open_positions: list) -> int:
+    """Reconstruct and register missing positions back into the tracker file.
+
+    Mirrors _remove_tracker_orphans but writes entries instead of deleting them.
+    Each reconstructed entry is flagged with _reconstructed=True and a timestamp
+    for auditability. Returns count of successfully registered positions.
+    """
+    if not missing_tickers or not open_positions:
+        return 0
+    try:
+        tracked = {}
+        if TRACKER_FILE.exists():
+            try:
+                tracked = json.loads(TRACKER_FILE.read_text(encoding='utf-8'))
+            except Exception:
+                pass
+
+        # Build lookup: ticker -> list of open position records
+        pos_by_ticker: dict = {}
+        for pos in open_positions:
+            t = pos.get('ticker', '')
+            if t:
+                pos_by_ticker.setdefault(t, []).append(pos)
+
+        registered = 0
+        reconstructed_at = datetime.now().isoformat()
+
+        for ticker in missing_tickers:
+            records = pos_by_ticker.get(ticker, [])
+            if not records:
+                continue
+            for rec in records:
+                side = rec.get('side', '')
+                key = f'{ticker}::{side}' if side else ticker
+                # Skip if already present (race condition guard)
+                if key in tracked:
+                    continue
+                entry = {
+                    'ticker': ticker,
+                    'side': side,
+                    'entry_price': rec.get('entry_price'),
+                    'contracts': rec.get('contracts'),
+                    'size_dollars': rec.get('size_dollars'),
+                    'module': rec.get('module', TICKER_MODULE_MAP.get(ticker.upper(), 'unknown')),
+                    'trade_id': rec.get('trade_id'),
+                    'title': rec.get('title') or ticker,
+                    'entry_date': rec.get('date') or rec.get('ts') or rec.get('timestamp'),
+                    '_reconstructed': True,
+                    '_reconstructed_at': reconstructed_at,
+                }
+                tracked[key] = entry
+                registered += 1
+
+        if registered:
+            tmp = TRACKER_FILE.with_suffix('.tmp')
+            tmp.write_text(json.dumps(tracked, indent=2), encoding='utf-8')
+            tmp.replace(TRACKER_FILE)
+
+        return registered
+    except Exception as e:
+        print(f'[DataAgent] Tracker missing-position registration failed: {e}')
+        return 0
+
+
 def _remove_tracker_orphans(orphan_tickers: list, open_positions: list = None):
     """Remove orphan tickers from position tracker file.
 
@@ -826,13 +890,24 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
         })
         log_activity(f'[DataAgent] Removed tracker orphans: {drift["orphans"]}')
     if drift['missing']:
-        flagged += len(drift['missing'])
-        issues.append({
-            'type': 'tracker_missing',
-            'tickers': drift['missing'],
-            'action': 'logged (no auto-add)',
-        })
-        log_activity(f'[DataAgent] Missing from tracker: {drift["missing"]}')
+        registered = _register_missing_positions(drift['missing'], open_positions)
+        if registered > 0:
+            auto_fixed += registered
+            issues.append({
+                'type': 'tracker_missing',
+                'tickers': drift['missing'],
+                'action': f'auto-registered {registered} missing position(s) into tracker',
+            })
+            log_activity(f'[DataAgent] Reconstructed {registered} missing tracker entries: {drift["missing"]}')
+        else:
+            # Reconstruction failed — fall back to logging only
+            flagged += len(drift['missing'])
+            issues.append({
+                'type': 'tracker_missing',
+                'tickers': drift['missing'],
+                'action': 'logged (no auto-add)',
+            })
+            log_activity(f'[DataAgent] Missing from tracker (reconstruction failed): {drift["missing"]}')
 
     # ── Important checks (full cycles only) ───────────────────────────────
 
