@@ -1112,7 +1112,7 @@ function renderState(state) {
   $('av').textContent = dollar((acct.balance||0) + (acct.open_pnl||0));
 
   // Open P&L
-  setPnl('opnl', 'opnl-pct', acct.open_pnl || 0, acct.open_cost || 0);
+  setPnl('opnl', 'opnl-pct', acct.open_pnl || 0, acct.balance || 0);
 
   // Closed P&L (period-aware)
   window._cpnlData = {

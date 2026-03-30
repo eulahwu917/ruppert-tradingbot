@@ -907,7 +907,7 @@ def get_pnl_history():
     # Use pnl field from settle/exit records directly — no API calls needed.
     for ticker, t in settled_tickers.items():
         try:
-            src = exit_records[ticker].get('source', t.get('source', 'bot')) if ticker in exit_records else t.get('source', 'bot')
+            src = t.get('source', 'bot')
             is_manual = src in ('economics', 'geo', 'manual')
             position_cost = float(t.get('size_dollars') or 0)
             if is_manual:
@@ -1333,8 +1333,7 @@ def _build_state():
 
     for ticker, t in settled_tickers.items():
         try:
-            src = (exit_records[ticker].get('source', t.get('source', 'bot'))
-                   if ticker in exit_records else t.get('source', 'bot'))
+            src = t.get('source', 'bot')
             is_manual = src in ('economics', 'geo', 'manual')
 
             side2 = t.get('side', 'no')
