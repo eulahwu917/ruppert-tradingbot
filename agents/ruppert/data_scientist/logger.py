@@ -403,6 +403,8 @@ def classify_module(src: str, ticker: str) -> str:
         return 'geo'
     if src == 'manual':
         return 'manual'
+    if src == 'crypto_15m' or '15M' in (ticker or '').upper():
+        return 'crypto'
     return 'other'
 
 

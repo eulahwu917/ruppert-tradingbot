@@ -205,35 +205,49 @@ def settlement_date_from_ticker(ticker: str):
     return None
 
 def _parse_15m_window_time(ticker: str):
-    """Extract the UTC window time from a 15M ticker and return a PDT-formatted string.
+    """Extract the EDT window close time from a 15M ticker and return the window OPEN time in PDT.
 
-    Ticker format example: KXBTC15M-26MAR301300-00
-    The '1300' encodes 13:00 UTC = 06:00 PDT (UTC-7 during PDT / summer).
+    Ticker format example: KXDOGE15M-26MAR301445-45
+    Kalshi encodes the window CLOSE time in Eastern (EDT = UTC-4).
+    We display the window OPEN time in PDT (= EDT - 3h, open = close - 15 min).
 
-    Returns e.g. "06:00 PDT", or None if not a 15M ticker or parsing fails.
+    Returns e.g. "11:30 PDT", or None if not a 15M ticker or parsing fails.
 
     QA samples:
-        KXBTC15M-26MAR301300-00  -> "06:00 PDT"  (13 UTC - 7 = 06 PDT)
-        KXBTC15M-26MAR300000-00  -> "17:00 PDT"  (00 UTC - 7 = 17 PDT previous day)
-        KXBTC15M-26MAR301945-00  -> "12:45 PDT"  (19 UTC - 7 = 12 PDT)
-        KXETH15M-26MAR302200-00  -> "15:00 PDT"  (22 UTC - 7 = 15 PDT)
+        KXDOGE15M-26MAR301445-45  -> "11:30 PDT"  (close 14:45 EDT → open 14:30 EDT → 11:30 PDT)
+        KXBTC15M-26MAR301300-00   -> "09:45 PDT"  (close 13:00 EDT → open 12:45 EDT → 09:45 PDT)
+        KXBTC15M-26MAR300015-00   -> "20:00 PDT"  (close 00:15 EDT → open 00:00 EDT → 21:00 PDT prev day)
     """
     import re as _re
     if '15M' not in ticker.upper():
         return None
     for part in ticker.upper().split('-'):
-        # Match date+time part like 26MAR301300 (yy=26, mon=MAR, dd=30, hhmm=1300)
+        # Match date+time part like 26MAR301445 (yy=26, mon=MAR, dd=30, hhmm=1445)
         m = _re.match(r'^(\d{2})([A-Z]{3})(\d{2})(\d{4})$', part)
         if m:
-            time_str = m.group(4)  # e.g. "1300"
+            time_str = m.group(4)  # e.g. "1445"
             try:
-                utc_hour = int(time_str[:2])
-                utc_min  = int(time_str[2:])
-                pdt_hour = (utc_hour - 7) % 24
-                return f"{pdt_hour:02d}:{utc_min:02d} PDT"
+                edt_close_h = int(time_str[:2])
+                edt_close_m = int(time_str[2:])
+                # Window open = close - 15 min; PDT = EDT - 3h
+                open_edt_total = edt_close_h * 60 + edt_close_m - 15
+                open_pdt_total = open_edt_total - 180  # EDT to PDT
+                open_pdt_h = (open_pdt_total // 60) % 24
+                open_pdt_m = open_pdt_total % 60
+                return f"{open_pdt_h:02d}:{open_pdt_m:02d} PDT"
             except Exception:
                 pass
     return None
+
+
+def _translate_15m_side(ticker: str, side: str) -> str:
+    """For 15M crypto direction contracts, translate yes/no to UP/DOWN."""
+    if '15M' in (ticker or '').upper():
+        if side == 'yes':
+            return 'UP'
+        if side == 'no':
+            return 'DOWN'
+    return side
 
 
 def is_settled_ticker(ticker: str) -> bool:
@@ -591,7 +605,7 @@ def get_active_positions():
         positions.append({
             "ticker":      ticker,
             "title":       title,
-            "side":        side,
+            "side":        _translate_15m_side(ticker, side),
             "source":      source,
             "module":      classify_module(source, ticker),
             "entry_price": ep,
@@ -1263,7 +1277,7 @@ def _build_state():
         positions.append({
             'ticker':      ticker,
             'title':       _raw_title,
-            'side':        side,
+            'side':        _translate_15m_side(ticker, side),
             'source':      source,
             'module':      mod,
             'entry_price': ep,
