@@ -166,6 +166,11 @@ def check_settlements(client):
             else:
                 entries_by_key[key] = rec
 
+    # Sync tracker: remove any positions that already have settle records
+    # (handles cases where tracker cleanup was missed on prior runs)
+    for (s_ticker, s_side) in settle_keys:
+        position_tracker.remove_position(s_ticker, s_side)
+
     open_positions = [rec for key, rec in entries_by_key.items() if key not in exit_keys]
 
     if not open_positions:
