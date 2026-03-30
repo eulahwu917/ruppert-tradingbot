@@ -261,8 +261,8 @@ def is_settled_ticker(ticker: str) -> bool:
               'JUL':7,'AUG':8,'SEP':9,'OCT':10,'NOV':11,'DEC':12}
     parts = ticker.upper().split('-')
     for part in parts:
-        # Match 26MAR11 (date only) OR 26MAR1117 (date + 2-digit hour)
-        m = _re.match(r'^(\d{2})([A-Z]{3})(\d{2})(\d{2})?$', part)
+        # Match 26MAR11 (date only), 26MAR1117 (date + 2-digit hour), or 26MAR111300 (date + 4-digit HHMM)
+        m = _re.match(r'^(\d{2})([A-Z]{3})(\d{2})(\d{2}|\d{4})?$', part)
         if m:
             yy, mon, dd = m.group(1), m.group(2), m.group(3)
             month_num = months.get(mon)
@@ -273,13 +273,19 @@ def is_settled_ticker(ticker: str) -> bool:
                         return True
                     # Same day but with hour — check if settlement time has passed
                     if mkt_date == today and m.group(4):
-                        hour = int(m.group(4))
+                        time_str = m.group(4)
                         # W6 fix: use full EDT datetime comparison to avoid midnight
                         # crossover bug where (utc_hour - 4) % 24 wraps 0-2 and
                         # fails the >= check against settlement hours like 17.
                         from datetime import datetime as _dt, timedelta as _td
                         now_edt = _dt.utcnow() - _td(hours=4)
-                        settle_edt = _dt(mkt_date.year, mkt_date.month, mkt_date.day, hour)
+                        if len(time_str) == 2:
+                            hour = int(time_str)
+                            settle_edt = _dt(mkt_date.year, mkt_date.month, mkt_date.day, hour)
+                        else:  # 4-digit HHMM
+                            hour = int(time_str[:2])
+                            minute = int(time_str[2:])
+                            settle_edt = _dt(mkt_date.year, mkt_date.month, mkt_date.day, hour, minute)
                         if now_edt >= settle_edt:
                             return True
                 except Exception:
