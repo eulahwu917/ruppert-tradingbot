@@ -111,6 +111,8 @@ def run_watchdog():
     log(f"Check interval: {CHECK_INTERVAL_SECONDS}s")
     log(f"Heartbeat stale threshold: {HEARTBEAT_STALE_SECONDS}s")
 
+    log(f"Watchdog entering persistent loop (check interval: {CHECK_INTERVAL_SECONDS}s)")
+
     while True:
         try:
             if not is_heartbeat_fresh():
