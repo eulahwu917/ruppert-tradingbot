@@ -826,7 +826,8 @@ def evaluate_crypto_15m_entry(
     _entry_cutoff = getattr(config, 'CRYPTO_15M_ENTRY_CUTOFF_SECS', 660)
     _secondary_start = getattr(config, 'CRYPTO_15M_SECONDARY_START_SECS', 480)
 
-    if elapsed_secs < 120:
+    _early_cutoff = getattr(config, 'CRYPTO_15M_EARLY_WINDOW_SECS', 120)
+    if elapsed_secs < _early_cutoff:
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
                        {}, {'yes_ask': yes_ask, 'yes_bid': yes_bid, 'spread': yes_ask - yes_bid, 'book_depth_usd': book_depth_usd},
                        'SKIP', 'EARLY_WINDOW', None, None, None)

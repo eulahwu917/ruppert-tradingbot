@@ -290,9 +290,14 @@ def should_enter(
     vol_ratio         = signal.get('vol_ratio', 1.0)
 
     # --- Time gate ---
-    if hours < MIN_HOURS_ENTRY:
+    _min_hours_map = getattr(config, 'MIN_HOURS_ENTRY', None)
+    if isinstance(_min_hours_map, dict):
+        min_hours = _min_hours_map.get(signal_module, _min_hours_map.get('default', MIN_HOURS_ENTRY))
+    else:
+        min_hours = MIN_HOURS_ENTRY  # fallback: hardcoded 0.5h constant
+    if hours < min_hours:
         return {'enter': False, 'size': 0.0,
-                'reason': f'too_close_to_settlement ({hours:.2f}h < {MIN_HOURS_ENTRY}h)'}
+                'reason': f'too_close_to_settlement ({hours:.2f}h < {min_hours}h)'}
 
     # --- Per-module confidence gate (single gate, replaces old dual-gate) ---
     # config.MIN_CONFIDENCE is a dict keyed by module name.

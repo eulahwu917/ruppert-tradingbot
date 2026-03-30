@@ -105,6 +105,14 @@ MIN_HOURS_TO_CLOSE = 4.0
 # DEPRECATED: replaced by MIN_HOURS_TO_CLOSE (timezone-independent)
 # SAME_DAY_SKIP_AFTER_HOUR = 14
 
+# Minimum hours to settlement before allowing entry — per module
+# Default (hourly/daily markets): 0.5h (30 min)
+# crypto_15m: 0.04h (≈2.4 min) — 15m window is only 0.25h total; timing gate is the binding constraint
+MIN_HOURS_ENTRY = {
+    'default':    0.5,
+    'crypto_15m': 0.04,   # 2.4 min remaining — allows all primary + secondary window entries
+}
+
 # Minimum confidence thresholds per module
 MIN_CONFIDENCE = {
     'weather':    0.25,
@@ -147,7 +155,8 @@ CRYPTO_15M_MAX_SPREAD        = 25     # DATA COLLECTION: 25c max spread (was 15)
 CRYPTO_15M_THIN_MARKET_RATIO = 0.01   # DATA COLLECTION: 1% of 30d avg vol (was 0.05)
 CRYPTO_15M_MIN_CONVICTION    = 0.05   # DATA COLLECTION: min |raw_score| (was hardcoded 0.15)
 CRYPTO_15M_LIQUIDITY_FLOOR   = 20.0   # DATA COLLECTION: absolute floor $20 (was $50/$100)
-CRYPTO_15M_ENTRY_CUTOFF_SECS    = 720    # Max elapsed secs to allow entry (was hardcoded 660 = 11 min); 720 = 12 min
+CRYPTO_15M_ENTRY_CUTOFF_SECS    = 800    # Max elapsed secs to allow entry (was 720 = 12 min); 800 = 13.3 min — captures WS reconnect close-calls
+CRYPTO_15M_EARLY_WINDOW_SECS    = 90     # Min elapsed secs before entry allowed (was hardcoded 120); 90s re-admits 90-120s band
 CRYPTO_15M_SECONDARY_START_SECS = 480    # Elapsed secs where secondary (tighter) window begins (was hardcoded 480)
 CRYPTO_15M_FALLBACK_MIN_REMAINING = 180  # Fallback stops firing if < this many secs remain before close (was hardcoded 120)
 
