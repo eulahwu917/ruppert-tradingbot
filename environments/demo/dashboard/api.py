@@ -204,6 +204,38 @@ def settlement_date_from_ticker(ticker: str):
                 except: pass
     return None
 
+def _parse_15m_window_time(ticker: str):
+    """Extract the UTC window time from a 15M ticker and return a PDT-formatted string.
+
+    Ticker format example: KXBTC15M-26MAR301300-00
+    The '1300' encodes 13:00 UTC = 06:00 PDT (UTC-7 during PDT / summer).
+
+    Returns e.g. "06:00 PDT", or None if not a 15M ticker or parsing fails.
+
+    QA samples:
+        KXBTC15M-26MAR301300-00  -> "06:00 PDT"  (13 UTC - 7 = 06 PDT)
+        KXBTC15M-26MAR300000-00  -> "17:00 PDT"  (00 UTC - 7 = 17 PDT previous day)
+        KXBTC15M-26MAR301945-00  -> "12:45 PDT"  (19 UTC - 7 = 12 PDT)
+        KXETH15M-26MAR302200-00  -> "15:00 PDT"  (22 UTC - 7 = 15 PDT)
+    """
+    import re as _re
+    if '15M' not in ticker.upper():
+        return None
+    for part in ticker.upper().split('-'):
+        # Match date+time part like 26MAR301300 (yy=26, mon=MAR, dd=30, hhmm=1300)
+        m = _re.match(r'^(\d{2})([A-Z]{3})(\d{2})(\d{4})$', part)
+        if m:
+            time_str = m.group(4)  # e.g. "1300"
+            try:
+                utc_hour = int(time_str[:2])
+                utc_min  = int(time_str[2:])
+                pdt_hour = (utc_hour - 7) % 24
+                return f"{pdt_hour:02d}:{utc_min:02d} PDT"
+            except Exception:
+                pass
+    return None
+
+
 def is_settled_ticker(ticker: str) -> bool:
     """Return True if ticker contains a past date (market already settled).
     Handles both date-only (26MAR11) and date+time (26MAR1117) formats.
@@ -539,7 +571,14 @@ def get_active_positions():
     positions  = []
     for t in open_trades:
         ticker = t.get('ticker', '')
-        title  = (t.get('title') or ticker).replace('**', '')
+        raw_title = (t.get('title') or ticker).replace('**', '')
+        # 15M entries: replace the date segment with a PDT time label for readability
+        _win_time = _parse_15m_window_time(ticker)
+        if _win_time:
+            import re as _re2
+            raw_title = _re2.sub(r'\s+\d{4}-\d{2}-\d{2}\b', '', raw_title).strip()
+            raw_title = f"{raw_title} {_win_time}"
+        title  = raw_title
         side   = t.get('side', 'no')
         source = t.get('source', 'bot')
         mp     = t.get('market_prob', 0.5) or 0.5
@@ -1215,9 +1254,15 @@ def _build_state():
             module_open[mod]['open_pnl'] += pnl
 
         edge_val = t.get('edge')
+        _raw_title = (t.get('title') or ticker).replace('**', '')
+        _win_time2 = _parse_15m_window_time(ticker)
+        if _win_time2:
+            import re as _re3
+            _raw_title = _re3.sub(r'\s+\d{4}-\d{2}-\d{2}\b', '', _raw_title).strip()
+            _raw_title = f"{_raw_title} {_win_time2}"
         positions.append({
             'ticker':      ticker,
-            'title':       (t.get('title') or ticker).replace('**', ''),
+            'title':       _raw_title,
             'side':        side,
             'source':      source,
             'module':      mod,
