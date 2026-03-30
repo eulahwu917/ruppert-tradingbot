@@ -782,13 +782,21 @@ def get_pnl_history():
             exit_records[t.get('ticker', '')] = t
 
     # Build close records index for pnl: (ticker, side) -> settle/exit record
+    # SUM fix: accumulate pnl across multiple settle records for the same (ticker, side)
+    # e.g. two ETH settle legs with same ticker+side — last-write-wins dropped one.
     close_records_pnl = {}
     for t in all_trades:
         if t.get('action') in ('exit', 'settle'):
             tk = t.get('ticker', '')
             sd = t.get('side', '')
             if tk:
-                close_records_pnl[(tk, sd)] = t
+                if (tk, sd) in close_records_pnl:
+                    # Accumulate pnl into the existing record rather than overwrite
+                    existing = close_records_pnl[(tk, sd)]
+                    if t.get('pnl') is not None and existing.get('pnl') is not None:
+                        existing['pnl'] = float(existing['pnl']) + float(t['pnl'])
+                else:
+                    close_records_pnl[(tk, sd)] = dict(t)  # copy to avoid mutating source
 
     # A position is "closed" ONLY if it has a settle/exit record.
     # Expired tickers without a settle record are still "open" (pending settlement).
@@ -1098,13 +1106,19 @@ def _build_state():
                 exit_records[tk] = t
 
     # ── Build close records index: (ticker, side) -> settle/exit record ─────
+    # SUM fix: accumulate pnl for duplicate (ticker, side) settle records
     _close_recs = {}
     for t in all_trades:
         if t.get('action') in ('exit', 'settle'):
             tk = t.get('ticker', '')
             sd = t.get('side', '')
             if tk:
-                _close_recs[(tk, sd)] = t
+                if (tk, sd) in _close_recs:
+                    existing = _close_recs[(tk, sd)]
+                    if t.get('pnl') is not None and existing.get('pnl') is not None:
+                        existing['pnl'] = float(existing['pnl']) + float(t['pnl'])
+                else:
+                    _close_recs[(tk, sd)] = dict(t)
 
     # ── Split: settled/exited vs open (for P&L calculation) ──────────────────
     # A position is "closed" ONLY if it has a settle/exit record with pnl.
@@ -1238,13 +1252,19 @@ def _build_state():
     } for m in module_keys}
 
     # Build close records index for _build_state: (ticker, side) -> record
+    # SUM fix: accumulate pnl for duplicate (ticker, side) settle records
     _close_recs_state = {}
     for t in all_trades:
         if t.get('action') in ('exit', 'settle'):
             tk = t.get('ticker', '')
             sd = t.get('side', '')
             if tk:
-                _close_recs_state[(tk, sd)] = t
+                if (tk, sd) in _close_recs_state:
+                    existing = _close_recs_state[(tk, sd)]
+                    if t.get('pnl') is not None and existing.get('pnl') is not None:
+                        existing['pnl'] = float(existing['pnl']) + float(t['pnl'])
+                else:
+                    _close_recs_state[(tk, sd)] = dict(t)
 
     for ticker, t in settled_tickers.items():
         try:
