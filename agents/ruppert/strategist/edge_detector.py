@@ -508,6 +508,8 @@ def analyze_market(market: dict) -> dict | None:
         'signal_src':  signal_src,
         'side':        side,
         'yes_price':   yes_ask,
+        'yes_ask':     yes_ask,                    # ADD: alias used by should_enter() market impact ceiling
+        'yes_bid':     market.get('yes_bid'),      # ADD: required for spread calculation; None if WS cache miss
         'bet_price':   bet_price,
         'action':      f"BUY {side.upper()} at {bet_price}c",
         'raw_edge':        round(_raw_edge, 4),

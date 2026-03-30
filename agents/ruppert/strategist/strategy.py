@@ -116,7 +116,7 @@ def apply_market_impact_ceiling(
     Tiers:
         spread ≤ 3¢  → liquid, full size
         spread 4–7¢  → moderate, cap at 50% of base size
-        spread > 7¢  → thin, floor at $25 hard minimum
+        spread > 7¢  → thin, cap at $25 maximum
 
     OI cap (Phase 2): if open_interest provided, cap at 5% of OI.
     This protects against entering thin markets and is module-agnostic.
@@ -578,7 +578,7 @@ def get_strategy_summary() -> dict:
         'min_edge_geo':             MIN_EDGE['geo'],
         'min_edge_econ':            MIN_EDGE['econ'],
         'min_edge_fed':             MIN_EDGE['fed'],
-        'min_edge_crypto_15m':      getattr(_cfg, 'MIN_EDGE_15M', 0.05),
+        'min_edge_crypto_15m':      MIN_EDGE['crypto_15m'],
         'min_confidence':           MIN_CONFIDENCE,
         'min_hours_to_entry':       MIN_HOURS_ENTRY,
         'min_hours_to_add':         MIN_HOURS_ADD,
@@ -659,10 +659,10 @@ if __name__ == '__main__':
     print("\n[1] calculate_position_size")
 
     s1 = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL, confidence=0.85)
-    print(f"  conf=0.85 (kf=0.25): edge=0.20, win_prob=0.70 -> ${s1}")
+    print(f"  conf=0.85 (kf=0.16): edge=0.20, win_prob=0.70 -> ${s1}")
 
     s1b = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL, confidence=0.75)
-    print(f"  conf=0.75 (kf=0.20): edge=0.20, win_prob=0.70 -> ${s1b}  (should be ~80% of ${s1})")
+    print(f"  conf=0.75 (kf=0.14): edge=0.20, win_prob=0.70 -> ${s1b}  (should be ~80% of ${s1})")
 
     s1c = calculate_position_size(edge=0.20, win_prob=0.70, capital=CAPITAL, confidence=0.65)
     print(f"  conf=0.65 (kf=0.15): edge=0.20, win_prob=0.70 -> ${s1c}  (should be ~60% of ${s1})")

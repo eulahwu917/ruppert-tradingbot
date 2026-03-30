@@ -36,7 +36,8 @@ DAILY_CAP = _capital * (
     getattr(_config, 'CRYPTO_DAILY_CAP_PCT', 0.07) +
     getattr(_config, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04) +
     getattr(_config, 'GEO_DAILY_CAP_PCT', 0.04) +
-    getattr(_config, 'ECON_DAILY_CAP_PCT', 0.04)
+    getattr(_config, 'ECON_DAILY_CAP_PCT', 0.04) +
+    getattr(_config, 'FED_DAILY_CAP_PCT', 0.03)
 )
 MIN_TRADES             = getattr(_config, 'OPTIMIZER_MIN_TRADES', 30)
 DOMAIN_THRESHOLD       = 30
@@ -254,7 +255,7 @@ def analyze_exit_timing(trades: list):
             except (ValueError, TypeError):
                 pass
         # P&L
-        pnl = t.get("pnl") or t.get("realized_pnl")
+        pnl = t.get("pnl") if t.get("pnl") is not None else t.get("realized_pnl")
         if pnl is not None:
             try:
                 pnls.append(float(pnl))
