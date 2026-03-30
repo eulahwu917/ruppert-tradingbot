@@ -915,7 +915,11 @@ async function loadTrades() {
     const title  = (t.title||t.ticker||'').replace(/[*]{2}/g,'');
     const ticker = t.ticker||'';
     const _ts = ticker.split('-')[0].toLowerCase(); const url = `https://kalshi.com/markets/${_ts}/${ticker.toLowerCase()}`;
-    const side   = t.side==='yes'
+    const side   = t.side==='UP'
+      ? '<span class="b-yes">UP</span>'
+      : t.side==='DOWN'
+      ? '<span class="b-no">DOWN</span>'
+      : t.side==='yes'
       ? '<span class="b-yes">YES</span>'
       : '<span class="b-no">NO</span>';
 
