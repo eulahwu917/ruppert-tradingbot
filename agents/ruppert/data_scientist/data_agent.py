@@ -895,6 +895,7 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
             auto_fixed += registered
             issues.append({
                 'type': 'tracker_missing',
+                'level': 'info',  # auto-healed — no alert needed
                 'tickers': drift['missing'],
                 'action': f'auto-registered {registered} missing position(s) into tracker',
             })
@@ -904,6 +905,7 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
             flagged += len(drift['missing'])
             issues.append({
                 'type': 'tracker_missing',
+                'level': 'warning',  # reconstruction failed — alert David
                 'tickers': drift['missing'],
                 'action': 'logged (no auto-add)',
             })
@@ -1021,16 +1023,20 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
         except Exception as e:
             print(f'[DataAgent] Audit report write failed: {e}')
 
-        # Send batch alert if 5+ issues and not all already alerted
-        if len(issues) >= 5:
-            batch_hash = _issue_hash('batch', f'{date.today().isoformat()}_{len(issues)}')
+        # Count only warning-level (or unleveled) issues toward alert thresholds
+        # Info-level issues are auto-healed and should not generate alerts
+        alertable_issues = [iss for iss in issues if iss.get('level', 'warning') != 'info']
+
+        # Send batch alert if 5+ alertable issues
+        if len(alertable_issues) >= 5:
+            batch_hash = _issue_hash('batch', f'{date.today().isoformat()}_{len(alertable_issues)}')
             if _should_alert(state, batch_hash):
-                send_telegram(_format_batch_alert(issues, str(audit_file)))
+                send_telegram(_format_batch_alert(alertable_issues, str(audit_file)))
                 _mark_alerted(state, batch_hash)
                 stats['alerts_sent'] = stats.get('alerts_sent', 0) + 1
-        elif len(issues) > 0 and len(issues) < 5:
+        elif len(alertable_issues) > 0:
             # Send individual alerts for non-already-alerted issues
-            for iss in issues:
+            for iss in alertable_issues:
                 iss_type = iss.get('type', '')
                 # Skip types that already sent their own alerts above
                 if iss_type in ('dry_run_mismatch', 'daily_cap_violation'):

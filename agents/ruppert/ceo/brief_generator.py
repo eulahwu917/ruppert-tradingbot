@@ -36,6 +36,9 @@ CEO_ALLOWED_TASKS = [
     'alert_anomaly',
 ]
 
+# All known trading modules — used to backfill zero-trade entries in the brief
+KNOWN_MODULES = ['crypto', 'weather', 'geo', 'fed', 'econ', 'crypto_15m']
+
 
 def check_role_boundary(task: str):
     """
@@ -138,7 +141,6 @@ def _compute_pnl_from_trades(trades: list[dict]) -> dict:
     for t in trades:
         action = t.get('action', 'buy')
         size = float(t.get('size_dollars', 0) or 0)
-        realized = t.get('realized_pnl')
         ticker = t.get('ticker', '')
 
         if action in ('buy', 'open'):
@@ -147,17 +149,24 @@ def _compute_pnl_from_trades(trades: list[dict]) -> dict:
         elif action in ('exit', 'settle'):
             # Remove from open if present
             open_cost -= open_positions.pop(ticker, 0)
-            if realized is not None:
-                pnl_val = float(realized)
+            # Try 'pnl' first (current field name), fall back to 'realized_pnl' for older records
+            pnl_raw = t.get('pnl') if t.get('pnl') is not None else t.get('realized_pnl')
+            if pnl_raw is not None:
+                pnl_val = float(pnl_raw)
                 closed_pnl += pnl_val
                 if pnl_val >= 0:
                     wins += 1
                 else:
                     losses += 1
             else:
-                # Estimate: exit means position closed
-                if size > 0:
+                # Fallback: use settlement_result field if available
+                result = t.get('settlement_result')
+                if result == 'yes':
                     wins += 1
+                elif result == 'no':
+                    losses += 1
+                elif size > 0:
+                    wins += 1  # last resort estimate
 
     return {
         'closed_pnl': round(closed_pnl, 2),
@@ -321,6 +330,10 @@ def build_brief() -> str:
     pnl_today = _compute_pnl_from_trades(today_trades)
     pnl_week = _compute_pnl_from_trades(weekly_trades)
     module_stats = _summarize_trades_by_module(today_trades)
+    # Backfill zero-trade entries so all known modules always appear
+    for _mod in KNOWN_MODULES:
+        if _mod not in module_stats:
+            module_stats[_mod] = {'count': 0, 'total_size': 0.0, 'avg_edge_pct': 0.0, 'exits': 0}
     open_pos = _get_open_positions_summary(today_trades)
     event_summary = _summarize_events(events)
     capital_info = _get_capital_summary()
@@ -531,6 +544,10 @@ def _build_telegram_summary() -> str:
     capital_info = _get_capital_summary()
     alerts = _get_pending_alerts()
     module_stats = _summarize_trades_by_module(today_trades)
+    # Backfill zero-trade entries so all known modules always appear
+    for _mod in KNOWN_MODULES:
+        if _mod not in module_stats:
+            module_stats[_mod] = {'count': 0, 'total_size': 0.0, 'avg_edge_pct': 0.0, 'exits': 0}
 
     mode_tag = '🔴 LIVE' if _is_live_mode() else '🔵 DEMO'
     circuit_tag = '⛔ CIRCUIT BREAKER TRIPPED\n' if event_summary['circuit_breaker_trips'] > 0 else ''
