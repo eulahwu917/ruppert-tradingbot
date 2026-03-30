@@ -240,8 +240,11 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
   <!-- Account Bar -->
   <div class="acct-bar">
     <div class="acct-item" onclick="openDepositSB()" style="cursor:pointer;" title="Click to deposit">
-      <div class="acct-label" id="av-label">Account Value</div>
-      <div class="acct-right"><div class="acct-main" id="av">--</div></div>
+      <div class="acct-label" id="av-label">Capital</div>
+      <div class="acct-right">
+        <div class="acct-main" id="av">--</div>
+        <div style="font-size:10px;color:#444;margin-top:3px;text-align:right;">Acct Value: <span id="av2" style="color:#555;">--</span></div>
+      </div>
     </div>
     <div class="acct-item">
       <div class="acct-label">Open P&amp;L</div>
@@ -680,7 +683,7 @@ function applyMode(mode) {
   if (track) { track.classList.toggle('live', isLive); }
   if (label) { label.textContent = isLive ? 'LIVE' : 'DEMO'; label.classList.toggle('live', isLive); }
   if (banner) { banner.style.display = isLive ? 'block' : 'none'; }
-  if (avLabel) { avLabel.textContent = 'Account Value'; }
+  if (avLabel) { avLabel.textContent = 'Capital'; }
   if (footer) { footer.textContent = isLive
     ? 'Ruppert v1.4 - LIVE MODE - Real money at risk - Auto-refreshes 30s'
     : 'Ruppert v1.4 - Demo Mode - No real money at risk - Auto-refreshes 30s'; }
@@ -896,11 +899,13 @@ async function loadLivePrices(positions) {
 }
 
 function updateAccountValue() {
-  // Account Value = balance + open P&L
-  // balance (window._kalshiBalance) = get_capital() = deposits + closed_pnl already included
+  // Capital = balance (= deposits + closed P&L, from get_capital())
+  // Account Value = Capital + open P&L (mark-to-market)
   const base    = window._kalshiBalance || 400;
   const openPnl = window._openPnl  || 0;
-  document.getElementById('av').textContent = dollar(base + openPnl);
+  document.getElementById('av').textContent = dollar(base);
+  const av2 = document.getElementById('av2');
+  if (av2) av2.textContent = dollar(base + openPnl);
 }
 
 // ── Trades ─────────────────────────────────────────────────────────────────────
@@ -1117,9 +1122,11 @@ function renderState(state) {
   window._openPnl       = acct.open_pnl  || 0;
   window._closedPnl     = acct.closed_pnl || 0;
 
-  // Account Value = balance + open P&L
-  // balance = get_capital() = deposits + closed_pnl (closed_pnl already included)
-  $('av').textContent = dollar((acct.balance||0) + (acct.open_pnl||0));
+  // Capital (primary) = balance = get_capital() = deposits + closed_pnl
+  // Account Value (secondary) = balance + open P&L
+  $('av').textContent = dollar(acct.balance || 0);
+  const _av2 = document.getElementById('av2');
+  if (_av2) _av2.textContent = dollar((acct.balance||0) + (acct.open_pnl||0));
 
   // Open P&L
   setPnl('opnl', 'opnl-pct', acct.open_pnl || 0, acct.balance || 0);
