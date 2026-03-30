@@ -772,7 +772,13 @@ async function loadPositions() {
   window._cachedPositions = positions;
   tb.innerHTML = positions.map(p => {
     const name  = (p.title||p.ticker||'');
-    const side  = p.side?.toLowerCase()==='yes' ? '<span class="b-yes">YES</span>' : '<span class="b-no">NO</span>';
+    const side  = p.side === 'UP'
+      ? '<span class="b-yes">UP</span>'
+      : p.side === 'DOWN'
+      ? '<span class="b-no">DOWN</span>'
+      : p.side?.toLowerCase() === 'yes'
+      ? '<span class="b-yes">YES</span>'
+      : '<span class="b-no">NO</span>';
     const cur   = '<span style="color:#555;font-size:10px;">live↓</span>';
     const _s = (p.ticker||"").split("-")[0].toLowerCase(); const url = `https://kalshi.com/markets/${_s}`;
     const pnlH  = v => v!=null ? `<span class="${pcls(v)}">${sign(v)}${dollar(v)}</span>` : '<span style="color:#333">--</span>';
@@ -1160,7 +1166,11 @@ function renderState(state) {
   }
   tb.innerHTML = positions.map(p => {
     const name = (p.title || p.ticker || '');
-    const side = p.side?.toLowerCase() === 'yes'
+    const side = p.side === 'UP'
+      ? '<span class="b-yes">UP</span>'
+      : p.side === 'DOWN'
+      ? '<span class="b-no">DOWN</span>'
+      : p.side?.toLowerCase() === 'yes'
       ? '<span class="b-yes">YES</span>'
       : '<span class="b-no">NO</span>';
     const _s  = (p.ticker || '').split('-')[0].toLowerCase();
