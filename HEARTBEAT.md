@@ -42,6 +42,10 @@
 - Check `environments/demo/logs/proposals/` — if a new optimizer_proposals_*.md appeared since last check, forward its contents to David
 
 
+## Weekend Tasks (next weekend)
+- Run Optimizer for weather domain (66 trades, well past 30-trade threshold)
+- Trigger: "Run Optimizer for weather domain"
+
 ## Secrets Rotation (quarterly)
 - Next due: 2026-06-28
 - On that week: alert David to rotate GitHub token + Kalshi API key

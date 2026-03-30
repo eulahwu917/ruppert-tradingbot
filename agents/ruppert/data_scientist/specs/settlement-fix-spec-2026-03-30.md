@@ -272,3 +272,4 @@ Note: `entry_price` key is **absent**.
 - [ ] After Fix 3: Buy a new weather position (dry run); confirm `entry_price` field present in JSONL
 - [ ] After Fix 3: Confirm `entry_price` == `fill_price` for a standard single-leg buy
 - [ ] After Fix 3: Confirm scale-in weighted average still works (two buys at different prices)
+
