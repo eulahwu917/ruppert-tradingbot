@@ -601,6 +601,8 @@ def _classify_crypto_direction(question: str, outcome: str) -> tuple[str | None,
         asset = 'SOL'
     elif 'ripple' in q or ' xrp' in q:
         asset = 'XRP'
+    elif 'dogecoin' in q or ' doge' in q:
+        asset = 'DOGE'
 
     if not asset:
         return None, 'N/A'
@@ -731,6 +733,7 @@ def get_polymarket_smart_money(wallets: dict | None = None) -> dict:
         'BTC': _agg('BTC'),
         'ETH': _agg('ETH'),
         'XRP': _agg('XRP'),
+        'DOGE': _agg('DOGE'),
         'available': len(raw_signals) > 0,
         'reason': 'ok' if raw_signals else ('no_positions' if not errors else 'api_error'),
         'raw_signals': raw_signals,

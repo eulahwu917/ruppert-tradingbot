@@ -69,7 +69,7 @@ LOGS_DIR = _get_paths()['logs']
 LOGS_DIR.mkdir(exist_ok=True)
 DECISION_LOG = LOGS_DIR / 'decisions_15m.jsonl'
 
-DRY_RUN = getattr(config, 'DRY_RUN', True)
+# DRY_RUN intentionally not captured at module level — read at call time (see evaluate_crypto_15m_entry)
 
 # ─────────────────────────────── Cache ────────────────────────────────────────
 
@@ -1052,7 +1052,8 @@ def evaluate_crypto_15m_entry(
 
     print(f"  [15m Crypto] {ticker} {direction.upper()} | P={P_final:.2f} edge={edge:+.1%} | ${position_usd:.2f}")
 
-    if DRY_RUN:
+    _dry_run = getattr(config, 'DRY_RUN', True)
+    if _dry_run:
         order_result = {'dry_run': True, 'status': 'simulated'}
     else:
         from agents.ruppert.env_config import require_live_enabled
@@ -1105,7 +1106,7 @@ def evaluate_crypto_15m_entry(
         from agents.ruppert.trader import position_tracker
         fill_price = entry_price
         fill_contracts = contracts
-        if not DRY_RUN and order_result and isinstance(order_result, dict):
+        if not _dry_run and order_result and isinstance(order_result, dict):
             fill_price = int(order_result.get('price', order_result.get('yes_price', entry_price)) or entry_price)
             fill_contracts = int(order_result.get('contracts', order_result.get('count', contracts)) or contracts)
         fill_price_pt = fill_price if fill_price else entry_price

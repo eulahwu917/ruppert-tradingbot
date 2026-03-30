@@ -58,7 +58,7 @@ TRADES_DIR.mkdir(parents=True, exist_ok=True)
 
 import config
 from scripts.event_logger import log_event
-DRY_RUN = getattr(config, 'DRY_RUN', True)
+# DRY_RUN intentionally not captured at module level — read at call time (see evaluate_crypto_entry)
 
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from agents.ruppert.data_scientist.logger import (
@@ -154,7 +154,7 @@ def load_traded_tickers() -> set:
                 rec = json.loads(line)
                 if rec.get('action') not in ('exit', 'settle'):
                     tickers.add(rec.get('ticker', ''))
-            except:
+            except Exception:
                 pass
     return tickers
 
@@ -410,7 +410,8 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     
     print(f"  [WS Crypto Entry] {ticker} {side.upper()} | edge={edge:+.1%} | ${size:.2f}")
     
-    if DRY_RUN:
+    _dry_run = getattr(config, 'DRY_RUN', True)
+    if _dry_run:
         order_result = {'dry_run': True, 'status': 'simulated'}
     else:
         from agents.ruppert.env_config import require_live_enabled
@@ -437,7 +438,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
         'size': size,
         'contracts': contracts,
         'price': bet_price,
-        'dry_run': DRY_RUN,
+        'dry_run': _dry_run,
     })
     push_alert('trade', f'WS Crypto Entry: {ticker} {side.upper()} @ {bet_price}c', ticker=ticker)
 
@@ -446,7 +447,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
         from agents.ruppert.trader import position_tracker
         fill_price = bet_price
         fill_contracts = contracts
-        if not DRY_RUN and order_result and isinstance(order_result, dict):
+        if not _dry_run and order_result and isinstance(order_result, dict):
             fill_price = int(order_result.get('price', order_result.get('yes_price', bet_price)) or bet_price)
             fill_contracts = int(order_result.get('contracts', order_result.get('count', contracts)) or contracts)
         position_tracker.add_position(ticker, fill_contracts, side, fill_price,
@@ -611,13 +612,13 @@ async def run_ws_mode(client: KalshiClient):
     # 4. Event loop
     print(f"  [Phase 3] Event loop ({WS_EVENT_LOOP_DURATION}s)...")
     
-    start_time = asyncio.get_event_loop().time()
+    start_time = asyncio.get_running_loop().time()
     last_backstop = start_time
     settled_tickers = set()  # Avoid re-settling
     
     try:
         async for msg in ws.messages():
-            now = asyncio.get_event_loop().time()
+            now = asyncio.get_running_loop().time()
             elapsed = now - start_time
             
             # Check duration
@@ -763,7 +764,7 @@ async def run_persistent_ws_mode():
         print(f"  [WS] Connected and subscribed at {ts()}")
         log_activity(f'[WS] Connected, subscribed to {len(crypto_tickers)} crypto tickers')
 
-        last_resub = asyncio.get_event_loop().time()
+        last_resub = asyncio.get_running_loop().time()
 
         try:
             async for msg in ws.messages():
@@ -772,7 +773,7 @@ async def run_persistent_ws_mode():
                     print(f"  [Persistent WS] Outside market hours — shutting down")
                     break
 
-                now = asyncio.get_event_loop().time()
+                now = asyncio.get_running_loop().time()
 
                 # Periodically re-fetch ticker list
                 if now - last_resub >= PERSISTENT_RESUB_INTERVAL:

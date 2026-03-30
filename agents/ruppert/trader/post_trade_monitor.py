@@ -34,7 +34,7 @@ TRADES_DIR.mkdir(parents=True, exist_ok=True)
 
 import config
 from scripts.event_logger import log_event
-DRY_RUN = getattr(config, 'DRY_RUN', True)
+# DRY_RUN intentionally not captured at module level — read at call time inside run_monitor()
 
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from agents.ruppert.data_scientist.logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock, normalize_entry_price
@@ -424,6 +424,7 @@ def check_alert_only_position(pos, market):
 
 def run_monitor():
     """Main monitor loop — check all open positions and execute/alert as needed."""
+    _dry_run = getattr(config, 'DRY_RUN', True)
     print(f"\n{'='*60}")
     print(f"  POST-TRADE MONITOR  {ts()}")
     print(f"{'='*60}")
@@ -525,7 +526,7 @@ def run_monitor():
                 ep = normalize_entry_price(pos)
                 exit_pnl = round((cur_price - ep) * pos_contracts / 100, 2)
 
-                if DRY_RUN:
+                if _dry_run:
                     log_trade(exit_opp, exit_opp['size_dollars'], pos_contracts, {'dry_run': True})
                     log_activity(f'[POST-MONITOR EXIT] {ticker} {side.upper()} @ {cur_price}c — {reason}')
                     print(f"    [DEMO] Exit logged")
