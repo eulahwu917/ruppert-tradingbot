@@ -506,6 +506,7 @@ def analyze_market(market: dict) -> dict | None:
         'edge':        round(edge, 4),
         'confidence':  round(confidence, 4),
         'signal_src':  signal_src,
+        'model_source': 'ensemble' if signal_src == 'open_meteo_multi_model' else signal_src,
         'side':        side,
         'yes_price':   yes_ask,
         'yes_ask':     yes_ask,                    # ADD: alias used by should_enter() market impact ceiling

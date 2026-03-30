@@ -75,6 +75,25 @@ def _activity_log_path():
     return os.path.join(LOG_DIR, f"activity_{_pdt_today().isoformat()}.log")
 
 
+def _build_ensemble_components(opportunity: dict) -> dict | None:
+    """Extract per-model probabilities and divergence from opportunity dict."""
+    models_used = opportunity.get('models_used')
+    if not models_used:
+        return None
+    model_map = {m['model']: m for m in models_used}
+    ecmwf = model_map.get('ecmwf_ifs025', {})
+    gfs   = model_map.get('gfs_seamless', {})
+    icon  = model_map.get('icon_global', {})
+    means = [m.get('mean_f') for m in models_used if m.get('mean_f') is not None]
+    divergence_f = round(max(means) - min(means), 1) if len(means) >= 2 else None
+    return {
+        'ecmwf_prob':   ecmwf.get('prob'),
+        'gfs_prob':     gfs.get('prob'),
+        'icon_prob':    icon.get('prob'),
+        'divergence_f': divergence_f,
+    }
+
+
 def build_trade_entry(opportunity, size, contracts, order_result):
     """Build a standardized trade entry dict with all required fields.
 
@@ -153,6 +172,10 @@ def build_trade_entry(opportunity, size, contracts, order_result):
         'edge':         opportunity.get('edge'),
         'confidence':   opportunity.get('confidence') if opportunity.get('confidence') is not None
                         else abs(opportunity.get('edge') or 0),
+        # ── Weather ensemble audit fields (None for non-weather trades) ────────
+        'ensemble_temp_forecast_f': opportunity.get('ensemble_mean'),
+        'model_source':             opportunity.get('model_source'),
+        'ensemble_components':      _build_ensemble_components(opportunity),
         'entry_price':  entry_price_val,          # ← NEW: was absent
         'size_dollars': size,
         'contracts':    contracts,
