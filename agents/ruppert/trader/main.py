@@ -108,6 +108,7 @@ def _opp_to_signal(opp: dict, module: str = 'weather') -> dict:
         'module':              module,
         'vol_ratio':           1.0,
         'side':                opp.get('side', ''),
+        'ticker':              opp.get('ticker', ''),
     }
 
 
