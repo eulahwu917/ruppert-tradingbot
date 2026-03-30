@@ -485,6 +485,19 @@ def get_trades():
         t['exit_type'] = 'settle' if cr.get('action') == 'settle' else cr.get('exit_type', 'manual')
 
         t['module'] = classify_module(t.get('source', 'bot'), ticker)
+
+        # Apply 15M display title transformation (mirrors open positions path)
+        raw_title = (t.get('title') or ticker).replace('**', '')
+        _win_time = _parse_15m_window_time(ticker)
+        if _win_time:
+            import re as _re
+            raw_title = _re.sub(r'\s+\d{4}-\d{2}-\d{2}\b', '', raw_title).strip()
+            raw_title = f"{raw_title} {_win_time}"
+        t['title'] = raw_title
+
+        # Also apply side translation for 15M contracts (yes→UP, no→DOWN)
+        t['side'] = _translate_15m_side(ticker, side)
+
         closed.append(t)
     # Exclude manual trades from the closed trades table display
     _MANUAL_EXCL = ('manual', 'economics', 'geo')
