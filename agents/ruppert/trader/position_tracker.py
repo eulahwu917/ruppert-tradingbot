@@ -41,6 +41,10 @@ EXIT_GAIN_PCT = 0.70          # 70% of max profit — auto-exit
 # {ticker: {quantity, side, entry_price, module, title, exit_thresholds: [{price, action}]}}
 _tracked = {}
 
+# Dedup guard: tracks (ticker, side) keys currently in the middle of execute_exit()
+# Prevents WS duplicate events from firing two exits for the same position.
+_exits_in_flight: set[tuple] = set()
+
 
 def _persist():
     """Write tracked positions to disk. Keys are serialized as 'ticker::side' strings."""
@@ -153,6 +157,7 @@ def add_position(ticker: str, quantity: int, side: str, entry_price: float,
 def remove_position(ticker: str, side: str):
     """Call after exit execution."""
     _tracked.pop((ticker, side), None)
+    _exits_in_flight.discard((ticker, side))  # Belt-and-suspenders cleanup
     _persist()
 
 
@@ -206,66 +211,84 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None):
 
 async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str):
     """Execute the exit order via REST."""
-    from agents.ruppert.data_analyst.kalshi_client import KalshiClient
-
     ticker, side = key
-    entry_price = pos['entry_price']
-    quantity = pos['quantity']
-    module = pos.get('module', '')
 
-    # P&L in dollars
-    if side == 'yes':
-        pnl = (current_bid - entry_price) * quantity / 100
-    else:
-        # NO position: our cost was (100 - entry_price), our exit value is (100 - current_bid)
-        pnl = ((100 - current_bid) - (100 - entry_price)) * quantity / 100
+    # Dedup guard: if this (ticker, side) exit is already in-flight, skip.
+    # Prevents WS duplicate events from firing two exits for the same position.
+    # NOTE: does NOT use contracts as part of the key — a single position per
+    # (ticker, side) key is the invariant enforced by add_position(). Scale-in
+    # is not possible for the same key; Cases 2 & 3 had distinct keys before
+    # this guard existed.
+    if key in _exits_in_flight:
+        logger.warning(
+            '[PositionTracker] Dedup guard: exit for %s %s already in-flight — skipping duplicate',
+            ticker, side
+        )
+        return
 
-    _dry_run = getattr(config, 'DRY_RUN', True)
-    if _dry_run:
-        order_result = {'dry_run': True, 'status': 'simulated'}
-    else:
-        from agents.ruppert.env_config import require_live_enabled
-        require_live_enabled()
-        try:
-            client = KalshiClient()
-            order_result = client.sell_position(ticker, side, current_bid, quantity)
-        except Exception as e:
-            logger.error('[WS Exit] Execute failed for %s: %s', ticker, e)
-            return
-
-    # Log the exit trade — P0-1 fix: write to logs/trades/ not logs/
-    log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
-    # For NO positions, exit_price should reflect the NO side price (100 - yes_bid).
-    # Entry_price is already stored as the NO price. Exit_price should match the same convention.
-    exit_price_logged = current_bid if side == 'yes' else (100 - current_bid)
-
-    exit_record = {
-        'trade_id': str(uuid.uuid4()),
-        'timestamp': datetime.now().isoformat(),
-        'date': str(date.today()),
-        'ticker': ticker,
-        'title': pos.get('title', ''),
-        'side': side,
-        'action': 'exit',
-        'action_detail': f'WS_EXIT {rule} @ {current_bid}c',
-        'source': 'ws_position_tracker',
-        'module': module,
-        'entry_price': entry_price,
-        'exit_price': exit_price_logged,
-        'contracts': quantity,
-        'pnl': round(pnl, 2),
-    }
-
+    _exits_in_flight.add(key)
     try:
-        with open(log_path, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(exit_record) + '\n')
-    except Exception as e:
-        logger.error('[WS Exit] Log write failed for %s: %s', ticker, e)
+        from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 
-    log_activity(f'[WS EXIT] {ticker} {side.upper()} @ {current_bid}c | {rule} | P&L=${pnl:+.2f}')
-    print(f'  [WS EXIT] {ticker} {side.upper()} @ {current_bid}c | {rule} | P&L=${pnl:+.2f}')
+        entry_price = pos['entry_price']
+        quantity = pos['quantity']
+        module = pos.get('module', '')
 
-    remove_position(ticker, side)
+        # P&L in dollars
+        if side == 'yes':
+            pnl = (current_bid - entry_price) * quantity / 100
+        else:
+            # NO position: our cost was (100 - entry_price), our exit value is (100 - current_bid)
+            pnl = ((100 - current_bid) - (100 - entry_price)) * quantity / 100
+
+        _dry_run = getattr(config, 'DRY_RUN', True)
+        if _dry_run:
+            order_result = {'dry_run': True, 'status': 'simulated'}
+        else:
+            from agents.ruppert.env_config import require_live_enabled
+            require_live_enabled()
+            try:
+                client = KalshiClient()
+                order_result = client.sell_position(ticker, side, current_bid, quantity)
+            except Exception as e:
+                logger.error('[WS Exit] Execute failed for %s: %s', ticker, e)
+                return
+
+        # Log the exit trade — P0-1 fix: write to logs/trades/ not logs/
+        log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
+        # For NO positions, exit_price should reflect the NO side price (100 - yes_bid).
+        # Entry_price is already stored as the NO price. Exit_price should match the same convention.
+        exit_price_logged = current_bid if side == 'yes' else (100 - current_bid)
+
+        exit_record = {
+            'trade_id': str(uuid.uuid4()),
+            'timestamp': datetime.now().isoformat(),
+            'date': str(date.today()),
+            'ticker': ticker,
+            'title': pos.get('title', ''),
+            'side': side,
+            'action': 'exit',
+            'action_detail': f'WS_EXIT {rule} @ {current_bid}c',
+            'source': 'ws_position_tracker',
+            'module': module,
+            'entry_price': entry_price,
+            'exit_price': exit_price_logged,
+            'contracts': quantity,
+            'pnl': round(pnl, 2),
+        }
+
+        try:
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(exit_record) + '\n')
+        except Exception as e:
+            logger.error('[WS Exit] Log write failed for %s: %s', ticker, e)
+
+        log_activity(f'[WS EXIT] {ticker} {side.upper()} @ {current_bid}c | {rule} | P&L=${pnl:+.2f}')
+        print(f'  [WS EXIT] {ticker} {side.upper()} @ {current_bid}c | {rule} | P&L=${pnl:+.2f}')
+
+        remove_position(ticker, side)
+    finally:
+        _exits_in_flight.discard(key)
 
 
 async def recovery_poll_positions():
