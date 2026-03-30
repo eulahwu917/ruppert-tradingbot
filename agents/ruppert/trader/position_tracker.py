@@ -179,7 +179,11 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None):
         if not pos:
             continue
 
-        for threshold in pos['exit_thresholds']:
+        thresholds = pos.get('exit_thresholds')
+        if thresholds is None:
+            logger.warning('[PositionTracker] %s missing exit_thresholds — skipping exit check', ticker)
+            continue
+        for threshold in thresholds:
             compare = threshold.get('compare', 'gte')
             price_target = threshold['price']
             triggered = False

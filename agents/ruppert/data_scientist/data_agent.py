@@ -12,6 +12,7 @@ Zero bad data tolerance during DEMO data-gathering phase.
 import argparse
 import hashlib
 import json
+import logging
 import os
 import sys
 import time
@@ -27,6 +28,9 @@ if str(_WORKSPACE_ROOT) not in sys.path:
 
 from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.data_scientist.logger import log_activity, send_telegram
+from agents.ruppert.trader import position_tracker
+
+logger = logging.getLogger(__name__)
 
 _paths = _get_paths()
 LOGS_DIR = _paths['logs']
@@ -612,19 +616,14 @@ def _register_missing_positions(missing_tickers: list, open_positions: list) -> 
     """Reconstruct and register missing positions back into the tracker file.
 
     Mirrors _remove_tracker_orphans but writes entries instead of deleting them.
+    Uses position_tracker.add_position() to ensure exit_thresholds are computed
+    correctly (prevents WS crash on missing exit_thresholds).
     Each reconstructed entry is flagged with _reconstructed=True and a timestamp
     for auditability. Returns count of successfully registered positions.
     """
     if not missing_tickers or not open_positions:
         return 0
     try:
-        tracked = {}
-        if TRACKER_FILE.exists():
-            try:
-                tracked = json.loads(TRACKER_FILE.read_text(encoding='utf-8'))
-            except Exception:
-                pass
-
         # Build lookup: ticker -> list of open position records
         pos_by_ticker: dict = {}
         for pos in open_positions:
@@ -642,29 +641,36 @@ def _register_missing_positions(missing_tickers: list, open_positions: list) -> 
             for rec in records:
                 side = rec.get('side', '')
                 key = f'{ticker}::{side}' if side else ticker
+
                 # Skip if already present (race condition guard)
-                if key in tracked:
+                if position_tracker.is_tracked(ticker, side):
                     continue
-                entry = {
-                    'ticker': ticker,
-                    'side': side,
-                    'entry_price': rec.get('entry_price'),
-                    'contracts': rec.get('contracts'),
-                    'size_dollars': rec.get('size_dollars'),
-                    'module': rec.get('module', TICKER_MODULE_MAP.get(ticker.upper(), 'unknown')),
-                    'trade_id': rec.get('trade_id'),
-                    'title': rec.get('title') or ticker,
-                    'entry_date': rec.get('date') or rec.get('ts') or rec.get('timestamp'),
-                    '_reconstructed': True,
-                    '_reconstructed_at': reconstructed_at,
-                }
-                tracked[key] = entry
+
+                entry_price = rec.get('entry_price')
+                quantity = rec.get('contracts')
+                module = rec.get('module', TICKER_MODULE_MAP.get(ticker.upper(), 'unknown'))
+                title = rec.get('title') or ticker
+
+                # Guard: skip if entry_price is missing or zero — cannot compute exit thresholds
+                if not entry_price:
+                    logger.warning(
+                        '[DataAgent] Skipping reconstruction for %s — entry_price is null, cannot compute exit thresholds',
+                        ticker,
+                    )
+                    continue
+
+                position_tracker.add_position(ticker, quantity, side, entry_price, module, title)
+
+                # Preserve _reconstructed flag for observability after add_position() wrote the entry
+                pos_key = (ticker, side)
+                if pos_key in position_tracker._tracked:
+                    position_tracker._tracked[pos_key]['_reconstructed'] = True
+                    position_tracker._tracked[pos_key]['_reconstructed_at'] = reconstructed_at
+
                 registered += 1
 
         if registered:
-            tmp = TRACKER_FILE.with_suffix('.tmp')
-            tmp.write_text(json.dumps(tracked, indent=2), encoding='utf-8')
-            tmp.replace(TRACKER_FILE)
+            position_tracker._persist()
 
         return registered
     except Exception as e:
