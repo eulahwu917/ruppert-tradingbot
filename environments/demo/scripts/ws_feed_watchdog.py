@@ -1,8 +1,7 @@
 """
 ws_feed_watchdog.py — Watchdog for ws_feed.py
-Checks every 5 minutes. Restarts if:
-  1. Process is not running
-  2. Process is hung (no heartbeat in 10 min)
+Checks every 5 minutes. Restarts if heartbeat has not been updated
+within 10 minutes (covers both crashed and hung states).
 
 Run via Task Scheduler at system startup.
 Environment: set RUPPERT_ENV=demo (or live) in Task Scheduler task.

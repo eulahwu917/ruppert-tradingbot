@@ -34,6 +34,7 @@ from agents.ruppert.researcher.market_scanner import (
     check_economic_calendar_gaps,
     generate_signal_hypotheses,
     CANDIDATE_SERIES_TO_SCAN,
+    CA_RESTRICTED_SERIES,
 )
 
 # Output paths (as per architecture spec) — env-aware via env_config
@@ -48,7 +49,7 @@ def _write_opportunities_backlog(opportunities: list[dict]) -> None:
     """Write opportunities to truth file. Researcher owns this file."""
     TRUTH_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Load existing backlog to preserve non-stale entries
+    # Load existing backlog to preserve all existing entries
     existing = []
     if BACKLOG_FILE.exists():
         try:
@@ -57,7 +58,9 @@ def _write_opportunities_backlog(opportunities: list[dict]) -> None:
             existing = []
 
     # Merge: update existing entries, add new ones
-    updated = {e['series']: e for e in existing}
+    # .get('series') guard: silently skip any corrupt/legacy entries missing the series key
+    # Filter out CA-restricted entries that may have been written by pre-patch scans
+    updated = {e['series']: e for e in existing if e.get('series') and e.get('series') not in CA_RESTRICTED_SERIES}
     for opp in opportunities:
         series = opp.get('series')
         if series:

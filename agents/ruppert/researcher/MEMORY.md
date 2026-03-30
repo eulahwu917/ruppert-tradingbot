@@ -5,7 +5,6 @@ _Owned by: Researcher agent. Updated after scans, discoveries, or pattern findin
 
 ## Market Scan History
 - Last light scan: 2026-03-29 (weekly Sunday scan)
-- Last deep scan: not yet run
 
 ## Known Market Constraints
 - California-based operation: avoid sports and election prediction markets

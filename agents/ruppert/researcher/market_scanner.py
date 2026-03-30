@@ -111,7 +111,17 @@ def scan_series(series_ticker: str) -> dict:
             'volume_estimate': 0,
         }
 
-    data = resp.json()
+    try:
+        data = resp.json()
+    except Exception as e:
+        print(f"  [ParseError] {series_ticker}: non-JSON response from Kalshi API - {e}")
+        return {
+            'series': series_ticker,
+            'status': 'unreachable',
+            'count': 0,
+            'sample_titles': [],
+            'volume_estimate': 0,
+        }
     markets = data.get('markets', [])
 
     if not markets:
