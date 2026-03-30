@@ -431,6 +431,45 @@ def send_telegram(message: str) -> bool:
         return False
 
 
+def compute_closed_pnl_from_logs() -> float:
+    """Compute closed P&L by scanning all trade log files live.
+    Sums the pnl field from all action=exit and action=settle records.
+    This is the same logic used by the dashboard — eliminates pnl_cache staleness.
+    """
+    from agents.ruppert.env_config import get_paths as _get_paths
+    import json
+    from pathlib import Path
+    from datetime import date
+
+    try:
+        _paths = _get_paths()
+        trades_dir = _paths['trades']
+        total_pnl = 0.0
+        since = '2026-03-26'
+        for p in sorted(trades_dir.glob('trades_*.jsonl')):
+            try:
+                file_date = p.stem.replace('trades_', '')
+                if file_date < since:
+                    continue
+            except Exception:
+                continue
+            for line in p.read_text(encoding='utf-8').splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    t = json.loads(line)
+                    if t.get('action') in ('exit', 'settle') and t.get('pnl') is not None:
+                        total_pnl += float(t['pnl'])
+                except Exception:
+                    pass
+        return round(total_pnl, 2)
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f'[Logger] compute_closed_pnl_from_logs() failed: {e}')
+        return 0.0
+
+
 def get_daily_summary():
     """Return a summary of today's trading activity."""
     log_path = _today_log_path()  # already uses TRADES_DIR via _today_log_path()

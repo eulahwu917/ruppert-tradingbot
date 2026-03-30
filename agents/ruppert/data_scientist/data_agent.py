@@ -1222,11 +1222,19 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
             })
             ih = _issue_hash('daily_cap', f'{v["module"]}_{date.today().isoformat()}')
             if _should_alert(state, ih):
+                # crypto_15m threshold is a canary (early activity flag), not an enforcement cap.
+                # Strategist will tune the 10% threshold after 30 trades.
+                if v['module'] == 'crypto_15m':
+                    alert_label  = 'Early Activity Flag'
+                    alert_action = 'Canary threshold reached. No action required — Strategist tracking.'
+                else:
+                    alert_label  = 'Daily Cap Violation'
+                    alert_action = 'Flagged. Review position sizes.'
                 send_telegram(_format_single_alert(
-                    'Daily Cap Violation',
+                    alert_label,
                     '',
-                    f'{v["module"]}: ${v["total"]:.0f} vs ${v["cap"]:.0f} cap',
-                    'Flagged. Review position sizes.',
+                    f'{v["module"]}: ${v["total"]:.0f} vs ${v["cap"]:.0f} threshold',
+                    alert_action,
                 ))
                 _mark_alerted(state, ih)
                 state['cumulative_stats']['alerts_sent'] = state['cumulative_stats'].get('alerts_sent', 0) + 1

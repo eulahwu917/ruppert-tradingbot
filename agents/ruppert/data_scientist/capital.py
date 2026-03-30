@@ -67,8 +67,11 @@ def get_capital() -> float:
             logger.warning(f"[Capital] deposits file empty or missing — using ${_DEFAULT_CAPITAL:.0f} default")
             return _DEFAULT_CAPITAL
 
-        # Add realized P&L from pnl_cache
-        closed_pnl = get_pnl().get('closed', 0.0)
+        # Add realized P&L — read LIVE from trade logs (same path as dashboard display)
+        # Do NOT use pnl_cache.json here: it lags behind trade logs until synthesizer runs,
+        # causing Account Value to diverge from the dashboard Closed P&L panel.
+        from agents.ruppert.data_scientist.logger import compute_closed_pnl_from_logs
+        closed_pnl = compute_closed_pnl_from_logs()
         return round(total + closed_pnl, 2)
 
     except Exception as e:

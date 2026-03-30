@@ -50,7 +50,9 @@ WEATHER_DAILY_CAP_PCT = 0.07   # 7% of capital/day
 CRYPTO_DAILY_CAP_PCT  = 0.07   # 7% of capital/day
 GEO_DAILY_CAP_PCT     = 0.04   # 4% of capital/day
 ECON_DAILY_CAP_PCT    = 0.04   # 4% of capital/day
-FED_DAILY_CAP_PCT     = 0.03   # 3% of capital/day (fed trades are rare/high-conviction)
+FED_DAILY_CAP_PCT        = 0.03   # 3% of capital/day (fed trades are rare/high-conviction)
+CRYPTO_15M_DAILY_CAP_PCT = 0.10   # 10% of capital/day — canary threshold; not enforced
+                                   # Strategist to tune after 30 trades
 
 # Per-trade position size cap — percentage of total capital
 MAX_POSITION_PCT = 0.01   # 1% of capital per trade (replaces fixed $25 caps)
