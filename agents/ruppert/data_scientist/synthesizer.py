@@ -166,7 +166,40 @@ def synthesize_pnl_cache(events: list = None) -> dict:
             except Exception:
                 pass
 
-    cache = {'closed_pnl': round(closed_pnl, 2)}
+    # Compute open P&L from current positions and live prices
+    open_pnl = 0.0
+    try:
+        from agents.ruppert.data_scientist.data_agent import get_open_positions_from_logs
+        from agents.ruppert.data_scientist.logger import normalize_entry_price
+        import agents.ruppert.data_analyst.market_cache as market_cache
+        open_positions = get_open_positions_from_logs()
+        for pos in open_positions:
+            ticker = pos.get('ticker', '')
+            side   = pos.get('side', 'yes')
+            contracts = int(pos.get('contracts') or 0)
+            if contracts == 0:
+                continue
+            entry_price = normalize_entry_price(pos)  # in cents
+            price_entry = market_cache.get(ticker)
+            if not price_entry:
+                continue
+            # Current mid price in cents
+            bid_d = price_entry.get('bid', 0)
+            ask_d = price_entry.get('ask', 0)
+            mid_cents = round(((bid_d + ask_d) / 2) * 100, 1)
+            if side == 'yes':
+                open_pnl += (mid_cents - entry_price) * contracts / 100
+            else:
+                no_entry = 100 - entry_price
+                no_current = 100 - mid_cents
+                open_pnl += (no_current - no_entry) * contracts / 100
+    except Exception:
+        pass  # open_pnl stays 0.0 on any failure — non-critical
+
+    cache = {
+        'closed_pnl': round(closed_pnl, 2),
+        'open_pnl':   round(open_pnl, 2),
+    }
     _write_truth('pnl_cache.json', cache)
     return cache
 

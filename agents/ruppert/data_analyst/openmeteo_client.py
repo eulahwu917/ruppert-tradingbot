@@ -71,7 +71,7 @@ CITY_BIAS_F = {
     "KXHIGHMIA":  4.0,   # Miami: +4°F (strong UHI + coastal effect)
     "KXHIGHCHI":  4.0,   # Chicago: +4°F
     "KXHIGHNY":   2.0,   # New York: +2°F
-    "KXHIGHLA":   3.0,   # Los Angeles: +3°F
+    # KXHIGHLA removed — KXHIGHLAX is the canonical active Kalshi series for LAX
     "KXHIGHPHX":  3.0,   # Phoenix: +3°F
     "KXHIGHHOU":  3.0,   # Houston: +3°F
     # Expanded cities (default bias until GHCND validates, added 2026-03-13)
@@ -100,7 +100,7 @@ NWS_GRID_POINTS = {
     "KXHIGHMIA":  {"office": "MFL", "gridX": 106, "gridY": 51},
     "KXHIGHPHX":  {"office": "PSR", "gridX": 157, "gridY": 57},
     "KXHIGHHOU":  {"office": "HGX", "gridX": 66,  "gridY": 99},
-    "KXHIGHLA":   {"office": "LOX", "gridX": 155, "gridY": 45},
+    # KXHIGHLA removed — KXHIGHLAX is the canonical active Kalshi series for LAX
     # Expanded cities (added 2026-03-13, grid points from api.weather.gov/points)
     "KXHIGHAUS":  {"office": "EWX", "gridX": 156, "gridY": 91},   # Austin (30.2672,-97.7431)
     "KXHIGHDEN":  {"office": "BOU", "gridX": 63,  "gridY": 62},   # Denver (39.7392,-104.9903)
@@ -130,13 +130,7 @@ CITIES = {
         "nws_station": "KNYC",
         "timezone": "America/New_York",
     },
-    "KXHIGHLA": {
-        "name": "Los Angeles",
-        "lat": 33.9425,   # KLAX airport
-        "lon": -118.4081,
-        "nws_station": "KLAX",
-        "timezone": "America/Los_Angeles",
-    },
+    # KXHIGHLA removed — KXHIGHLAX is the canonical active Kalshi series for LAX
     "KXHIGHCHI": {
         "name": "Chicago",
         "lat": 41.9742,   # KORD (O'Hare) airport

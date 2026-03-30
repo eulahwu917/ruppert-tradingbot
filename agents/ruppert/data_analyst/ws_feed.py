@@ -353,16 +353,14 @@ async def handle_message(msg: dict):
                 if _series and _open_time_norm:
                     _window_evaluated[f"{_series}::{_open_time_norm}"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
-    # Route crypto hourly band tickers
+    # Route crypto hourly band tickers (elif guarantees no CRYPTO_15M_SERIES match)
     elif any(ticker_upper.startswith(p) for p in CRYPTO_HOURLY_PREFIXES):
-        # Skip 15m tickers that also match hourly prefixes (already handled above)
-        if not any(ticker_upper.startswith(s) for s in CRYPTO_15M_SERIES):
-            if yes_ask is not None and yes_bid is not None:
-                try:
-                    from agents.ruppert.trader.position_monitor import evaluate_crypto_entry
-                    evaluate_crypto_entry(ticker, yes_ask, yes_bid, data.get('close_time'))
-                except Exception as e:
-                    logger.warning('[WS Feed] Crypto eval error: %s', e)
+        if yes_ask is not None and yes_bid is not None:
+            try:
+                from agents.ruppert.trader.position_monitor import evaluate_crypto_entry
+                evaluate_crypto_entry(ticker, yes_ask, yes_bid, data.get('close_time'))
+            except Exception as e:
+                logger.warning('[WS Feed] Crypto eval error: %s', e)
 
 
 # ─────────────────────────────── REST Stale Heal ────────────────────────────
@@ -378,17 +376,13 @@ async def _rest_refresh_stale() -> None:
         logger.warning('[WS Feed] _rest_refresh_stale: could not get tracked: %s', e)
         return
 
-    kalshi_client = None
     for key_str in tracked:
         ticker = key_str.split('::')[0]  # get_tracked() returns 'ticker::side' keys
         try:
             _, _, is_stale = market_cache.get_with_staleness(ticker)
             if not is_stale:
                 continue
-            if kalshi_client is None:
-                from agents.ruppert.data_analyst.kalshi_client import KalshiClient
-                kalshi_client = KalshiClient()
-            result = kalshi_client.get_market(ticker)
+            result = _get_kalshi_client().get_market(ticker)
             if result and result.get('yes_bid') is not None and result.get('yes_ask') is not None:
                 bid_d = result['yes_bid'] / 100
                 ask_d = result['yes_ask'] / 100

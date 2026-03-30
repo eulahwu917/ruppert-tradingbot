@@ -222,13 +222,16 @@ def check_module_mismatch(trade: dict) -> tuple:
     return False, None
 
 
-def check_tracker_drift(tracked: dict) -> dict:
+def check_tracker_drift(tracked: dict, open_positions: list = None) -> dict:
     """Compare open trades vs position tracker. Uses all-time logs for multi-day positions.
 
-    Comparison is done on (ticker, side) pairs to correctly handle positions
-    that have both YES and NO legs open simultaneously.
+    Comparison is done on (ticker, side) pairs to correctly detect side-specific
+    orphans (e.g. KXBTC::yes closed while KXBTC::no remains open).
+    Returns both orphan_pairs (for precise cleanup) and orphans (ticker list for
+    backward-compat with _remove_tracker_orphans).
     """
-    open_positions = get_open_positions_from_logs()
+    if open_positions is None:
+        open_positions = get_open_positions_from_logs()
     # Build set of (ticker, side) pairs from logs
     open_keys = {(t.get('ticker', ''), t.get('side', '')) for t in open_positions}
     open_tickers = {ticker for ticker, side in open_keys}
@@ -241,8 +244,15 @@ def check_tracker_drift(tracked: dict) -> dict:
         else:
             tracked_pairs.add((k, ''))
     tracked_tickers = {ticker for ticker, side in tracked_pairs}
+
+    # Pair-level orphan detection (catches side-specific orphans)
+    orphan_pairs = list(tracked_pairs - open_keys)
+    # Derive ticker list for _remove_tracker_orphans (which operates on tickers)
+    orphan_tickers = list({t for t, s in orphan_pairs})
+
     return {
-        'orphans': list(tracked_tickers - open_tickers),
+        'orphans': orphan_tickers,           # ticker list — used by _remove_tracker_orphans
+        'orphan_pairs': orphan_pairs,        # (ticker, side) pairs — for diagnostics/logging
         'missing': list(open_tickers - tracked_tickers),
     }
 
@@ -355,15 +365,22 @@ def get_open_positions_from_logs() -> list[dict]:
                     # First buy leg: store a copy as the base record
                     entries[key] = dict(t)
                 else:
-                    # Scale-in: accumulate size_dollars and contracts
+                    # Scale-in: accumulate size_dollars and contracts,
+                    # and update entry_price to the weighted average cost basis.
+                    old_contracts = int(entries[key].get('contracts') or 0)
+                    new_contracts = int(t.get('contracts') or 0)
+                    old_price     = float(entries[key].get('entry_price') or 0)
+                    new_price     = float(t.get('entry_price') or 0)
                     entries[key]['size_dollars'] = (
                         float(entries[key].get('size_dollars') or 0)
                         + float(t.get('size_dollars') or 0)
                     )
-                    entries[key]['contracts'] = (
-                        int(entries[key].get('contracts') or 0)
-                        + int(t.get('contracts') or 0)
-                    )
+                    total_contracts = old_contracts + new_contracts
+                    entries[key]['contracts'] = total_contracts
+                    if total_contracts > 0:
+                        entries[key]['entry_price'] = round(
+                            (old_price * old_contracts + new_price * new_contracts) / total_contracts, 2
+                        )
 
     return [rec for key, rec in entries.items() if key not in exits]
 
@@ -388,11 +405,14 @@ def compute_win_rate_from_logs(module: str) -> float | None:
     return round(wins / total, 3)
 
 
-def check_dashboard_consistency() -> list[dict]:
+def check_dashboard_consistency(open_positions: list = None) -> list[dict]:
     """Compare dashboard API responses against trade log computations.
 
     Only runs if the dashboard is reachable (non-blocking).
     """
+    if open_positions is None:
+        open_positions = get_open_positions_from_logs()
+    log_open = open_positions
     issues = []
     try:
         import requests
@@ -407,7 +427,6 @@ def check_dashboard_consistency() -> list[dict]:
         try:
             api_positions_resp = requests.get(f'{base}/api/account', timeout=5).json()
             api_count = api_positions_resp.get('open_trade_count', 0)
-            log_open = get_open_positions_from_logs()
             log_count = len(log_open)
             if abs(api_count - log_count) > 0:
                 issues.append({
@@ -437,7 +456,6 @@ def check_dashboard_consistency() -> list[dict]:
         # --- Capital deployed ---
         try:
             api_deployed = api_positions_resp.get('total_deployed', 0)
-            log_open = get_open_positions_from_logs()
             log_deployed = sum(t.get('size_dollars', 0) for t in log_open)
             if abs(api_deployed - log_deployed) > 1.0:
                 issues.append({
@@ -590,7 +608,7 @@ def _flag_trade(path: Path, trade_id: str, flag_key: str, flag_value=True):
         _write_trades_file(path, trades)
 
 
-def _remove_tracker_orphans(orphan_tickers: list[str]):
+def _remove_tracker_orphans(orphan_tickers: list, open_positions: list = None):
     """Remove orphan tickers from position tracker file.
 
     orphan_tickers is a list of plain ticker strings. To avoid deleting valid
@@ -602,7 +620,8 @@ def _remove_tracker_orphans(orphan_tickers: list[str]):
     try:
         tracked = json.loads(TRACKER_FILE.read_text(encoding='utf-8'))
         # Get currently open (ticker, side) pairs from logs to avoid over-deletion
-        open_positions = get_open_positions_from_logs()
+        if open_positions is None:
+            open_positions = get_open_positions_from_logs()
         open_keys = {(t.get('ticker', ''), t.get('side', '')) for t in open_positions}
         changed = False
         for ticker in orphan_tickers:
@@ -708,6 +727,9 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
         except Exception:
             pass
 
+    # Compute open positions once — passed to all sub-checks to avoid redundant file scans
+    open_positions = get_open_positions_from_logs()
+
     # ── Critical checks (every cycle) ─────────────────────────────────────
 
     # 1. Duplicate trade IDs
@@ -793,9 +815,9 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
             log_activity(f'[DataAgent] Module fix: {tid[:8]} {old_module} -> {expected}')
 
     # 5. Position tracker drift
-    drift = check_tracker_drift(tracked)
+    drift = check_tracker_drift(tracked, open_positions=open_positions)
     if drift['orphans']:
-        _remove_tracker_orphans(drift['orphans'])
+        _remove_tracker_orphans(drift['orphans'], open_positions=open_positions)
         auto_fixed += len(drift['orphans'])
         issues.append({
             'type': 'tracker_orphans',
@@ -878,7 +900,7 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
             })
 
         # 10. Dashboard consistency
-        dash_issues = check_dashboard_consistency()
+        dash_issues = check_dashboard_consistency(open_positions=open_positions)
         for di in dash_issues:
             check_name = di.get('check', '')
             flagged += 1

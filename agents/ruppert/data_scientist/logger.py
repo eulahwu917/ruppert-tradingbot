@@ -183,22 +183,28 @@ def log_activity(message):
 
 
 def get_daily_exposure(module: str = None) -> float:
-    """Calculate total $ exposure from today's open positions.
+    """Calculate total $ exposure from all open positions (any age).
 
-    Also reads yesterday's log to catch multi-day positions that were entered
-    yesterday but not yet exited. Only counts entries (buys) that have no
-    corresponding exit across both log files.
+    Reads all trade files from START_DATE forward — the same window used by
+    data_agent.get_open_positions_from_logs() — so multi-day positions entered
+    2+ days ago are correctly counted. Only sums entries (buys) that have no
+    corresponding exit/settle record.
     """
-    today_str     = _pdt_today().isoformat()
-    yesterday_str = (_pdt_today() - timedelta(days=1)).isoformat()
+    START_DATE = '2026-03-26'  # bot launch date; matches _get_trade_files() default
 
-    entries   = {}   # key: (ticker, side) → size_dollars of the latest entry
+    entries   = {}   # key: (ticker, side) → accumulated size_dollars
     exit_keys = set()
 
-    for day_str in [yesterday_str, today_str]:
-        log_path = os.path.join(TRADES_DIR, f"trades_{day_str}.jsonl")  # P0-2 fix: read from logs/trades/
-        if not os.path.exists(log_path):
+    for fname in sorted(os.listdir(TRADES_DIR)):
+        if not fname.startswith('trades_') or not fname.endswith('.jsonl'):
             continue
+        try:
+            file_date = fname[len('trades_'):-len('.jsonl')]
+            if file_date < START_DATE:
+                continue
+        except Exception:
+            continue
+        log_path = os.path.join(TRADES_DIR, fname)
         with open(log_path, 'r', encoding='utf-8') as f:
             for line in f:
                 try:
@@ -209,6 +215,7 @@ def get_daily_exposure(module: str = None) -> float:
                     key    = (ticker, side)
                     if action in ('exit', 'settle'):
                         exit_keys.add(key)
+                        entries.pop(key, None)  # clear accumulated entry on exit
                     else:
                         if module is not None:
                             entry_module = entry.get('module', '')
@@ -339,12 +346,11 @@ def get_daily_summary():
             except Exception:
                 pass
 
+    buys = [t for t in trades if t.get('action') not in ('exit', 'settle')]
     return {
         'date': date.today().isoformat(),
-        'trades': len(trades),
-        'total_exposure': sum(
-            t.get('size_dollars', 0) for t in trades
-            if t.get('action') not in ('exit', 'settle')
-        ),
-        'markets': [t['ticker'] for t in trades],
+        'trades': len(buys),
+        'total_exposure': sum(t.get('size_dollars', 0) for t in buys),
+        'markets': list(dict.fromkeys(t['ticker'] for t in buys)),  # deduplicated, order-preserving
+        'exits_today': len(trades) - len(buys),  # informational — count of exit/settle records
     }

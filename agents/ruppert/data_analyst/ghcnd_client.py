@@ -27,6 +27,7 @@ Station IDs (GHCND):
 import json
 import logging
 import sys
+import time as _time
 import requests
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -39,6 +40,30 @@ if str(_WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKSPACE_ROOT))
 
 logger = logging.getLogger(__name__)
+
+
+def _get_with_retry(url: str, params: dict = None, headers: dict = None,
+                    timeout: int = 25, max_retries: int = 3):
+    """GET with exponential backoff. Returns Response or None on exhaustion."""
+    for attempt in range(max_retries):
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=timeout)
+            if r.status_code == 429:
+                wait = 2 ** attempt
+                logger.warning(f"[GHCND] 429 from {url[:60]} — retrying in {wait}s (attempt {attempt+1}/{max_retries})")
+                _time.sleep(wait)
+                continue
+            return r
+        except requests.exceptions.Timeout:
+            logger.warning(f"[GHCND] Timeout on {url[:60]} (attempt {attempt+1}/{max_retries})")
+            if attempt < max_retries - 1:
+                _time.sleep(2 ** attempt)
+        except Exception as e:
+            logger.error(f"[GHCND] Request error: {e}")
+            return None
+    logger.error(f"[GHCND] All {max_retries} retries exhausted for {url[:60]}")
+    return None
+
 
 # ── Station & City Config ─────────────────────────────────────────────────────
 
@@ -60,12 +85,6 @@ GHCND_STATIONS = {
         "name": "Miami International",
         "lat": 25.7617, "lon": -80.1918,
         "tz": "America/New_York",
-    },
-    "KXHIGHLA": {
-        "station": "USW00023174",
-        "name": "Los Angeles (LAX)",
-        "lat": 34.0522, "lon": -118.2437,
-        "tz": "America/Los_Angeles",
     },
     "KXHIGHHOU": {
         "station": "USW00012960",
@@ -275,7 +294,9 @@ def _fetch_noaa_tmax(station_id: str, start_date: str, end_date: str, token: str
     headers = {"token": token}
 
     try:
-        r = requests.get(url, params=params, headers=headers, timeout=25)
+        r = _get_with_retry(url, params=params, headers=headers, timeout=25)
+        if r is None:
+            return {}
         r.raise_for_status()
         data = r.json()
         results = data.get("results", [])
@@ -312,7 +333,7 @@ def _fetch_noaa_tmax(station_id: str, start_date: str, end_date: str, token: str
 
 # ── ERA5 Archive Fetch ────────────────────────────────────────────────────────
 
-def _fetch_era5_tmax(lat: float, lon: float, timezone: str,
+def _fetch_era5_tmax(lat: float, lon: float, tz_name: str,
                      start_date: str, end_date: str) -> dict:
     """
     Fetch ERA5 reanalysis TMAX from Open-Meteo Archive API.
@@ -329,10 +350,12 @@ def _fetch_era5_tmax(lat: float, lon: float, timezone: str,
         "end_date":         end_date,
         "daily":            "temperature_2m_max",
         "temperature_unit": "fahrenheit",
-        "timezone":         timezone,
+        "timezone":         tz_name,
     }
     try:
-        r = requests.get(url, params=params, timeout=20)
+        r = _get_with_retry(url, params=params, timeout=20)
+        if r is None:
+            return {}
         r.raise_for_status()
         data = r.json()
         dates = data.get("daily", {}).get("time", [])

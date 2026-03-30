@@ -141,8 +141,8 @@ def get_market_price(ticker: str, fallback_client=None) -> dict | None:
                     return {
                         'yes_bid': bid,
                         'yes_ask': ask,
-                        'no_bid':  round((1 - rest_ask_d) * 100),
-                        'no_ask':  round((1 - rest_bid_d) * 100),
+                        'no_bid':  int(round((1 - rest_ask_d) * 100)),
+                        'no_ask':  int(round((1 - rest_bid_d) * 100)),
                         'source': 'rest',
                     }
                 # REST returned market but null prices — fall through to stale
