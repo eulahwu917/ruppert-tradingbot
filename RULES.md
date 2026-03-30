@@ -166,6 +166,23 @@ Strategist / Data Scientist / Researcher → CEO → David (if CEO unsure or rea
 
 ---
 
+## 17. Changelog Logging (Mandatory for All Code Changes)
+
+**Every code change — regardless of source — must be logged in the changelog before the session ends.**
+
+- **Audit-loop fixes:** logged automatically in Phase 6 (CHANGELOG.md + domain detail files)
+- **Runtime fixes** (bugs found between audits, hotfixes, post-audit discoveries): logged to `memory/changelog/runtime/YYYY-MM-DD-issues.md` AND added as a one-line entry to `memory/changelog/CHANGELOG.md`
+- **No exceptions.** A fix without a changelog entry is an invisible fix. Future audit agents read CHANGELOG.md first — if it's not there, they'll re-raise it or miss the context.
+
+**Format for runtime entries in CHANGELOG.md:**
+```
+RUNTIME-YYYY-MM-DD-NNN | {description} | Fixed (commit hash) QA-passed
+```
+
+**Who owns this:** CEO is responsible for ensuring changelog entries exist before closing any session where code was changed. If runtime fixes were made by any agent, CEO adds the CHANGELOG.md entries at session close.
+
+---
+
 ## 15. Root Cause Discipline
 
 - All bug fixes must address root cause. No masking. No easy fixes.
