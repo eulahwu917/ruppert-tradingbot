@@ -27,6 +27,7 @@ import logging
 import statistics
 import requests
 import uuid
+import threading
 from collections import deque
 from datetime import datetime, timezone, date, timedelta
 import pytz
@@ -70,6 +71,83 @@ LOGS_DIR.mkdir(exist_ok=True)
 DECISION_LOG = LOGS_DIR / 'decisions_15m.jsonl'
 
 # DRY_RUN intentionally not captured at module level — read at call time (see evaluate_crypto_15m_entry)
+
+# ─────────────────────────────── Module-Level Cap State ───────────────────────
+
+# Per-window exposure counter (in-memory, race-safe)
+_window_lock           = threading.Lock()
+_window_exposure: dict = {}    # dict: window_open_ts (str) → float (dollars committed this window)
+_daily_wager           = 0.0   # float: total dollars wagered today (all buys)
+_daily_wager_date      = ''    # str: ISO date string, used to detect midnight rollover
+_cb_consecutive_losses = 0     # int: consecutive complete-loss windows (circuit breaker counter)
+_cb_last_window_ts     = ''    # str: last window_open_ts seen; triggers CB state file re-read on change
+
+_state_initialized = False     # guard: _rehydrate_state() runs only once per process
+
+
+def _read_circuit_breaker_state() -> int:
+    """
+    Read the current consecutive_losses count from the circuit breaker state file.
+    Returns 0 if the file doesn't exist or is unreadable (safe/permissive default).
+    """
+    state_path = LOGS_DIR / 'crypto_15m_circuit_breaker.json'
+    try:
+        with open(state_path, 'r', encoding='utf-8') as f:
+            state = json.load(f)
+        return int(state.get('consecutive_losses', 0))
+    except (FileNotFoundError, json.JSONDecodeError, Exception):
+        return 0
+
+
+def _get_current_window_open_ts() -> str:
+    """
+    Derive the current 15-minute window open timestamp from now().
+    Floors to the nearest 15-minute boundary in UTC.
+    Returns ISO format string, e.g. '2026-03-30T13:15:00+00:00'
+    """
+    now = datetime.now(timezone.utc)
+    floored_minute = (now.minute // 15) * 15
+    window_open = now.replace(minute=floored_minute, second=0, microsecond=0)
+    return window_open.isoformat()
+
+
+def _rehydrate_state():
+    """
+    Re-read trade log and circuit breaker state file to restore in-memory counters
+    after a restart. Called once at startup before first evaluation.
+    """
+    global _daily_wager, _daily_wager_date, _window_exposure, _cb_consecutive_losses, _state_initialized
+
+    if _state_initialized:
+        return
+    _state_initialized = True
+
+    today_str = date.today().isoformat()
+    _daily_wager_date = today_str
+
+    # 1. Daily wager: sum all buys today from trade log
+    try:
+        from agents.ruppert.data_scientist.logger import get_daily_wager, get_window_exposure
+        _daily_wager = get_daily_wager('crypto_15m')
+
+        # 2. Window exposure: re-hydrate for any window currently open
+        current_window_ts = _get_current_window_open_ts()
+        if current_window_ts:
+            _window_exposure[current_window_ts] = get_window_exposure('crypto_15m', current_window_ts)
+    except Exception as e:
+        logger.warning('[crypto_15m] _rehydrate_state: failed to re-hydrate wager counters: %s', e)
+
+    # 3. Circuit breaker: re-read consecutive complete-loss count from state file
+    _cb_consecutive_losses = _read_circuit_breaker_state()
+
+    logger.info(
+        '[crypto_15m] State rehydrated: daily_wager=$%.2f, cb_consecutive_losses=%d',
+        _daily_wager, _cb_consecutive_losses,
+    )
+
+
+# Run rehydration at module load time
+_rehydrate_state()
 
 # ─────────────────────────────── Cache ────────────────────────────────────────
 
@@ -985,16 +1063,12 @@ def evaluate_crypto_15m_entry(
                        max(edge_yes, edge_no), None, None)
         return
 
-    # ── Daily cap check ──
+    # ── Capital + Cap Constants ──
     capital = get_capital()
-    daily_cap = capital * getattr(config, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04)
-    current_exposure = get_daily_exposure('crypto_15m')
-
-    if current_exposure >= daily_cap:
-        _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
-                       signals, kalshi_info, 'SKIP', 'DAILY_CAP',
-                       edge, entry_price, None)
-        return
+    window_cap      = capital * getattr(config, 'CRYPTO_15M_WINDOW_CAP_PCT', 0.02)
+    daily_wager_cap = capital * getattr(config, 'CRYPTO_15M_DAILY_WAGER_CAP_PCT', 0.40)
+    cb_n            = getattr(config, 'CRYPTO_15M_CIRCUIT_BREAKER_N', 3)
+    cb_advisory     = getattr(config, 'CRYPTO_15M_CIRCUIT_BREAKER_ADVISORY', True)
 
     # Strategy gate: global 70% deployment cap + strategy filters
     from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_exp
@@ -1043,12 +1117,78 @@ def evaluate_crypto_15m_entry(
     )
     position_usd = max(position_usd, 5.0)  # minimum viable
 
-    # Don't exceed remaining daily cap
-    position_usd = min(position_usd, daily_cap - current_exposure)
     if position_usd < 5.0:
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
                        signals, kalshi_info, 'SKIP', 'SIZE_TOO_SMALL',
                        edge, entry_price, position_usd)
+        return
+
+    # ── Three-Tier Cap Check (race-safe, inside lock) ──
+    # Required global declarations — without these, Python raises UnboundLocalError
+    # on assignment to module-level variables inside this function.
+    global _cb_consecutive_losses, _cb_last_window_ts
+    global _daily_wager, _daily_wager_date, _window_exposure
+
+    _skip_reason = None
+
+    with _window_lock:
+
+        # --- Fix (Critical): Re-read CB state file on each window transition ---
+        # settlement_checker updates the state FILE after each settled window, but
+        # does NOT update the in-memory variable. Without this re-read, the circuit
+        # breaker can only fire as a startup gate — it never trips mid-session.
+        win_key = window_open_ts or 'unknown'
+        if win_key != _cb_last_window_ts:
+            _cb_consecutive_losses = _read_circuit_breaker_state()
+            _cb_last_window_ts = win_key
+
+        # --- Check 0: Circuit breaker ---
+        if _cb_consecutive_losses >= cb_n:
+            if cb_advisory:
+                logger.warning(
+                    '[crypto_15m] CIRCUIT BREAKER advisory: %d consecutive complete-loss windows '
+                    '(threshold=%d). Would halt but ADVISORY mode is on.',
+                    _cb_consecutive_losses, cb_n,
+                )
+                # Do NOT set _skip_reason — advisory mode continues trading
+            else:
+                _skip_reason = 'CIRCUIT_BREAKER'
+
+        if not _skip_reason:
+            # --- Check 1: Tier 2 daily wager backstop ---
+            today_str = date.today().isoformat()
+            if _daily_wager_date != today_str:
+                _daily_wager = 0.0
+                _daily_wager_date = today_str
+
+            if _daily_wager + position_usd > daily_wager_cap:
+                trimmed = daily_wager_cap - _daily_wager
+                if trimmed < 5.0:
+                    _skip_reason = 'DAILY_WAGER_BACKSTOP'
+                else:
+                    position_usd = trimmed
+
+        if not _skip_reason:
+            # --- Check 2: Tier 1 window cap ---
+            win_exp = _window_exposure.get(win_key, 0.0)
+
+            if win_exp + position_usd > window_cap:
+                trimmed = window_cap - win_exp
+                if trimmed < 5.0:
+                    _skip_reason = 'WINDOW_CAP'
+                else:
+                    position_usd = trimmed
+
+        if not _skip_reason:
+            # Reserve capacity atomically (release on order failure below)
+            _window_exposure[win_key] = _window_exposure.get(win_key, 0.0) + position_usd
+            _daily_wager += position_usd
+
+    # --- Outside lock ---
+    if _skip_reason:
+        _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
+                       signals, kalshi_info, 'SKIP', _skip_reason,
+                       edge, entry_price, None)
         return
 
     # ── Execute ──
@@ -1070,6 +1210,10 @@ def evaluate_crypto_15m_entry(
             _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
                            signals, kalshi_info, 'SKIP', f'ORDER_FAILED:{e}',
                            edge, entry_price, position_usd)
+            # Release reservation on order failure
+            with _window_lock:
+                _window_exposure[win_key] = max(0.0, _window_exposure.get(win_key, 0.0) - position_usd)
+                _daily_wager = max(0.0, _daily_wager - position_usd)
             return
 
     # ── Log trade ──
@@ -1094,6 +1238,7 @@ def evaluate_crypto_15m_entry(
         'date': str(date.today()),
         'scan_price': entry_price,
         'fill_price': entry_price,
+        'window_open_ts': window_open_ts,                         # for get_window_exposure() re-hydration
         # ── Data quality tags (for Optimizer / Data Scientist segmentation) ──
         'data_quality':          data_quality,
         'okx_volume_pct':        okx_volume_pct,                  # float ratio, e.g. 0.12 = 12% of 30d avg

@@ -248,6 +248,85 @@ def get_daily_exposure(module: str = None) -> float:
     return sum(size for key, size in entries.items() if key not in exit_keys)
 
 
+def _read_trades_for_module(module: str) -> list:
+    """Internal helper: read all trade records for a given module from all trade log files.
+
+    Returns a flat list of trade record dicts (all dates, all actions).
+    Silently skips missing or malformed files.
+    """
+    records = []
+    if not os.path.isdir(TRADES_DIR):
+        return records
+    for fname in sorted(os.listdir(TRADES_DIR)):
+        if not fname.startswith('trades_') or not fname.endswith('.jsonl'):
+            continue
+        log_path = os.path.join(TRADES_DIR, fname)
+        try:
+            with open(log_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        if rec.get('module') == module:
+                            records.append(rec)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+    return records
+
+
+def get_daily_wager(module: str) -> float:
+    """
+    Returns the total dollars wagered (all buy entries) for the given module today,
+    regardless of whether positions have settled or been exited.
+
+    Used for the Tier 2 daily wager backstop in crypto_15m.
+
+    Args:
+        module: Module name string (e.g. 'crypto_15m')
+
+    Returns:
+        Total size_dollars of all buy actions logged today for this module.
+    """
+    today = _pdt_today().isoformat()   # 'YYYY-MM-DD'
+    total = 0.0
+    trades = _read_trades_for_module(module)
+    for trade in trades:
+        if trade.get('date') == today and trade.get('action') == 'buy':
+            total += float(trade.get('size_dollars', 0.0))
+    return total
+
+
+def get_window_exposure(module: str, window_open_ts: str) -> float:
+    """
+    Returns the total dollars placed (buy entries) for the given module
+    within a specific 15-minute window, identified by its open timestamp.
+
+    Used for Tier 1 window cap enforcement and startup re-hydration
+    of the in-memory _window_exposure counter.
+
+    Args:
+        module:          Module name string (e.g. 'crypto_15m')
+        window_open_ts:  ISO timestamp string of the window open
+                         (e.g. '2026-03-30T13:15:00') — same key used
+                         in _window_exposure dict in crypto_15m.py
+
+    Returns:
+        Total size_dollars of all buy actions logged for this module
+        in the specified window.
+    """
+    total = 0.0
+    trades = _read_trades_for_module(module)
+    for trade in trades:
+        if (trade.get('action') == 'buy'
+                and trade.get('window_open_ts') == window_open_ts):
+            total += float(trade.get('size_dollars', 0.0))
+    return total
+
+
 def normalize_entry_price(pos: dict) -> float:
     """Return entry_price in cents from a position record.
 

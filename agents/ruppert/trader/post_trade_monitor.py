@@ -11,6 +11,7 @@ Usage: python post_trade_monitor.py
 """
 import sys
 import json
+import os
 import uuid
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
@@ -41,6 +42,80 @@ from agents.ruppert.data_scientist.logger import log_trade, log_activity, acquir
 
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _update_circuit_breaker_state(module: str, window_open_ts: str, settlements: list):
+    """
+    Classify the just-settled window as complete loss, win, or partial loss,
+    then update the circuit breaker state file.
+
+    Called after each 15m window's positions are fully settled.
+
+    Args:
+        module:          Module name (e.g. 'crypto_15m')
+        window_open_ts:  ISO timestamp of the window that just settled
+        settlements:     List of settlement result dicts for this window.
+                         Each dict must have at minimum: {'payout': float}
+                         where payout = 0.0 for a loss, >0 for a win.
+    """
+    if not settlements:
+        return  # No settlements to classify — don't update state
+
+    # Use absolute path via _get_paths() to avoid working-directory ambiguity.
+    state_path = os.path.join(str(_get_paths()['logs']), 'crypto_15m_circuit_breaker.json')
+
+    # Classify the window
+    payouts = [float(s.get('payout', 0.0)) for s in settlements]
+    if all(p == 0.0 for p in payouts):
+        window_result = 'loss'        # complete loss — all entries expired worthless
+    elif any(p > 0.0 for p in payouts):
+        window_result = 'win'         # at least one winner
+    else:
+        window_result = 'partial_loss'  # shouldn't reach here given above logic
+
+    # Read current state (or initialize)
+    try:
+        with open(state_path, 'r', encoding='utf-8') as f:
+            state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        state = {'consecutive_losses': 0, 'advisory_would_have_fired_count': 0}
+
+    # Update consecutive loss counter
+    if window_result == 'loss':
+        state['consecutive_losses'] = state.get('consecutive_losses', 0) + 1
+    else:
+        # Any non-complete-loss resets the counter
+        state['consecutive_losses'] = 0
+
+    # Track advisory fire count for calibration
+    cb_n = getattr(config, 'CRYPTO_15M_CIRCUIT_BREAKER_N', 3)
+    if state['consecutive_losses'] >= cb_n:
+        state['advisory_would_have_fired_count'] = state.get('advisory_would_have_fired_count', 0) + 1
+        print(
+            f'  [circuit_breaker] Advisory: {state["consecutive_losses"]} consecutive complete-loss '
+            f'windows for {module} (threshold={cb_n}). '
+            f'advisory_would_have_fired_count={state["advisory_would_have_fired_count"]}'
+        )
+
+    state['last_updated']       = datetime.utcnow().isoformat()
+    state['last_window_ts']     = window_open_ts
+    state['last_window_result'] = window_result
+
+    # Atomic write via .tmp + os.replace
+    os.makedirs(os.path.dirname(state_path), exist_ok=True)
+    tmp_path = state_path + '.tmp'
+    try:
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp_path, state_path)
+    except Exception as e:
+        print(f'  [circuit_breaker] State file write failed: {e}')
+        return
+
+    print(
+        f'  [circuit_breaker] Window {window_open_ts} result={window_result}, '
+        f'consecutive_losses={state["consecutive_losses"]}'
+    )
 
 
 def check_settlements(client):
@@ -97,6 +172,9 @@ def check_settlements(client):
         return
 
     settled_count = 0
+    # Accumulate 15m settlements per window for circuit breaker update
+    # dict: window_open_ts → list of {'payout': float}
+    _15m_window_settlements: dict = {}
     for pos in open_positions:
         ticker = pos.get('ticker', '')
         side = pos.get('side', '')
@@ -239,10 +317,27 @@ def check_settlements(client):
         print(f"  [Settlement] {ticker} {side.upper()} → {result.upper()} | P&L=${pnl:+.2f}")
         settled_count += 1
 
+        # Accumulate 15m crypto settlements by window for circuit breaker update
+        if pos.get('module') == 'crypto_15m':
+            win_ts = pos.get('window_open_ts', '')
+            if win_ts:
+                payout = exit_price if (
+                    (side == 'yes' and result == 'yes') or
+                    (side == 'no'  and result == 'no')
+                ) else 0.0
+                _15m_window_settlements.setdefault(win_ts, []).append({'payout': payout})
+
     if settled_count == 0:
         print(f"  [Settlement Checker] no newly settled positions")
     else:
         print(f"  [Settlement Checker] settled {settled_count} position(s)")
+
+    # Update circuit breaker state for each fully-settled 15m window
+    for win_ts, win_settlements in _15m_window_settlements.items():
+        try:
+            _update_circuit_breaker_state('crypto_15m', win_ts, win_settlements)
+        except Exception as _cb_err:
+            print(f"  [circuit_breaker] State update failed for window {win_ts}: {_cb_err}")
 
 
 def push_alert(level, message, ticker=None, pnl=None):
