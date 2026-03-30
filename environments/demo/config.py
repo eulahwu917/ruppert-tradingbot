@@ -139,12 +139,14 @@ OPTIMIZER_CAP_UTIL_FLAG      = 0.30  # flag if avg cap utilization below 30%
 OPTIMIZER_MAX_AVG_SIZE       = 40.0  # flag if avg position size above this
 
 # ── 15-Min Crypto Direction (KXBTC15M / KXETH15M / KXXRP15M / KXDOGE15M) ────
-CRYPTO_15M_MIN_EDGE          = 0.05   # DEMO relaxed: 5% minimum edge (was 0.08)
-CRYPTO_15M_LIQUIDITY_MIN_PCT = 0.001  # DEMO relaxed: book depth >= 0.1% of OI (was 0.003)
+CRYPTO_15M_MIN_EDGE          = 0.02   # DATA COLLECTION: 2% min edge (was 0.05)
+CRYPTO_15M_LIQUIDITY_MIN_PCT = 0.0005 # DATA COLLECTION: 0.05% of OI (was 0.001)
 CRYPTO_15M_SIGMOID_SCALE     = 1.0    # sigmoid scale factor (autoresearcher-tunable)
-CRYPTO_15M_DAILY_CAP_PCT     = 0.04   # 4% of capital per day
-CRYPTO_15M_MAX_SPREAD        = 15     # DEMO relaxed: max spread cents (was hardcoded 8 in crypto_15m.py)
-CRYPTO_15M_THIN_MARKET_RATIO = 0.05   # DEMO relaxed: min OKX vol ratio vs 30d avg (was hardcoded 0.25)
+CRYPTO_15M_DAILY_CAP_PCT     = 0.06   # DATA COLLECTION: 6% of capital/day (was 0.04)
+CRYPTO_15M_MAX_SPREAD        = 25     # DATA COLLECTION: 25c max spread (was 15)
+CRYPTO_15M_THIN_MARKET_RATIO = 0.01   # DATA COLLECTION: 1% of 30d avg vol (was 0.05)
+CRYPTO_15M_MIN_CONVICTION    = 0.05   # DATA COLLECTION: min |raw_score| (was hardcoded 0.15)
+CRYPTO_15M_LIQUIDITY_FLOOR   = 20.0   # DATA COLLECTION: absolute floor $20 (was $50/$100)
 
 # ── WS-First Architecture ────────────────────────────────────────────────────
 # Active series prefixes — only cache tickers matching these.

@@ -615,10 +615,11 @@ def check_risk_filters(
     # Require book depth >= LIQUIDITY_MIN_PCT of open interest
     # Falls back to absolute $100 floor if OI is unavailable
     liquidity_min_pct = getattr(config, 'CRYPTO_15M_LIQUIDITY_MIN_PCT', 0.003)
+    liquidity_floor = getattr(config, 'CRYPTO_15M_LIQUIDITY_FLOOR', 20.0)
     if dollar_oi > 0:
-        min_depth = max(dollar_oi * liquidity_min_pct, 50.0)  # at least $50 floor
+        min_depth = max(dollar_oi * liquidity_min_pct, liquidity_floor)
     else:
-        min_depth = 100.0  # fallback if OI unavailable
+        min_depth = liquidity_floor
     if book_depth_usd < min_depth:
         return {'block': 'LOW_KALSHI_LIQUIDITY', 'okx_volume_pct': okx_volume_pct}
 
@@ -639,7 +640,8 @@ def check_risk_filters(
         return {'block': 'EXTREME_FUNDING', 'okx_volume_pct': okx_volume_pct}
 
     # R7: Low conviction
-    if abs(raw_score) < 0.15:
+    min_conviction = getattr(config, 'CRYPTO_15M_MIN_CONVICTION', 0.05)
+    if abs(raw_score) < min_conviction:
         return {'block': 'LOW_CONVICTION', 'okx_volume_pct': okx_volume_pct}
 
     # R8: Session drawdown
