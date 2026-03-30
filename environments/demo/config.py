@@ -147,6 +147,9 @@ CRYPTO_15M_MAX_SPREAD        = 25     # DATA COLLECTION: 25c max spread (was 15)
 CRYPTO_15M_THIN_MARKET_RATIO = 0.01   # DATA COLLECTION: 1% of 30d avg vol (was 0.05)
 CRYPTO_15M_MIN_CONVICTION    = 0.05   # DATA COLLECTION: min |raw_score| (was hardcoded 0.15)
 CRYPTO_15M_LIQUIDITY_FLOOR   = 20.0   # DATA COLLECTION: absolute floor $20 (was $50/$100)
+CRYPTO_15M_ENTRY_CUTOFF_SECS    = 720    # Max elapsed secs to allow entry (was hardcoded 660 = 11 min); 720 = 12 min
+CRYPTO_15M_SECONDARY_START_SECS = 480    # Elapsed secs where secondary (tighter) window begins (was hardcoded 480)
+CRYPTO_15M_FALLBACK_MIN_REMAINING = 180  # Fallback stops firing if < this many secs remain before close (was hardcoded 120)
 
 # ── WS-First Architecture ────────────────────────────────────────────────────
 # Active series prefixes — only cache tickers matching these.

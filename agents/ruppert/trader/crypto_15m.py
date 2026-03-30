@@ -823,6 +823,8 @@ def evaluate_crypto_15m_entry(
 
     # ── Timing Gate ──
     min_edge = getattr(config, 'CRYPTO_15M_MIN_EDGE', 0.08)
+    _entry_cutoff = getattr(config, 'CRYPTO_15M_ENTRY_CUTOFF_SECS', 660)
+    _secondary_start = getattr(config, 'CRYPTO_15M_SECONDARY_START_SECS', 480)
 
     if elapsed_secs < 120:
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
@@ -830,10 +832,10 @@ def evaluate_crypto_15m_entry(
                        'SKIP', 'EARLY_WINDOW', None, None, None)
         return
 
-    elif elapsed_secs <= 480:
+    elif elapsed_secs <= _secondary_start:
         pass  # primary window, use base min_edge
 
-    elif elapsed_secs <= 660:
+    elif elapsed_secs <= _entry_cutoff:
         min_edge = min_edge * 1.25  # secondary window, harder threshold
 
     else:

@@ -217,8 +217,11 @@ async def _check_and_fire_fallback() -> None:
     elapsed_secs = (now_utc - window_open_dt).total_seconds()
     remaining_secs = (window_close_dt - now_utc).total_seconds()
 
-    # Only fire in the useful window: 90s after open, 120s before close
-    if elapsed_secs < 90 or remaining_secs < 120:
+    # Only fire in the useful window: 90s after open, FALLBACK_MIN_REMAINING before close
+    # Align with CRYPTO_15M_ENTRY_CUTOFF_SECS so fallback doesn't waste REST calls
+    # on windows the entry evaluator would block anyway.
+    _fallback_min_remaining = getattr(config, 'CRYPTO_15M_FALLBACK_MIN_REMAINING', 180)
+    if elapsed_secs < 90 or remaining_secs < _fallback_min_remaining:
         return
 
     for series in CRYPTO_15M_SERIES:
@@ -264,9 +267,10 @@ async def _check_and_fire_fallback() -> None:
 async def _fallback_poll_loop() -> None:
     """Background task: REST-poll each 15m series if WS hasn't fired for current window.
     Created and cancelled per WS connection cycle — do not run globally.
+    Poll interval: 30s (was 60s) to catch windows missed mid-cycle.
     """
     while True:
-        await asyncio.sleep(60)
+        await asyncio.sleep(30)  # tightened from 60s — catches stragglers sooner
         try:
             await _check_and_fire_fallback()
         except asyncio.CancelledError:
@@ -442,6 +446,15 @@ async def run_ws_feed():
 
                 # START fallback task for this connection cycle
                 fallback_task = asyncio.create_task(_fallback_poll_loop())
+
+                # Bootstrap: immediately fire one REST check on reconnect
+                # so any active 15m window missed during disconnect is evaluated
+                # without waiting up to 60s for the first poll cycle.
+                try:
+                    await _check_and_fire_fallback()
+                    logger.info('[WS Feed] REST bootstrap fired on reconnect')
+                except Exception as _boot_err:
+                    logger.warning('[WS Feed] REST bootstrap error: %s', _boot_err)
 
                 try:
                     async for raw in ws:
