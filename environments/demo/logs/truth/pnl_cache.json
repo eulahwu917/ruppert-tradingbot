@@ -1,0 +1,10 @@
+{
+  "closed_pnl": 12393.57,
+  "open_pnl": 0.0,
+  "logged_closed_pnl": 29920.85,
+  "correction_applied": -17527.28,
+  "last_corrected": "2026-03-31T15:56:35",
+  "correction_reason": "P0 bug: 95c_rule_no @ 0c at settlement - orderbook clearing misidentified as NO win",
+  "stale": true,
+  "note": "dashboard computes live from logs — do not use this file"
+}
