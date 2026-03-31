@@ -173,6 +173,18 @@ OPTIMIZER_CAP_UTIL_FLAG      = 0.30  # flag if avg cap utilization below 30%
 OPTIMIZER_MAX_AVG_SIZE       = 40.0  # flag if avg position size above this
 
 # ── 15-Min Crypto Direction (KXBTC15M / KXETH15M / KXXRP15M / KXDOGE15M / KXSOL15M) ────
+# Batch-3 config keys (previously hardcoded in crypto_15m.py)
+CRYPTO_15M_SESSION_DRAWDOWN_PAUSE_PCT = 0.05    # pause if session loss > this % of capital
+CRYPTO_15M_SECONDARY_EDGE_MULTIPLIER  = 1.25    # edge multiplier for secondary window
+CRYPTO_15M_MAX_BASIS_PCT              = 0.0015  # max Coinbase-OKX basis before BASIS_RISK block
+CRYPTO_15M_TFI_BUCKET_WEIGHTS         = [0.20, 0.30, 0.50]  # time-weighted TFI composite weights
+CRYPTO_15M_ROLLING_WINDOW_BUCKETS     = 48      # 4 hours of 5-min buckets
+CRYPTO_15M_FUNDING_Z_THRESHOLD        = 2.0     # funding rate z-score threshold
+CRYPTO_15M_FUNDING_BEARISH_MULT       = 0.85    # P multiplier when funding z > threshold (bearish)
+CRYPTO_15M_FUNDING_BULLISH_MULT       = 1.15    # P multiplier when funding z < -threshold (bullish)
+CRYPTO_15M_POLY_DIVERGENCE_THRESHOLD  = 0.03    # min |divergence| to apply Polymarket nudge
+CRYPTO_15M_POLY_NUDGE_WEIGHT          = 0.3     # weight for Polymarket divergence nudge
+
 CRYPTO_15M_MIN_EDGE          = 0.02   # DATA COLLECTION: 2% min edge (was 0.05)
 CRYPTO_15M_LIQUIDITY_MIN_PCT = 0.0005 # DATA COLLECTION: 0.05% of OI (was 0.001)
 CRYPTO_15M_SIGMOID_SCALE     = 1.0    # sigmoid scale factor (autoresearcher-tunable)
@@ -211,6 +223,13 @@ CRYPTO_1D_MAX_POSITION_USD         = 200.0  # hard cap per entry (liquidity cons
 CRYPTO_1D_MIN_EDGE                 = 0.08   # primary window minimum edge (8%)
 CRYPTO_1D_SECONDARY_MIN_EDGE       = 0.12   # 1.5× minimum edge for secondary window entries
 CRYPTO_1D_SECONDARY_MAX_EXPOSURE_PCT = 0.50 # skip secondary window if global exposure >= 50%
+# Batch-3 config keys (previously hardcoded in crypto_1d.py)
+CRYPTO_1D_MIN_POSITION_USD         = 10.0   # minimum viable trade size
+CRYPTO_1D_MAX_DISCOVERY_SPREAD     = 12     # max spread (cents) during market discovery
+CRYPTO_1D_MIN_BOOK_DEPTH_USD       = 300    # minimum book depth ($) to allow entry
+CRYPTO_1D_HIGH_VOL_BTC             = 0.03   # ATR high-vol threshold for BTC
+CRYPTO_1D_HIGH_VOL_ETH             = 0.04   # ATR high-vol threshold for ETH
+CRYPTO_1D_HIGH_VOL_SOL             = 0.05   # ATR high-vol threshold for SOL
 
 # ── WS-First Architecture ────────────────────────────────────────────────────
 # Active series prefixes — only cache tickers matching these.
@@ -244,6 +263,13 @@ LONG_HORIZON_MIN_EDGE = 0.08        # 8c minimum edge
 LONG_HORIZON_MAX_SPREAD = 10        # max 10c spread (monthly/annual are tighter)
 LONG_HORIZON_MAX_POSITION_PCT = 0.005  # 0.5% of capital per trade
 LONG_HORIZON_DAILY_CAP_PCT = 0.10   # 10% of capital/day total for this module
+# Batch-3 config keys (previously hardcoded in crypto_long_horizon.py)
+LONG_HORIZON_MAX_POSITION_USD   = 50.0   # hard $ cap per long-horizon trade
+LONG_HORIZON_VOL_MULT_BULL      = 1.2    # vol multiplier in bull regime
+LONG_HORIZON_VOL_MULT_NEUTRAL   = 1.0    # vol multiplier in neutral regime
+LONG_HORIZON_VOL_MULT_BEAR      = 1.4    # vol multiplier in bear regime
+LONG_HORIZON_BARRIER_BOOST      = 1.5    # barrier reflection principle boost cap
+LONG_HORIZON_FAT_TAIL_ADDEND    = 0.03   # additive fat-tail correction for extreme strikes
 
 # ── Expanded Cities (Weather) ────────────────────────────────────────────────
 # Disable trading on cities with unvalidated bias corrections (0.0 bias).
@@ -289,6 +315,16 @@ TTYPE_PER_CITY_DAILY_MAX  = 100.0   # $100/city/day (across upper + lower thresh
 
 # Enable T-type in DEMO (set False to disable without code changes)
 TTYPE_ENABLED = True
+
+# ── T-Type Soft Prior (edge_detector.py) ─────────────────────────────────────
+# Batch-3 config keys (previously hardcoded in edge_detector.py)
+TTYPE_SOFT_PRIOR_EDGE_THRESHOLD = 0.30   # apply soft prior when |edge| <= this value
+TTYPE_SOFT_PRIOR_NO_MULT        = 1.15   # confidence multiplier for NO side (longshot bias boost)
+TTYPE_SOFT_PRIOR_YES_MULT       = 0.85   # confidence multiplier for YES side (longshot bias penalty)
+
+# ── Weather Ensemble (edge_detector.py) ──────────────────────────────────────
+WEATHER_MIN_ENSEMBLE_CONFIDENCE = 0.5    # minimum ensemble confidence to proceed
+WEATHER_NWS_CONFIDENCE_PENALTY  = 0.15  # subtract this from confidence when NWS unavailable
 
 # ── Capital Fallback ─────────────────────────────────────────────────────────
 CAPITAL_FALLBACK = 10000.0  # fallback capital when API unavailable

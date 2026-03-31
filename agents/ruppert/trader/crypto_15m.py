@@ -190,7 +190,7 @@ _rolling_obi:  dict[str, deque] = {}
 _rolling_macd: dict[str, deque] = {}
 _rolling_oi:   dict[str, deque] = {}
 
-ROLLING_WINDOW = 48  # 4 hours of 5-min buckets
+ROLLING_WINDOW = getattr(config, 'CRYPTO_15M_ROLLING_WINDOW_BUCKETS', 48)  # 4 hours of 5-min buckets
 
 
 def _z_score(value: float, window: deque, clip_lo: float = -3.0, clip_hi: float = 3.0) -> float:
@@ -265,7 +265,7 @@ def fetch_taker_flow_imbalance(symbol: str) -> dict:
         bucket_tfis.append(tfi)
 
     # Time-weighted composite of last 3 buckets
-    weights = [0.20, 0.30, 0.50]
+    weights = getattr(config, 'CRYPTO_15M_TFI_BUCKET_WEIGHTS', [0.20, 0.30, 0.50])
     while len(bucket_tfis) < 3:
         bucket_tfis.insert(0, 0.0)
     tfi_composite = sum(w * t for w, t in zip(weights, bucket_tfis[-3:]))
@@ -744,7 +744,8 @@ def check_risk_filters(
     capital = get_capital()
     # R8: pause if session loss exceeds 5% of total capital (not 5% of daily_alloc).
     # Prior formula used 5% of daily_alloc which was ~0.2% of capital — far too sensitive.
-    if session_pnl < -0.05 * capital:
+    _drawdown_pause_pct = getattr(config, 'CRYPTO_15M_SESSION_DRAWDOWN_PAUSE_PCT', 0.05)
+    if session_pnl < -_drawdown_pause_pct * capital:
         return {'block': 'DRAWDOWN_PAUSE', 'okx_volume_pct': okx_volume_pct}
 
     # R9: Macro event (reuse from main cycle if available)
@@ -760,7 +761,8 @@ def check_risk_filters(
     okx_price = fetch_okx_price(symbol)
     if coinbase_price and okx_price and okx_price > 0:
         basis = abs(coinbase_price - okx_price) / okx_price
-        if basis > 0.0015:
+        _max_basis = getattr(config, 'CRYPTO_15M_MAX_BASIS_PCT', 0.0015)
+        if basis > _max_basis:
             return {'block': 'BASIS_RISK', 'okx_volume_pct': okx_volume_pct}
 
     return {'block': None, 'okx_volume_pct': okx_volume_pct}
@@ -931,7 +933,8 @@ def evaluate_crypto_15m_entry(
         pass  # primary window, use base min_edge
 
     elif elapsed_secs <= _entry_cutoff:
-        min_edge = min_edge * 1.25  # secondary window, harder threshold
+        _secondary_edge_mult = getattr(config, 'CRYPTO_15M_SECONDARY_EDGE_MULTIPLIER', 1.25)
+        min_edge = min_edge * _secondary_edge_mult  # secondary window, harder threshold
 
     else:
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
@@ -963,11 +966,14 @@ def evaluate_crypto_15m_entry(
     # ── Bias Filters ──
     fr_z = get_funding_z(asset)
     funding_mult = 1.0
+    _funding_z_threshold = getattr(config, 'CRYPTO_15M_FUNDING_Z_THRESHOLD', 2.0)
+    _funding_bearish_mult = getattr(config, 'CRYPTO_15M_FUNDING_BEARISH_MULT', 0.85)
+    _funding_bullish_mult = getattr(config, 'CRYPTO_15M_FUNDING_BULLISH_MULT', 1.15)
     if fr_z is not None:
-        if fr_z > 2.0:
-            funding_mult = 0.85
-        elif fr_z < -2.0:
-            funding_mult = 1.15
+        if fr_z > _funding_z_threshold:
+            funding_mult = _funding_bearish_mult
+        elif fr_z < -_funding_z_threshold:
+            funding_mult = _funding_bullish_mult
 
     P_biased = P_directional * funding_mult
 
@@ -975,10 +981,12 @@ def evaluate_crypto_15m_entry(
     poly_nudge = 0.0
     poly_yes = get_polymarket_yes_prob(asset)
     kalshi_yes = yes_ask / 100.0
+    _poly_div_threshold = getattr(config, 'CRYPTO_15M_POLY_DIVERGENCE_THRESHOLD', 0.03)
+    _poly_nudge_weight   = getattr(config, 'CRYPTO_15M_POLY_NUDGE_WEIGHT', 0.3)
     if poly_yes is not None:
         divergence = poly_yes - kalshi_yes
-        if abs(divergence) > 0.03:
-            poly_nudge = 0.3 * divergence
+        if abs(divergence) > _poly_div_threshold:
+            poly_nudge = _poly_nudge_weight * divergence
 
     P_final = max(0.05, min(0.95, P_biased + poly_nudge))
 

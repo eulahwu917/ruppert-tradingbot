@@ -82,7 +82,11 @@ def touch_probability(
     P(BTC touches `strike` at least once before expiry).
     Uses log-normal with regime-adjusted vol + fat-tail correction.
     """
-    vol_mult = {'bull': 1.2, 'neutral': 1.0, 'bear': 1.4}.get(regime, 1.0)
+    vol_mult = {
+        'bull':    getattr(config, 'LONG_HORIZON_VOL_MULT_BULL',    1.2),
+        'neutral': getattr(config, 'LONG_HORIZON_VOL_MULT_NEUTRAL', 1.0),
+        'bear':    getattr(config, 'LONG_HORIZON_VOL_MULT_BEAR',    1.4),
+    }.get(regime, 1.0)
     sigma = annualized_vol * vol_mult * math.sqrt(days_to_expiry / 365)
 
     if sigma <= 0:
@@ -95,7 +99,7 @@ def touch_probability(
         # Barrier approximation: P(price touches strike) ≈ 2 * P(terminal > strike) for GBM.
         # This is the standard reflection principle result. Cap the boost at the reflection bound.
         p_terminal = norm.cdf(-log_ratio / sigma)
-        barrier_boost = 1.5  # reflection principle upper bound (2x) capped at 1.5x
+        barrier_boost = getattr(config, 'LONG_HORIZON_BARRIER_BOOST', 1.5)  # reflection principle upper bound (2x) capped at 1.5x
         p = min(p_terminal * barrier_boost, 0.99)
     else:
         p_terminal = norm.cdf(log_ratio / sigma)
@@ -106,7 +110,7 @@ def touch_probability(
 
     # Fat-tail correction for extreme strikes (>2 sigma) — additive nudge, not multiplicative
     if z > 2.0:
-        fat_tail_addend = 0.03  # +3 percentage points for fat tail, not 35% multiplicative boost
+        fat_tail_addend = getattr(config, 'LONG_HORIZON_FAT_TAIL_ADDEND', 0.03)  # +3 percentage points for fat tail, not 35% multiplicative boost
         p = min(p + fat_tail_addend, 0.99)
 
     return round(min(p, 0.99), 4)
@@ -151,7 +155,8 @@ def size_long_horizon(edge: float, win_prob: float, capital: float, days: int) -
     sized = (kelly / 6) * capital
     # Hard caps
     max_pos = capital * config.LONG_HORIZON_MAX_POSITION_PCT
-    return round(min(sized, max_pos, 50.0), 2)  # $50 max per long-horizon trade
+    _max_pos_usd = getattr(config, 'LONG_HORIZON_MAX_POSITION_USD', 50.0)
+    return round(min(sized, max_pos, _max_pos_usd), 2)  # hard cap per long-horizon trade
 
 
 # ─────────────────────────────── Decision Logger ──────────────────────────────

@@ -126,7 +126,7 @@ TICKER_TO_SERIES = {
 
 # Minimum ensemble confidence to trade (0-1 scale)
 # 0.5 = 75% of members agree (25/31), 0.7 = 85% agree (26/31)
-MIN_ENSEMBLE_CONFIDENCE = 0.5
+MIN_ENSEMBLE_CONFIDENCE = getattr(config, 'WEATHER_MIN_ENSEMBLE_CONFIDENCE', 0.5)
 
 # Title keyword → city name (for NOAA fallback)
 CITY_MAP = {
@@ -409,10 +409,11 @@ def analyze_market(market: dict) -> dict | None:
             # None means both NWS sources failed (e.g. Miami MFL 404, network error).
             nws_data = signal.get("nws_current_f")
             if nws_data is None:
-                confidence = max(confidence - 0.15, 0.0)
+                _nws_penalty = getattr(config, 'WEATHER_NWS_CONFIDENCE_PENALTY', 0.15)
+                confidence = max(confidence - _nws_penalty, 0.0)
                 logger.warning(
                     f"[Edge] {ticker}: NWS data unavailable — confidence degraded "
-                    f"by 0.15 → {confidence:.2f}"
+                    f"by {_nws_penalty} → {confidence:.2f}"
                 )
 
             models_used_names = [m.get("model", "?") for m in signal.get("models_used", [])]
@@ -550,13 +551,16 @@ def analyze_market(market: dict) -> dict | None:
 
     # T-market soft prior: longshot bias — crowds systematically overprice rare
     # tail events (YES settles ~5% of the time). We nudge confidence down for
-    # YES and up for NO when the signal is weak (|edge| <= 0.30).
-    # Strong signals (|edge| > 0.30) are trusted as-is and override this prior.
-    if is_t_market and abs(edge) <= 0.30:
+    # YES and up for NO when the signal is weak (|edge| <= TTYPE_SOFT_PRIOR_EDGE_THRESHOLD).
+    # Strong signals (above threshold) are trusted as-is and override this prior.
+    _ttype_edge_threshold = getattr(config, 'TTYPE_SOFT_PRIOR_EDGE_THRESHOLD', 0.30)
+    _ttype_no_mult        = getattr(config, 'TTYPE_SOFT_PRIOR_NO_MULT',        1.15)
+    _ttype_yes_mult       = getattr(config, 'TTYPE_SOFT_PRIOR_YES_MULT',       0.85)
+    if is_t_market and abs(edge) <= _ttype_edge_threshold:
         if side == 'no':
-            confidence = min(confidence * 1.15, 1.0)  # hard cap at 1.0; intentional for max-confidence NO bets
+            confidence = min(confidence * _ttype_no_mult, 1.0)  # hard cap at 1.0; intentional for max-confidence NO bets
         elif side == 'yes':
-            confidence = confidence * 0.85
+            confidence = confidence * _ttype_yes_mult
         logger.info(
             f"[Edge] {ticker}: T-market ({market_type}) — soft prior applied "
             f"(longshot bias), side={side}, adjusted confidence={confidence:.2f}"

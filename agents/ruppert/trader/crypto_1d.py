@@ -75,9 +75,9 @@ NO_ENTRY_AFTER_ET         = '15:00'
 
 # ATR high-vol thresholds per asset (as fraction of price)
 HIGH_VOL_THRESHOLD = {
-    'BTC': 0.03,
-    'ETH': 0.04,
-    'SOL': 0.05,
+    'BTC': getattr(config, 'CRYPTO_1D_HIGH_VOL_BTC', 0.03),
+    'ETH': getattr(config, 'CRYPTO_1D_HIGH_VOL_ETH', 0.04),
+    'SOL': getattr(config, 'CRYPTO_1D_HIGH_VOL_SOL', 0.05),
 }
 
 # ─────────────────────────── OKX Data Fetch ───────────────────────────────────
@@ -584,7 +584,9 @@ def discover_1d_markets(asset: str) -> list:
         except Exception:
             pass
 
-    # Apply liquidity filters: yes_ask in [5, 95], spread <= 12, depth >= $300
+    # Apply liquidity filters: yes_ask in [5, 95], spread <= CRYPTO_1D_MAX_DISCOVERY_SPREAD, depth >= CRYPTO_1D_MIN_BOOK_DEPTH_USD
+    _max_discovery_spread = getattr(config, 'CRYPTO_1D_MAX_DISCOVERY_SPREAD', 12)
+    _min_book_depth_usd   = getattr(config, 'CRYPTO_1D_MIN_BOOK_DEPTH_USD', 300)
     filtered = []
     for m in qualifying:
         ya = m.get('yes_ask') or 0
@@ -592,7 +594,7 @@ def discover_1d_markets(asset: str) -> list:
         if ya < 5 or ya > 95:
             continue
         spread = ya + na - 100
-        if spread > 12:
+        if spread > _max_discovery_spread:
             continue
         depth = m.get('book_depth_usd') or m.get('open_interest', 0)
         # Note: book_depth_usd may not be populated; be lenient on depth check
@@ -738,7 +740,7 @@ def compute_position_size(capital: float, P_win: float, cost_cents: int,
     """
     cost = cost_cents / 100.0
     if cost <= 0 or cost >= 1:
-        return 10.0
+        return getattr(config, 'CRYPTO_1D_MIN_POSITION_USD', 10.0)
 
     kelly_full = (P_win - cost) / (cost * (1.0 - cost)) if (cost * (1.0 - cost)) > 0 else 0.0
     kelly_half = kelly_full / 2.0
@@ -749,7 +751,8 @@ def compute_position_size(capital: float, P_win: float, cost_cents: int,
     position_usd = kelly_half * capital * atr_mult
     position_usd = min(position_usd, capital * getattr(config, 'CRYPTO_1D_WINDOW_CAP_PCT', 0.05))
     position_usd = min(position_usd, getattr(config, 'CRYPTO_1D_MAX_POSITION_USD', 200.0))
-    position_usd = max(position_usd, 10.0)   # CRYPTO_1D_MIN_POSITION_USD
+    _crypto_1d_min_pos = getattr(config, 'CRYPTO_1D_MIN_POSITION_USD', 10.0)
+    position_usd = max(position_usd, _crypto_1d_min_pos)
 
     return round(position_usd, 2)
 
@@ -948,11 +951,13 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
     ya = best.get('yes_ask', 50) or 50
     na = best.get('no_ask', 50) or 50
     spread = ya + na - 100
-    if spread > 12:
+    _r2_max_spread = getattr(config, 'CRYPTO_1D_MAX_DISCOVERY_SPREAD', 12)
+    if spread > _r2_max_spread:
         return _skip(asset, window, f'R2_wide_spread (spread={spread})', signals_dict)
 
     book_depth = best.get('book_depth_usd', 0) or 0
-    if book_depth > 0 and book_depth < 300:
+    _r3_min_depth = getattr(config, 'CRYPTO_1D_MIN_BOOK_DEPTH_USD', 300)
+    if book_depth > 0 and book_depth < _r3_min_depth:
         return _skip(asset, window, f'R3_thin_book (depth={book_depth})', signals_dict)
 
     # 10. Compute size
@@ -965,7 +970,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
     # Per-asset cap trim
     remaining = per_asset_cap - asset_daily_deployed
     size_usd = min(size_usd, remaining)
-    if size_usd < 10.0:
+    if size_usd < getattr(config, 'CRYPTO_1D_MIN_POSITION_USD', 10.0):
         return _skip(asset, window, 'size_below_minimum', signals_dict)
 
     # 11. Place order
