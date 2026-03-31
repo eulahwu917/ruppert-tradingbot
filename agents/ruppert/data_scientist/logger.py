@@ -578,6 +578,8 @@ def compute_closed_pnl_from_logs() -> float:
                     t = json.loads(line)
                     if t.get('action') in ('exit', 'settle') and t.get('pnl') is not None:
                         total_pnl += float(t['pnl'])
+                    elif t.get('action') == 'exit_correction' and t.get('pnl_correction') is not None:
+                        total_pnl += float(t['pnl_correction'])
                 except Exception:
                     pass
         return round(total_pnl, 2)
