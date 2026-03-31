@@ -45,19 +45,20 @@ def load_all_unsettled():
     """Read all trade logs and return unsettled buy positions.
 
     Returns:
-        dict: {(ticker, side): record} for buys without a matching settle/exit.
-              When multiple buy legs exist for the same (ticker, side), each leg
-              is included as its own entry using a unique index suffix key
-              (ticker, side, idx). The consumer in check_settlements() handles
-              both 2-tuple and 3-tuple keys by extracting ticker/side from the
-              record directly.
+        dict: {(ticker, side, idx): record} for buy legs without a matching settle/exit.
+              Multiple buy legs for the same (ticker, side) are each included with a
+              unique index suffix so they don't collide. The consumer in
+              check_settlements() extracts ticker/side from the record directly.
 
-    NOTE (DS-SETTLE-AUDIT-2026-03-29): Fixed overwrite bug — previously only
-    the last buy leg for a given (ticker, side) was retained. Now all legs are
-    accumulated and each becomes its own unsettled entry.
+    Exit/settle counting (FIFO):
+        Instead of a binary "any exit = skip all legs" approach, counts the number
+        of exit/settle records per (ticker, side). The first N buy legs (where N =
+        exit count) are skipped (FIFO order). Remaining legs are returned as unsettled.
+        This ensures multi-buy positions where only some legs have been WS-exited
+        still receive settle records for their remaining legs.
     """
-    entries_by_key = {}
-    closed_keys = set()
+    entries_by_key = {}     # (ticker, side) → list of buy records (chronological)
+    exit_count_by_key = {}  # (ticker, side) → count of exit/settle records
 
     for trade_log in sorted(TRADES_DIR.glob('trades_*.jsonl')):
         for line in trade_log.read_text(encoding='utf-8').splitlines():
@@ -73,22 +74,22 @@ def load_all_unsettled():
             action = rec.get('action', 'buy')
             key = (ticker, side)
             if action in ('exit', 'settle'):
-                closed_keys.add(key)
+                exit_count_by_key[key] = exit_count_by_key.get(key, 0) + 1
             elif action in ('buy', 'open'):
-                # Accumulate all buy legs instead of overwriting
                 if key not in entries_by_key:
                     entries_by_key[key] = []
                 entries_by_key[key].append(rec)
 
-    # Flatten: each buy leg becomes its own entry in the result dict.
-    # Use (ticker, side, idx) as key so multiple legs don't collide.
+    # Flatten: skip first N buy legs equal to the exit count (FIFO matching).
+    # Remaining legs are unsettled and each becomes its own result entry.
     # check_settlements() reads ticker/side from the record, not the key.
     result = {}
     for key, recs in entries_by_key.items():
-        if key in closed_keys:
-            continue
-        for idx, rec in enumerate(recs):
-            result[(key[0], key[1], idx)] = rec
+        exits = exit_count_by_key.get(key, 0)
+        # Skip legs that already have a matching exit record (FIFO: oldest legs first)
+        unsettled_recs = recs[exits:]
+        for idx, rec in enumerate(unsettled_recs):
+            result[(key[0], key[1], exits + idx)] = rec
     return result
 
 

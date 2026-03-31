@@ -172,11 +172,34 @@ def build_trade_entry(opportunity, size, contracts, order_result):
     }
 
 
+# Session-level dedup set: (ticker, side, date, entry_price, contracts)
+# Resets on process restart by design — within-session guard only.
+_logged_trade_fingerprints: set[tuple] = set()
+
+
 def log_trade(opportunity, size, contracts, order_result):
     """Log a placed trade to today's trade log."""
     if get_current_env() == 'live':
         require_live_enabled()  # Raises RuntimeError if enabled=false in mode.json
     entry = build_trade_entry(opportunity, size, contracts, order_result)
+
+    # Dedup: skip if an identical trade (same ticker/side/date/price/contracts) already logged this session
+    fingerprint = (
+        entry.get('ticker'),
+        entry.get('side'),
+        entry.get('date'),
+        entry.get('entry_price'),
+        entry.get('contracts'),
+    )
+    if fingerprint in _logged_trade_fingerprints:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            '[Logger] Duplicate trade suppressed: %s %s %s @ %s (%s contracts)',
+            *fingerprint
+        )
+        return
+    _logged_trade_fingerprints.add(fingerprint)
+
     with open(_today_log_path(), 'a', encoding='utf-8') as f:
         f.write(json.dumps(entry) + '\n')
     print(f"[Log] Trade logged: {entry['trade_id'][:8]}.. {entry['ticker']} {entry['side'].upper()} ${size:.2f}")

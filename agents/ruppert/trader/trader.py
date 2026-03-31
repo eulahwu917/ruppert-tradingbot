@@ -49,6 +49,20 @@ class Trader:
         side = opportunity['side']
         edge = opportunity['edge']
 
+        # Instrument call-site to help trace upstream double-call source
+        log_activity(f'[Trader] execute_opportunity called: {ticker} {side}')
+
+        # Dedup guard: skip if this position is already being tracked (duplicate opportunity)
+        try:
+            from agents.ruppert.trader import position_tracker
+            if position_tracker.is_tracked(ticker, side):
+                log_activity(
+                    f'[Trader] SKIP duplicate opportunity: {ticker} {side.upper()} already in position tracker'
+                )
+                return False
+        except Exception as e:
+            log_activity(f'[Trader] Warning: is_tracked() check failed for {ticker}: {e}')
+
         log_activity(f"Evaluating: {ticker} | Edge: {edge:.1%} | Action: {opportunity['action']}")
 
         strategy_size = opportunity.get('strategy_size')

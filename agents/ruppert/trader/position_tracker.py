@@ -45,6 +45,12 @@ _tracked = {}
 # Prevents WS duplicate events from firing two exits for the same position.
 _exits_in_flight: set[tuple] = set()
 
+# Post-exit cooldown guard: prevents sequential re-fires after position removal.
+# Maps (ticker, side) -> unix timestamp of completed exit.
+# Entries are held for _EXIT_COOLDOWN_TTL seconds.
+_EXIT_COOLDOWN_TTL = 300  # 5 minutes
+_recently_exited: dict[tuple, float] = {}
+
 
 def _persist():
     """Write tracked positions to disk. Keys are serialized as 'ticker::side' strings."""
@@ -91,27 +97,17 @@ def _load():
 
 # ─────────────────────────────── Public API ───────────────────────────────────
 
-def add_position(ticker: str, quantity: int, side: str, entry_price: float,
-                 module: str = '', title: str = '', holding_type: str = ''):
-    """
-    Call after every trade execution.
-    entry_price: in cents (e.g. 45 = 45c).
-    holding_type: 'long_horizon' skips the 70% gain exit threshold.
+def _build_thresholds(side: str, entry_price: float, holding_type: str = '') -> list:
+    """Build exit threshold list for a given side, entry price, and holding type.
+
+    Extracted as a private helper so both the new-position and accumulate paths
+    in add_position() can call it cleanly.
     """
     skip_gain_exit = (holding_type == 'long_horizon')
-
-    # P0-4 fix: standardize NO positions to always use NO price.
-    # DRY_RUN sometimes passes YES price for NO side (entry_price < 50 when side='no').
-    # Convert: if side='no' and entry_price looks like YES price (< 50), flip it.
-    if side == 'no' and entry_price < 50:
-        entry_price = 100 - entry_price
-
     if side == 'yes':
         thresholds = [
             {'price': EXIT_95C_THRESHOLD, 'action': 'sell_all', 'rule': '95c_rule'},
         ]
-        # 70% gain threshold: entry_price + 70% of (100 - entry_price)
-        # Skip for long_horizon positions (price has days/weeks to move)
         if not skip_gain_exit:
             gain_target = entry_price + EXIT_GAIN_PCT * (100 - entry_price)
             if gain_target < EXIT_95C_THRESHOLD:
@@ -121,43 +117,77 @@ def add_position(ticker: str, quantity: int, side: str, entry_price: float,
                     'rule': '70pct_gain',
                 })
     else:  # no side
-        # For NO positions, track yes_bid dropping (our NO value rises)
-        # 95c rule: yes_bid <= 5 means no_ask >= 95
         thresholds = [
             {'price': 5, 'action': 'sell_all', 'rule': '95c_rule_no', 'compare': 'lte'},
         ]
-        # P0-4 fix: correct NO-side 70% gain formula.
-        # entry_price is now guaranteed to be NO price (>= 50).
-        # Max profit = 100 - entry_price cents. Exit when YES bid has fallen enough
-        # that NO holder has gained 70% of max profit.
-        # no_gain_target = 100 - (entry_price + EXIT_GAIN_PCT * (100 - entry_price))
         if not skip_gain_exit:
             no_gain_target = 100 - (entry_price + EXIT_GAIN_PCT * (100 - entry_price))
-            if no_gain_target > 5:  # Only add if meaningful (above the 95c rule floor)
+            if no_gain_target > 5:
                 thresholds.append({
                     'price': round(no_gain_target, 1),
                     'action': 'sell_all',
                     'rule': '70pct_gain_no',
                     'compare': 'lte',
                 })
+    return thresholds
 
-    _tracked[(ticker, side)] = {
-        'quantity': quantity,
-        'side': side,
-        'entry_price': entry_price,
-        'module': module,
-        'title': title,
-        'added_at': time.time(),
-        'exit_thresholds': thresholds,
-    }
+
+def add_position(ticker: str, quantity: int, side: str, entry_price: float,
+                 module: str = '', title: str = '', holding_type: str = ''):
+    """
+    Call after every trade execution.
+    entry_price: in cents (e.g. 45 = 45c).
+    holding_type: 'long_horizon' skips the 70% gain exit threshold.
+
+    When a position for (ticker, side) already exists, accumulates the new leg:
+    total quantity is summed and entry_price is blended (weighted average).
+    This preserves all legs for correct P&L and settlement tracking.
+    """
+    # P0-4 fix: standardize NO positions to always use NO price.
+    # DRY_RUN sometimes passes YES price for NO side (entry_price < 50 when side='no').
+    # Convert: if side='no' and entry_price looks like YES price (< 50), flip it.
+    if side == 'no' and entry_price < 50:
+        entry_price = 100 - entry_price
+
+    key = (ticker, side)
+    existing = _tracked.get(key)
+    if existing:
+        # Accumulate: merge new leg into existing position
+        old_qty = existing['quantity']
+        old_price = existing['entry_price']
+        new_qty = old_qty + quantity
+        # Weighted-average entry price
+        blended_price = round((old_price * old_qty + entry_price * quantity) / new_qty, 2)
+        existing['quantity'] = new_qty
+        existing['entry_price'] = blended_price
+        # Refresh thresholds for new blended price
+        existing['exit_thresholds'] = _build_thresholds(side, blended_price, holding_type)
+        logger.info(
+            '[PositionTracker] Accumulated %s %s: +%d contracts (total=%d, blended_entry=%.1fc)',
+            ticker, side, quantity, new_qty, blended_price
+        )
+    else:
+        thresholds = _build_thresholds(side, entry_price, holding_type)
+        _tracked[key] = {
+            'quantity': quantity,
+            'side': side,
+            'entry_price': entry_price,
+            'module': module,
+            'title': title,
+            'added_at': time.time(),
+            'exit_thresholds': thresholds,
+        }
+        logger.info('[PositionTracker] Tracking %s %s @ %dc (%d contracts)', ticker, side, entry_price, quantity)
     _persist()
-    logger.info('[PositionTracker] Tracking %s %s @ %dc (%d contracts)', ticker, side, entry_price, quantity)
 
 
 def remove_position(ticker: str, side: str):
     """Call after exit execution."""
     _tracked.pop((ticker, side), None)
-    _exits_in_flight.discard((ticker, side))  # Belt-and-suspenders cleanup
+    # NOTE: do NOT discard from _exits_in_flight here.
+    # Discarding inside remove_position() broke the in-flight guard by clearing it
+    # before execute_exit()'s finally block ran. The finally block in execute_exit()
+    # is the sole place responsible for clearing _exits_in_flight.
     _persist()
 
 
@@ -258,10 +288,24 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None):
     if yes_bid is None:
         return
 
+    # Prune stale cooldown entries
+    now = time.time()
+    expired = [k for k, t in _recently_exited.items() if now - t > _EXIT_COOLDOWN_TTL]
+    for k in expired:
+        del _recently_exited[k]
+
     matching_keys = [k for k in _tracked if k[0] == ticker]
     for key in matching_keys:
         pos = _tracked.get(key)
         if not pos:
+            continue
+
+        # Cooldown guard: block re-fire on recently exited positions
+        if key in _recently_exited:
+            logger.warning(
+                '[PositionTracker] Cooldown guard: %s %s was exited %.0fs ago — suppressing re-fire',
+                key[0], key[1], time.time() - _recently_exited[key]
+            )
             continue
 
         thresholds = pos.get('exit_thresholds')
@@ -367,6 +411,7 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str):
         print(f'  [WS EXIT] {ticker} {side.upper()} @ {current_bid}c | {rule} | P&L=${pnl:+.2f}')
 
         remove_position(ticker, side)
+        _recently_exited[(ticker, side)] = time.time()  # cooldown: prevent re-fire for TTL window
     finally:
         _exits_in_flight.discard(key)
 
