@@ -680,6 +680,103 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
     return executed
 
 
+# ─── CRYPTO 1D MODULE ─────────────────────────────────────────────────────────
+
+def run_crypto_1d_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
+    """
+    Run the daily crypto above/below scan (crypto_1d module).
+    Evaluates BTC and ETH (Phase 1) for KXBTCD / KXETHD above/below entries.
+    Entry windows: 09:30–11:30 ET (primary), 13:30–14:30 ET (secondary).
+    Returns list of executed trade dicts.
+    """
+    if traded_tickers is None:
+        traded_tickers = set()
+
+    log_activity("[Crypto1D] Starting daily above/below scan...")
+    executed = []
+
+    try:
+        from agents.ruppert.trader.crypto_1d import evaluate_crypto_1d_entry, ASSETS_PHASE1
+
+        # Window time constants
+        _NO_ENTRY_AFTER_ET        = '15:00'
+        _PRIMARY_START_ET         = '09:30'
+        _PRIMARY_END_ET           = '11:30'
+        _SECONDARY_START_ET       = '13:30'
+        _SECONDARY_END_ET         = '14:30'
+
+        # Determine current window (Eastern Time)
+        try:
+            import pytz
+            _now_et = datetime.now(pytz.timezone('America/New_York'))
+        except ImportError:
+            from zoneinfo import ZoneInfo
+            _now_et = datetime.now(ZoneInfo('America/New_York'))
+
+        _time_str = _now_et.strftime('%H:%M')
+
+        # No-entry-after gate (check first)
+        if _time_str >= _NO_ENTRY_AFTER_ET:
+            log_activity(f"[Crypto1D] No-entry gate: {_time_str} ET >= {_NO_ENTRY_AFTER_ET} — skipping")
+            return []
+
+        if _PRIMARY_START_ET <= _time_str <= _PRIMARY_END_ET:
+            window = 'primary'
+        elif _SECONDARY_START_ET <= _time_str <= _SECONDARY_END_ET:
+            window = 'secondary'
+        else:
+            log_activity(f"[Crypto1D] Outside entry windows (current ET: {_time_str}) — skipping")
+            return []
+
+        # Capital / daily cap check
+        try:
+            _capital = get_capital()
+            _1d_deployed = get_daily_exposure(module='crypto_1d')
+            _1d_cap = _capital * config.CRYPTO_1D_DAILY_CAP_PCT
+        except Exception as _ce:
+            log_activity(f"[Crypto1D] Capital check error: {_ce} — using fallback")
+            _capital = getattr(config, 'CAPITAL_FALLBACK', 10000.0)
+            _1d_deployed = 0.0
+            _1d_cap = _capital * getattr(config, 'CRYPTO_1D_DAILY_CAP_PCT', 0.15)
+
+        if _1d_deployed >= _1d_cap:
+            log_activity(f"[Crypto1D] Daily cap reached (${_1d_deployed:.2f} / ${_1d_cap:.0f}) — skipping")
+            return []
+
+        # Evaluate each Phase 1 asset
+        for asset in ASSETS_PHASE1:
+            ticker_key = f'crypto_1d_{asset}'
+            if ticker_key in traded_tickers:
+                log_activity(f"[Crypto1D] {asset} already evaluated this cycle — skipping")
+                continue
+
+            result = evaluate_crypto_1d_entry(asset=asset, window=window)
+            traded_tickers.add(ticker_key)
+
+            if result.get('entered'):
+                log_activity(
+                    f"[Crypto1D] ENTERED {asset} {result.get('ticker')} "
+                    f"${result.get('size_usd', 0):.2f} ({window} window)"
+                )
+                executed.append({
+                    'asset': asset,
+                    'ticker': result.get('ticker'),
+                    'size_dollars': result.get('size_usd', 0),
+                    'module': 'crypto_1d',
+                    'window': window,
+                })
+            else:
+                log_activity(f"[Crypto1D] SKIP {asset}: {result.get('reason', '?')}")
+
+    except Exception as e:
+        log_activity(f"[Crypto1D] ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+
+    log_activity(f"[Crypto1D] Scan complete — {len(executed)} trade(s) executed")
+    return executed
+
+
 # ─── FED MODULE ───────────────────────────────────────────────────────────────
 
 def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):

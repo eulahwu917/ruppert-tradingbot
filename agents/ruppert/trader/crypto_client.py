@@ -197,7 +197,7 @@ def get_funding_rates(symbol: str, limit: int = FUNDING_RATE_LIMIT) -> list | No
         return None
 
 
-def _compute_funding_z_scores() -> dict:
+def _compute_funding_z_scores(symbol: str = None, return_cumulative: bool = False) -> dict:
     """
     Compute funding rate z-scores for BTC, ETH, XRP, DOGE.
 
@@ -206,7 +206,15 @@ def _compute_funding_z_scores() -> dict:
       z > +2.0 → longs crowded → bearish signal
       z < -2.0 → shorts crowded → bullish signal
 
-    Returns:
+    Args:
+        symbol: If provided, compute z-score only for this specific Binance symbol
+                (e.g. 'BTCUSDT') and return cumulative if return_cumulative=True.
+                If None, computes for all assets in FUNDING_SYMBOLS (legacy behavior).
+        return_cumulative: If True, also return funding_24h_cumulative and
+                           funding_24h_z (sum of last 3×8h rates vs 30-day baseline).
+                           Only used when symbol is provided.
+
+    Returns (legacy, symbol=None):
         {
           'btc': float or None,
           'eth': float or None,
@@ -215,18 +223,99 @@ def _compute_funding_z_scores() -> dict:
           'raw_rates': {symbol: latest_rate},
           'available': bool,
         }
+
+    Returns (symbol-specific, return_cumulative=True):
+        {
+          'z_score': float,
+          'funding_24h_cumulative': float,   # sum of last 3×8h funding rates
+          'funding_24h_z': float,            # z-score vs 30-day rolling daily cumulative
+          'raw_rate': float,
+          'available': bool,
+        }
     """
+    # ── Single-symbol mode (crypto_1d) ────────────────────────────────────────
+    if symbol is not None:
+        cache_key = f'funding_single_{symbol}_{return_cumulative}'
+        cached = _cache_get(cache_key, ttl=3600)
+        if cached is not _CACHE_MISS:
+            return cached
+
+        single_result = {
+            'z_score': 0.0,
+            'funding_24h_cumulative': 0.0,
+            'funding_24h_z': 0.0,
+            'raw_rate': 0.0,
+            'available': False,
+        }
+        try:
+            rates = get_funding_rates(symbol, limit=FUNDING_RATE_LIMIT)
+            if not rates or len(rates) < 10:
+                logger.warning('Insufficient funding rate data for %s (%d records)',
+                               symbol, len(rates) if rates else 0)
+                _cache_set(cache_key, single_result)
+                return single_result
+
+            current_rate = rates[-1]
+            rolling_mean = statistics.mean(rates)
+            rolling_std  = statistics.stdev(rates) if len(rates) >= 2 else 0.0
+            z_score = (current_rate - rolling_mean) / rolling_std if rolling_std >= 1e-10 else 0.0
+
+            single_result['z_score'] = round(z_score, 3)
+            single_result['raw_rate'] = round(current_rate, 8)
+            single_result['available'] = True
+
+            if return_cumulative:
+                # Last 3×8h rates = 24h cumulative
+                last_3 = rates[-3:] if len(rates) >= 3 else rates
+                funding_24h_cumulative = sum(last_3)
+
+                # 30-day baseline: group history into daily triplets (3×8h = 1 day)
+                daily_cumulative_rates = []
+                for i in range(0, len(rates) - 3, 3):
+                    daily_cumulative_rates.append(
+                        sum(rates[i:i+3])
+                    )
+
+                if len(daily_cumulative_rates) >= 2:
+                    mean_30d = sum(daily_cumulative_rates) / len(daily_cumulative_rates)
+                    std_30d = (
+                        sum((x - mean_30d) ** 2 for x in daily_cumulative_rates)
+                        / len(daily_cumulative_rates)
+                    ) ** 0.5
+                    if std_30d < 1e-10:
+                        std_30d = 1e-8
+                    funding_24h_z = (funding_24h_cumulative - mean_30d) / std_30d
+                else:
+                    funding_24h_z = 0.0
+
+                single_result['funding_24h_cumulative'] = round(funding_24h_cumulative, 8)
+                single_result['funding_24h_z'] = round(funding_24h_z, 3)
+
+            logger.info(
+                'Funding %s: rate=%.6f mean=%.6f z=%.3f cumulative=%s',
+                symbol, current_rate, rolling_mean, z_score,
+                round(single_result.get('funding_24h_cumulative', 0.0), 8)
+                if return_cumulative else 'N/A',
+            )
+
+        except Exception as e:
+            logger.warning('Funding z-score failed for %s: %s', symbol, e)
+
+        _cache_set(cache_key, single_result)
+        return single_result
+
+    # ── Legacy all-assets mode ─────────────────────────────────────────────────
     cached = _cache_get('funding_z_scores', ttl=3600)
     if cached is not _CACHE_MISS:
         return cached
 
     result = {'btc': None, 'eth': None, 'xrp': None, 'raw_rates': {}, 'available': False}
 
-    for asset, symbol in FUNDING_SYMBOLS.items():
+    for asset, sym in FUNDING_SYMBOLS.items():
         try:
-            rates = get_funding_rates(symbol)
+            rates = get_funding_rates(sym)
             if not rates or len(rates) < 10:
-                logger.warning('Insufficient funding rate data for %s (%d records)', symbol, len(rates) if rates else 0)
+                logger.warning('Insufficient funding rate data for %s (%d records)', sym, len(rates) if rates else 0)
                 continue
 
             current_rate  = rates[-1]
@@ -239,16 +328,16 @@ def _compute_funding_z_scores() -> dict:
                 z_score = (current_rate - rolling_mean) / rolling_std
 
             result[asset.lower()]              = round(z_score, 3)
-            result['raw_rates'][symbol]        = round(current_rate, 8)
+            result['raw_rates'][sym]           = round(current_rate, 8)
             result['available']                = True
 
             logger.info(
                 'Funding %s: rate=%.6f mean=%.6f std=%.6f z=%.3f',
-                symbol, current_rate, rolling_mean, rolling_std, z_score
+                sym, current_rate, rolling_mean, rolling_std, z_score
             )
 
         except Exception as e:
-            logger.warning('Funding z-score failed for %s: %s', symbol, e)
+            logger.warning('Funding z-score failed for %s: %s', sym, e)
 
     _cache_set('funding_z_scores', result)
     return result

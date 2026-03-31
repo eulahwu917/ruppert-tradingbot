@@ -113,6 +113,7 @@ MIN_HOURS_TO_CLOSE = 4.0
 MIN_HOURS_ENTRY = {
     'default':    0.5,
     'crypto_15m': 0.04,   # 2.4 min remaining — allows all primary + secondary window entries
+    'crypto_1d':  2.0,    # hard cutoff at 15:00 ET = 2h before 17:00 settlement
 }
 
 # Minimum confidence thresholds per module
@@ -164,6 +165,17 @@ CRYPTO_15M_ENTRY_CUTOFF_SECS    = 800    # Max elapsed secs to allow entry (was 
 CRYPTO_15M_EARLY_WINDOW_SECS    = 90     # Min elapsed secs before entry allowed (was hardcoded 120); 90s re-admits 90-120s band
 CRYPTO_15M_SECONDARY_START_SECS = 480    # Elapsed secs where secondary (tighter) window begins (was hardcoded 480)
 CRYPTO_15M_FALLBACK_MIN_REMAINING = 180  # Fallback stops firing if < this many secs remain before close (was hardcoded 120)
+
+# ── Daily Crypto Above/Below (crypto_1d: KXBTCD / KXETHD / KXSOLD) ──────────
+# Separate cap pool from crypto_15m. Trades daily above/below at 09:30 ET (primary)
+# and 13:30 ET (secondary, gated by global exposure).
+CRYPTO_1D_DAILY_CAP_PCT            = 0.15   # 15% of capital/day total across all crypto_1d
+CRYPTO_1D_WINDOW_CAP_PCT           = 0.05   # 5% of capital per single entry
+CRYPTO_1D_PER_ASSET_CAP_PCT        = 0.03   # 3% of capital per asset per day
+CRYPTO_1D_MAX_POSITION_USD         = 200.0  # hard cap per entry (liquidity constraint)
+CRYPTO_1D_MIN_EDGE                 = 0.08   # primary window minimum edge (8%)
+CRYPTO_1D_SECONDARY_MIN_EDGE       = 0.12   # 1.5× minimum edge for secondary window entries
+CRYPTO_1D_SECONDARY_MAX_EXPOSURE_PCT = 0.50 # skip secondary window if global exposure >= 50%
 
 # ── WS-First Architecture ────────────────────────────────────────────────────
 # Active series prefixes — only cache tickers matching these.

@@ -8,6 +8,7 @@ Modes:
   econ_prescan  — position check + econ scan only, skip if no release today (5am)
   weather_only  — position check + weather scan only (7pm)
   crypto_only   — position check + crypto scan only (10am, 6pm)
+  crypto_1d     — daily crypto above/below scan only (09:30 ET, 13:30 ET)
   report        — 7am P&L summary + loss detection
 """
 import sys, json
@@ -737,6 +738,69 @@ def _build_crypto_15m_block() -> str:
         return ''
 
 
+def run_crypto_1d_mode(state):
+    """
+    crypto_1d mode: daily above/below scan for KXBTCD / KXETHD.
+    Runs at 09:30 ET (primary window) and 13:30 ET (secondary window, gated by exposure).
+    Returns {'crypto_1d_trades': int}.
+    """
+    print("\n[crypto_1d] Running daily crypto above/below scan...")
+    _1d_count = 0
+    try:
+        from agents.ruppert.trader.main import run_crypto_1d_scan as _run_1d
+        _1d_results = _run_1d(
+            dry_run=state.dry_run,
+            traded_tickers=state.traded_tickers,
+            open_position_value=state.open_position_value,
+        )
+        _1d_count = len(_1d_results) if _1d_results else 0
+        if _1d_count:
+            print(f"  {_1d_count} crypto_1d trade(s) executed")
+            for t in _1d_results:
+                print(f"    {t.get('asset')} {t.get('ticker')} ${t.get('size_dollars', 0):.2f}")
+        else:
+            print("  No crypto_1d entries placed this window")
+    except Exception as _e:
+        print(f"  crypto_1d error: {_e}")
+        import traceback; traceback.print_exc()
+
+    print(f"\ncrypto_1d done — {_1d_count} trade(s). {ts()}")
+
+    # Scan summary notification
+    try:
+        _tz_pdt = _get_local_tz()
+        _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
+        import time as _time
+        _tz_abbr = 'PDT' if _time.localtime().tm_isdst > 0 else 'PST'
+        try:
+            _capital  = get_capital()
+            _deployed = get_daily_exposure()
+            _bp       = get_buying_power()
+            _cap_line = f'${_capital:.2f} | Deployed: ${_deployed:.2f} | BP: ${_bp:.2f}'
+        except Exception:
+            _cap_line = 'N/A'
+        _scan_msg = (
+            f'\U0001f4ca Ruppert Scan \u2014 {_time_str} {_tz_abbr}\n\n'
+            f'\u20bf Crypto 1D (daily above/below)\n'
+            f'{_1d_count} trade(s) placed\n\n'
+            f'\U0001f4b0 Capital: {_cap_line}'
+        )
+        log_event('SCAN_COMPLETE', {
+            'mode': 'crypto_1d',
+            'crypto_1d_trades': _1d_count,
+            'summary': _scan_msg,
+        })
+        if _1d_count > 0:
+            send_telegram(_scan_msg)
+            log_activity('[SCAN NOTIFY] crypto_1d summary sent via Telegram')
+        push_alert('info', _scan_msg)
+        print('  Scan summary sent via Telegram.')
+    except Exception as _notify_ex:
+        print(f'  Scan notify error (non-fatal): {_notify_ex}')
+
+    return {'crypto_1d_trades': _1d_count}
+
+
 def run_report_mode(state):
     """7am P&L summary + loss detection + optimizer review.
     Returns {'exit_count': int, 'losses': int}.
@@ -1187,6 +1251,8 @@ def run_cycle(mode):
             summary = run_crypto_only_mode(state)
         elif mode == 'report':
             summary = run_report_mode(state)
+        elif mode == 'crypto_1d':
+            summary = run_crypto_1d_mode(state)
         elif mode == 'full':
             summary = run_full_mode(client, state)
         elif mode == 'smart':
@@ -1205,7 +1271,7 @@ def run_cycle(mode):
         # Note: 'smart' mode currently runs as check_mode (position check only).
         # TODO: implement smart money refresh + light synthesis when ready.
         # Until then, the data agent audit still runs (line below) as a lightweight signal.
-        if mode in ('full', 'smart', 'crypto_only', 'weather_only', 'econ_prescan'):
+        if mode in ('full', 'smart', 'crypto_only', 'weather_only', 'econ_prescan', 'crypto_1d'):
             try:
                 from agents.ruppert.data_scientist.data_agent import run_post_scan_audit
                 _audit = run_post_scan_audit(mode='post_cycle')
