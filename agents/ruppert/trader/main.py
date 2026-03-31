@@ -607,7 +607,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
         _crypto_daily_cap = _total_capital * getattr(config, 'CRYPTO_DAILY_CAP_PCT', 0.07)
         try:
             from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_daily_exp
-            _crypto_deployed_this_cycle = _get_daily_exp(module='crypto')
+            _crypto_deployed_this_cycle = _get_daily_exp(module='crypto_1h_band')
         except Exception:
             _crypto_deployed_this_cycle = 0.0
 
@@ -637,7 +637,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 'win_prob': t['prob_model'],
                 'confidence': t.get('confidence', t['edge']),
                 'hours_to_settlement': t.get('hours_to_settlement', 24.0),
-                'module': 'crypto',
+                'module': 'crypto_1h_band',
                 'vol_ratio': 1.0,
                 'side': t['side'],
                 'yes_ask': t['yes_ask'],
@@ -646,7 +646,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
             }
             decision = should_enter(
                 signal, _total_capital, _deployed_today,
-                module='crypto',
+                module='crypto_1h_band',
                 module_deployed_pct=_crypto_deployed_this_cycle / _total_capital if _total_capital > 0 else 0.0,
                 traded_tickers=traded_tickers,
             )
@@ -680,7 +680,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 'date': str(date.today()),
             }
             opp['strategy_size'] = size
-            opp['module'] = 'crypto'
+            opp['module'] = 'crypto_1h_band'
             result = trader.execute_opportunity(opp)
             if not result:
                 print(f"  [Crypto] execute_opportunity failed for {t['ticker']} — skipping accounting")
@@ -777,7 +777,7 @@ def run_crypto_1d_scan(dry_run=True, traded_tickers=None, open_position_value=0.
         # Capital / daily cap check
         try:
             _capital = get_capital()
-            _1d_deployed = get_daily_exposure(module='crypto_1d')
+            _1d_deployed = get_daily_exposure(module='crypto_1h_dir')
             _1d_cap = _capital * config.CRYPTO_1D_DAILY_CAP_PCT
         except Exception as _ce:
             log_activity(f"[Crypto1D] Capital check error: {_ce} — using fallback")
@@ -808,7 +808,7 @@ def run_crypto_1d_scan(dry_run=True, traded_tickers=None, open_position_value=0.
                     'asset': asset,
                     'ticker': result.get('ticker'),
                     'size_dollars': result.get('size_usd', 0),
-                    'module': 'crypto_1d',
+                    'module': 'crypto_1h_dir',
                     'window': window,
                 })
             else:
@@ -844,7 +844,7 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
         fed_signal = _run_fed_scan_inner()
         try:
             from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_daily_exp
-            _fed_deployed_this_cycle = _get_daily_exp(module='fed')
+            _fed_deployed_this_cycle = _get_daily_exp(module='econ_fed_rate')
         except Exception:
             _fed_deployed_this_cycle = 0.0
 
@@ -893,7 +893,7 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
                     'win_prob': fed_signal.get('prob', 0.5),
                     'confidence': fed_signal.get('confidence', 0),
                     'hours_to_settlement': _fed_hours,
-                    'module': 'fed',
+                    'module': 'econ_fed_rate',
                     'vol_ratio': 1.0,
                     'side': side,
                     'yes_ask': mkt_price,
@@ -903,7 +903,7 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
                 _fed_deployed_pct = _fed_deployed_this_cycle / _fed_capital if _fed_capital > 0 else 0.0
                 _fed_decision = should_enter(
                     _fed_signal_dict, _fed_capital, _fed_deployed,
-                    module='fed',
+                    module='econ_fed_rate',
                     module_deployed_pct=_fed_deployed_pct,
                     traded_tickers=traded_tickers,
                 )
@@ -943,7 +943,7 @@ def run_fed_scan(dry_run=True, traded_tickers=None, open_position_value=0.0):
                         "date":        str(date.today()),
                     }
                     opp['strategy_size'] = size
-                    opp['module'] = 'fed'
+                    opp['module'] = 'econ_fed_rate'
                     opp['scan_price'] = mkt_price
                     opp['fill_price'] = mkt_price
                     result = Trader(dry_run=dry_run).execute_opportunity(opp)

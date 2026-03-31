@@ -129,12 +129,12 @@ def _rehydrate_state():
     # 1. Daily wager: sum all buys today from trade log
     try:
         from agents.ruppert.data_scientist.logger import get_daily_wager, get_window_exposure
-        _daily_wager = get_daily_wager('crypto_15m')
+        _daily_wager = get_daily_wager('crypto_15m_dir')
 
         # 2. Window exposure: re-hydrate for any window currently open
         current_window_ts = _get_current_window_open_ts()
         if current_window_ts:
-            _window_exposure[current_window_ts] = get_window_exposure('crypto_15m', current_window_ts)
+            _window_exposure[current_window_ts] = get_window_exposure('crypto_15m_dir', current_window_ts)
     except Exception as e:
         logger.warning('[crypto_15m] _rehydrate_state: failed to re-hydrate wager counters: %s', e)
 
@@ -531,7 +531,7 @@ def _get_session_pnl_15m() -> float:
             continue
         try:
             rec = json.loads(line)
-            if rec.get('module') == 'crypto_15m' and rec.get('action') in ('settle', 'exit'):
+            if rec.get('module') == 'crypto_15m_dir' and rec.get('action') in ('settle', 'exit'):
                 total += float(rec.get('pnl', 0.0))
         except Exception:
             continue
@@ -1074,7 +1074,7 @@ def evaluate_crypto_15m_entry(
     # Strategy gate: global 70% deployment cap + strategy filters
     from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_exp
     _deployed_today = _get_exp()
-    _module_deployed_today = _get_exp('crypto_15m')
+    _module_deployed_today = _get_exp('crypto_15m_dir')
     _module_deployed_pct = _module_deployed_today / capital if capital > 0 else 0.0
     from agents.ruppert.data_scientist.capital import get_buying_power as _get_bp
     _bp = _get_bp()
@@ -1084,7 +1084,7 @@ def evaluate_crypto_15m_entry(
         'edge': round(edge, 4),
         'win_prob': round(P_win, 4),
         'confidence': round(abs(raw_score), 3),
-        'module': 'crypto_15m',
+        'module': 'crypto_15m_dir',
         'yes_ask': yes_ask,
         'yes_bid': yes_bid,
         'hours_to_settlement': max(0, (900 - elapsed_secs) / 3600),
@@ -1092,7 +1092,7 @@ def evaluate_crypto_15m_entry(
     }
     _se_decision = should_enter(
         _signal_dict, capital, _deployed_today,
-        module='crypto_15m',
+        module='crypto_15m_dir',
         module_deployed_pct=_module_deployed_pct,
         traded_tickers=None,
     )
@@ -1228,7 +1228,7 @@ def evaluate_crypto_15m_entry(
         'market_prob': yes_ask / 100.0 if direction == 'yes' else (100 - yes_bid) / 100.0,
         'model_prob': round(P_final, 4),
         'source': 'crypto_15m',
-        'module': 'crypto_15m',
+        'module': 'crypto_15m_dir',
         'yes_ask': yes_ask,
         'yes_bid': yes_bid,
         'hours_to_settlement': max(0, (900 - elapsed_secs) / 3600),
@@ -1263,7 +1263,7 @@ def evaluate_crypto_15m_entry(
         fill_contracts_pt = fill_contracts if fill_contracts else contracts
         position_tracker.add_position(
             ticker, fill_contracts_pt, direction, fill_price_pt,
-            module='crypto_15m',
+            module='crypto_15m_dir',
             title=f'{asset} 15m direction',
         )
     except Exception as _pt_err:

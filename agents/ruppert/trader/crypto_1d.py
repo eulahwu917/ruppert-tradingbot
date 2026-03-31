@@ -670,9 +670,9 @@ def _cross_module_guard(asset: str, settlement_date: str) -> bool:
         from agents.ruppert.trader.position_tracker import get_active_positions
         active = get_active_positions(asset=asset, settlement_date=settlement_date)
         for pos in active:
-            if pos.get('module') != 'crypto_1d':
+            if pos.get('module') != 'crypto_1h_dir':
                 logger.info(
-                    'crypto_1d cross-module guard: %s blocked by %s position in %s',
+                    'crypto_1h_dir cross-module guard: %s blocked by %s position in %s',
                     asset, pos.get('module'), pos.get('market_id', '?')
                 )
                 return False
@@ -709,7 +709,7 @@ def _cross_module_guard(asset: str, settlement_date: str) -> bool:
                 continue
             if rec_asset != asset:
                 continue
-            if rec_module == 'crypto_1d':
+            if rec_module == 'crypto_1h_dir':
                 continue
 
             # Check if ticker is for daily series (KXBTCD / KXETHD / KXSOLD)
@@ -717,7 +717,7 @@ def _cross_module_guard(asset: str, settlement_date: str) -> bool:
             daily_series = KALSHI_SERIES.get(asset, '')
             if daily_series and ticker.startswith(daily_series):
                 logger.info(
-                    'crypto_1d cross-module guard: %s blocked by %s position %s',
+                    'crypto_1h_dir cross-module guard: %s blocked by %s position %s',
                     asset, rec_module, ticker
                 )
                 return False
@@ -769,7 +769,7 @@ def _log_decision(asset: str, window: str, signals: dict, decision: str, reason:
         'market_id': market_id,
         'decision': decision,
         'reason': reason,
-        'module': 'crypto_1d',
+        'module': 'crypto_1h_dir',
     }
 
     if signals:
@@ -847,11 +847,11 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         logger.warning('evaluate_crypto_1d_entry: get_capital() failed: %s — using fallback', e)
 
     try:
-        asset_daily_deployed = get_daily_exposure(module='crypto_1d', asset=asset)
+        asset_daily_deployed = get_daily_exposure(module='crypto_1h_dir', asset=asset)
     except TypeError:
         # get_daily_exposure may not support asset= kwarg — use module-only
         try:
-            asset_daily_deployed = get_daily_exposure(module='crypto_1d')
+            asset_daily_deployed = get_daily_exposure(module='crypto_1h_dir')
         except Exception:
             asset_daily_deployed = 0.0
     except Exception:
@@ -862,7 +862,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         return _skip(asset, window, 'per_asset_daily_cap')
 
     try:
-        total_1d_deployed = get_daily_exposure(module='crypto_1d')
+        total_1d_deployed = get_daily_exposure(module='crypto_1h_dir')
     except Exception:
         total_1d_deployed = 0.0
 
@@ -985,7 +985,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         'size_dollars': actual_cost,
         'contracts':   contracts,
         'source':      'crypto_1d',
-        'module':      'crypto_1d',
+        'module':      'crypto_1h_dir',
         'asset':       asset,
         'window':      window,
         'scan_price':  cost_cents,

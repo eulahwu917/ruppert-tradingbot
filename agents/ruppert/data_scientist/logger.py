@@ -105,28 +105,8 @@ def build_trade_entry(opportunity, size, contracts, order_result):
     source = opportunity.get('source', 'bot')
     module = opportunity.get('module', '')
     if not module:
-        ticker_upper = (opportunity.get('ticker') or '').upper()
-        if source in ('weather',) or (source == 'bot' and ticker_upper.startswith('KXHIGH')):
-            module = 'weather'
-        elif source == 'crypto' or (source == 'bot' and any(
-            ticker_upper.startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXSOL', 'KXDOGE')
-        )):
-            module = 'crypto'
-        elif source == 'fed' or ticker_upper.startswith('KXFED'):
-            module = 'fed'
-        elif source == 'econ' or ticker_upper.startswith('KXCPI'):
-            module = 'econ'
-        elif source == 'geo':
-            module = 'geo'
-        elif source == 'manual':
-            module = 'manual'
-        else:
-            # P2-3 fix: avoid setting module = 'bot' (not a valid module in MIN_CONFIDENCE).
-            # For 'bot' source, infer from ticker prefix; otherwise default to 'other'.
-            if source == 'bot':
-                module = 'weather' if ticker_upper.startswith('KXHIGH') else 'other'
-            else:
-                module = source  # fallback: use source as module (e.g. 'unknown')
+        # Delegate to classify_module — single source of truth
+        module = classify_module(source, opportunity.get('ticker', ''))
 
     raw_action = opportunity.get('action', 'buy')
     raw_lower = raw_action.strip().lower() if isinstance(raw_action, str) else str(raw_action).lower()
@@ -428,29 +408,69 @@ def classify_module(src: str, ticker: str) -> str:
     """Classify a trade into a module bucket based on source and ticker prefix.
 
     Single source of truth - imported by dashboard/api.py to stay in sync.
+
+    Module taxonomy (2026-03-30):
+      weather_band        KXHIGH*-B*  (ticker contains '-B')
+      weather_threshold   KXHIGH*-T*  (ticker contains '-T')
+      crypto_15m_dir      KXBTC15M, KXETH15M, KXXRP15M, KXDOGE15M, KXSOL15M
+      crypto_1h_dir       KXBTCD, KXETHD, KXSOLD  (source=crypto_1d)
+      crypto_1h_band      KXBTC, KXETH, KXDOGE, KXXRP (band, no D/15M suffix)
+      econ_cpi            KXCPI*
+      econ_unemployment   KXJOBLESSCLAIMS, KXECONSTATU3, KXUE
+      econ_fed_rate       KXFED, KXFOMC  (was: fed)
+      econ_recession      KXWRECSS
+      geo                 geopolitical series (unchanged)
     """
     t = (ticker or '').upper()
-    if src in ('weather',) or (src in ('weather', 'bot') and t.startswith('KXHIGH')):
-        return 'weather'
-    if src == 'crypto_1d':
-        return 'crypto'
-    if src == 'crypto' or (src in ('crypto', 'bot') and any(
-        t.startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXSOL', 'KXDOGE')
-    )):
-        return 'crypto'
-    if src == 'fed' or t.startswith('KXFED'):
-        return 'fed'
-    if src == 'econ' or t.startswith('KXCPI'):
-        return 'econ'
+
+    # ── Weather ───────────────────────────────────────────────────────────
+    if src in ('weather', 'bot') and t.startswith('KXHIGH'):
+        if '-T' in t:
+            return 'weather_threshold'
+        return 'weather_band'  # default: B-type band
+
+    # ── Crypto 15-min direction ───────────────────────────────────────────
+    # NOTE: 15M prefixes (KXBTC15M) must be checked BEFORE base prefixes (KXBTC)
+    if src == 'crypto_15m' or any(
+        t.startswith(p) for p in ('KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M')
+    ):
+        return 'crypto_15m_dir'
+
+    # ── Crypto 1h direction (above/below binary) ──────────────────────────
+    # NOTE: D-suffix series (KXBTCD) must be checked BEFORE base prefixes (KXBTC)
+    if src == 'crypto_1d' or any(
+        t.startswith(p) for p in ('KXBTCD', 'KXETHD', 'KXSOLD')
+    ):
+        return 'crypto_1h_dir'
+
+    # ── Crypto 1h band (range prediction) ────────────────────────────────
+    if src == 'crypto' or any(
+        t.startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE', 'KXSOL')
+    ):
+        return 'crypto_1h_band'
+
+    # ── Econ subcategories ────────────────────────────────────────────────
+    if t.startswith('KXCPI'):
+        return 'econ_cpi'
+    if any(t.startswith(p) for p in ('KXJOBLESSCLAIMS', 'KXECONSTATU3', 'KXUE')):
+        return 'econ_unemployment'
+    if src == 'fed' or any(t.startswith(p) for p in ('KXFED', 'KXFOMC')):
+        return 'econ_fed_rate'
+    if t.startswith('KXWRECSS'):
+        return 'econ_recession'
+    if src == 'econ':
+        return 'econ_cpi'  # fallback for unknown econ tickers
+
+    # ── Geo ───────────────────────────────────────────────────────────────
     if src == 'geo' or any(t.startswith(p) for p in (
         'KXUKRAINE', 'KXRUSSIA', 'KXISRAEL', 'KXIRAN', 'KXTAIWAN',
         'KXNATO', 'KXCHINA', 'KXNKOREA', 'KXCEASEFIRE',
     )):
         return 'geo'
+
     if src == 'manual':
         return 'manual'
-    if src == 'crypto_15m' or '15M' in (ticker or '').upper():
-        return 'crypto'
+
     return 'other'
 
 
