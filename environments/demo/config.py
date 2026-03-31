@@ -45,27 +45,33 @@ def get_environment():
     cfg = load_config()
     return cfg.get('environment', 'demo')
 
-# Daily cap per module — percentage of total capital (scaled dynamically)
-WEATHER_DAILY_CAP_PCT = 0.07   # DEPRECATED — use WEATHER_BAND_DAILY_CAP_PCT / WEATHER_THRESHOLD_DAILY_CAP_PCT
-CRYPTO_DAILY_CAP_PCT  = 0.07   # DEPRECATED — use CRYPTO_1H_BAND_DAILY_CAP_PCT
-GEO_DAILY_CAP_PCT     = 0.04   # 4% of capital/day
-ECON_DAILY_CAP_PCT    = 0.04   # DEPRECATED — use ECON_CPI_DAILY_CAP_PCT / ECON_UNEMPLOYMENT_DAILY_CAP_PCT / ECON_RECESSION_DAILY_CAP_PCT
-FED_DAILY_CAP_PCT        = 0.03   # DEPRECATED — use ECON_FED_RATE_DAILY_CAP_PCT
-CRYPTO_15M_DAILY_CAP_PCT = 0.10   # DEPRECATED — use CRYPTO_15M_DIR_DAILY_CAP_PCT
+# DAILY CAPS REMOVED (Phase 2 — 2026-03-31)
+# Rationale: Circuit breaker is the daily hard stop. Per-module caps were
+# limiting trade throughput with insufficient risk-control benefit.
+# Optimizer to revisit after 30+ days of post-CB data.
 
-# ── Per-Module Daily Cap Percentages (new taxonomy keys) ─────────────────────
-# These are read by strategy.py should_enter() via: module.upper() + '_DAILY_CAP_PCT'
-# Legacy keys (WEATHER_DAILY_CAP_PCT etc.) kept for data_agent.py backward compat
-# until data_agent.py is updated. Remove legacy keys in follow-up.
-WEATHER_BAND_DAILY_CAP_PCT      = 0.07   # was WEATHER_DAILY_CAP_PCT
-WEATHER_THRESHOLD_DAILY_CAP_PCT = 0.07   # same budget as band
-CRYPTO_1H_BAND_DAILY_CAP_PCT    = 0.07   # was CRYPTO_DAILY_CAP_PCT
-CRYPTO_1H_DIR_DAILY_CAP_PCT     = 0.15   # from CRYPTO_1D_DAILY_CAP_PCT (already exists)
-CRYPTO_15M_DIR_DAILY_CAP_PCT    = 0.10   # was CRYPTO_15M_DAILY_CAP_PCT (canary)
-ECON_CPI_DAILY_CAP_PCT          = 0.04   # was ECON_DAILY_CAP_PCT
-ECON_UNEMPLOYMENT_DAILY_CAP_PCT = 0.04
-ECON_FED_RATE_DAILY_CAP_PCT     = 0.03   # was FED_DAILY_CAP_PCT
-ECON_RECESSION_DAILY_CAP_PCT    = 0.04
+# Legacy keys (kept for reference / future re-enable)
+# WEATHER_DAILY_CAP_PCT = 0.07   # removed Phase 2
+# CRYPTO_DAILY_CAP_PCT  = 0.07   # removed Phase 2
+# ECON_DAILY_CAP_PCT    = 0.04   # removed Phase 2
+# FED_DAILY_CAP_PCT     = 0.03   # removed Phase 2
+# CRYPTO_15M_DAILY_CAP_PCT = 0.10 # removed Phase 2
+
+# New taxonomy keys (also removed Phase 2)
+# WEATHER_BAND_DAILY_CAP_PCT      = 0.07   # removed Phase 2
+# WEATHER_THRESHOLD_DAILY_CAP_PCT = 0.07   # removed Phase 2
+# CRYPTO_1H_BAND_DAILY_CAP_PCT    = 0.07   # removed Phase 2
+# CRYPTO_1H_DIR_DAILY_CAP_PCT     = 0.15   # removed Phase 2
+# CRYPTO_15M_DIR_DAILY_CAP_PCT    = 0.10   # removed Phase 2
+# ECON_CPI_DAILY_CAP_PCT          = 0.04   # removed Phase 2
+# ECON_UNEMPLOYMENT_DAILY_CAP_PCT = 0.04   # removed Phase 2
+# ECON_FED_RATE_DAILY_CAP_PCT     = 0.03   # removed Phase 2
+# ECON_RECESSION_DAILY_CAP_PCT    = 0.04   # removed Phase 2
+# GEO_DAILY_CAP_PCT               = 0.04   # removed Phase 2
+
+# GEO_DAILY_CAP_PCT still needed — it was in strategy gate checks only,
+# and with caps removed, strategy.py will log a warning and allow through.
+# (No value needed; getattr fallback of None in should_enter() = no enforcement)
 
 # Per-trade position size cap — percentage of total capital
 MAX_POSITION_PCT = 0.01   # 1% of capital per trade (replaces fixed $25 caps)
@@ -135,7 +141,7 @@ MIN_CONFIDENCE = {
     'weather_threshold': 0.25,
     'crypto_1h_band':    0.50,
     'crypto_1h_dir':     0.50,
-    'crypto_15m_dir':    0.50,   # Phase 2 changes this to 0.40
+    'crypto_15m_dir':    0.40,   # Phase 2: lowered from 0.50
     'econ_cpi':          0.55,
     'econ_unemployment': 0.55,
     'econ_fed_rate':     0.55,
@@ -170,20 +176,22 @@ OPTIMIZER_MAX_AVG_SIZE       = 40.0  # flag if avg position size above this
 CRYPTO_15M_MIN_EDGE          = 0.02   # DATA COLLECTION: 2% min edge (was 0.05)
 CRYPTO_15M_LIQUIDITY_MIN_PCT = 0.0005 # DATA COLLECTION: 0.05% of OI (was 0.001)
 CRYPTO_15M_SIGMOID_SCALE     = 1.0    # sigmoid scale factor (autoresearcher-tunable)
-CRYPTO_15M_WINDOW_CAP_PCT           = 0.02   # 2% of capital per 15-min window (~$166 at $8,300 capital)
+CRYPTO_15M_WINDOW_CAP_PCT           = 0.04   # 4% of capital per 15-min window (Phase 2; was 0.02)
 CRYPTO_15M_DAILY_WAGER_CAP_PCT      = 0.60   # 60% backstop — raised to give strategy gate more room; CB is the daily hard stop
 CRYPTO_15M_CIRCUIT_BREAKER_N        = 3      # consecutive complete-loss windows before halt
 CRYPTO_15M_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop — halt all crypto_15m entries for rest of trading day
 
 # ── crypto_15m_dir Signal Weights ────────────────────────────────────────────
-CRYPTO_15M_DIR_W_TFI  = 0.42   # Taker Flow Imbalance weight
-CRYPTO_15M_DIR_W_OBI  = 0.25   # Orderbook Imbalance weight
-CRYPTO_15M_DIR_W_MACD = 0.15   # MACD Histogram weight
-CRYPTO_15M_DIR_W_OI   = 0.18   # Open Interest Delta weight
+CRYPTO_15M_DIR_W_TFI  = 0.50   # Taker Flow Imbalance weight (Phase 2: increased from 0.42)
+CRYPTO_15M_DIR_W_OBI  = 0.25   # Orderbook Imbalance weight (unchanged)
+CRYPTO_15M_DIR_W_MACD = 0.15   # MACD Histogram weight (unchanged)
+CRYPTO_15M_DIR_W_OI   = 0.10   # Open Interest Delta weight (Phase 2: reduced from 0.18)
 # Must sum to 1.0; Optimizer owns these values
+# Sum check: 0.50 + 0.25 + 0.15 + 0.10 = 1.00 ✓
 
 CRYPTO_15M_DIR_HARD_CAP_USD     = 100.0   # absolute per-trade dollar cap (half-Kelly formula)
 CRYPTO_15M_DIR_MIN_POSITION_USD =   5.0   # minimum viable trade size
+CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED = False   # Phase 2: disabled — CB is daily guardrail
 CRYPTO_15M_MAX_SPREAD        = 25     # DATA COLLECTION: 25c max spread (was 15)
 CRYPTO_15M_THIN_MARKET_RATIO = 0.01   # DATA COLLECTION: 1% of 30d avg vol (was 0.05)
 CRYPTO_15M_MIN_CONVICTION    = 0.05   # DATA COLLECTION: min |raw_score| (was hardcoded 0.15)
@@ -287,7 +295,7 @@ CAPITAL_FALLBACK = 10000.0  # fallback capital when API unavailable
 
 # ── Position Exit Thresholds ─────────────────────────────────────────────────
 EXIT_95C_THRESHOLD = 95     # cents — auto-exit YES position if bid >= this
-EXIT_GAIN_PCT      = 0.70   # fraction of max upside — auto-exit at this gain
+EXIT_GAIN_PCT      = 0.90   # fraction of max upside — auto-exit at this gain (Phase 2; was 0.70)
 
 # ── Minimum Edge per Module (strategy gate) ───────────────────────────────────
 # These are the STRATEGY GATE minimums — a secondary check in should_enter().

@@ -1175,12 +1175,15 @@ def evaluate_crypto_15m_entry(
 
         if not _skip_reason:
             # --- Check 1: Tier 2 daily wager backstop ---
+            # PHASE 2 (2026-03-31): Daily caps removed. CB is the daily hard stop.
+            # Backstop disabled via config flag. Still tracking _daily_wager for metrics.
             today_str = date.today().isoformat()
             if _daily_wager_date != today_str:
                 _daily_wager = 0.0
                 _daily_wager_date = today_str
 
-            if _daily_wager + position_usd > daily_wager_cap:
+            _backstop_enabled = getattr(config, 'CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED', False)
+            if _backstop_enabled and _daily_wager + position_usd > daily_wager_cap:
                 trimmed = daily_wager_cap - _daily_wager
                 if trimmed < 5.0:
                     _skip_reason = 'DAILY_WAGER_BACKSTOP'

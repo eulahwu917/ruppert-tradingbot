@@ -185,6 +185,8 @@ def check_settlements(client):
     # Accumulate 15m settlements per window for circuit breaker update
     # dict: window_open_ts → list of {'payout': float}
     _15m_window_settlements: dict = {}
+    # Accumulate 1h band settlements per window for circuit breaker update
+    _1h_band_settlements: dict = {}
     for pos in open_positions:
         ticker = pos.get('ticker', '')
         side = pos.get('side', '')
@@ -333,7 +335,7 @@ def check_settlements(client):
             print(f"  [Settlement Checker] WARN: could not remove {ticker} {side} from tracker: {_pt_err}")
 
         # Accumulate 15m crypto settlements by window for circuit breaker update
-        if pos.get('module') == 'crypto_15m':
+        if pos.get('module') in ('crypto_15m', 'crypto_15m_dir'):
             win_ts = pos.get('window_open_ts', '')
             if win_ts:
                 payout = exit_price if (
@@ -341,6 +343,17 @@ def check_settlements(client):
                     (side == 'no'  and result == 'no')
                 ) else 0.0
                 _15m_window_settlements.setdefault(win_ts, []).append({'payout': payout})
+
+        # Accumulate 1h band settlements by window for circuit breaker update
+        if pos.get('module') == 'crypto_1h_band':
+            # Use date as proxy window_ts for 1h band (hourly windows align to date+hour)
+            win_ts_1h = pos.get('window_open_ts', pos.get('date', ''))
+            if win_ts_1h:
+                payout_1h = exit_price if (
+                    (side == 'yes' and result == 'yes') or
+                    (side == 'no'  and result == 'no')
+                ) else 0.0
+                _1h_band_settlements.setdefault(win_ts_1h, []).append({'payout': payout_1h})
 
     if settled_count == 0:
         print(f"  [Settlement Checker] no newly settled positions")
@@ -353,6 +366,106 @@ def check_settlements(client):
             _update_circuit_breaker_state('crypto_15m', win_ts, win_settlements)
         except Exception as _cb_err:
             print(f"  [circuit_breaker] State update failed for window {win_ts}: {_cb_err}")
+
+    # Update 1h band circuit breaker state for each fully-settled 1h window
+    for win_ts, win_settlements in _1h_band_settlements.items():
+        try:
+            update_1h_circuit_breaker(win_ts, win_settlements)
+        except Exception as _cb_err:
+            print(f"  [1h_circuit_breaker] State update failed for window {win_ts}: {_cb_err}")
+
+
+def _read_1h_circuit_breaker_state() -> int:
+    """
+    Read the current consecutive_losses count from the 1h band circuit breaker state file.
+    Performs a daily reset: if the stored date differs from today (PDT), resets
+    consecutive_losses to 0 and updates the file.
+    Returns 0 if the file doesn't exist or is unreadable (safe/permissive default).
+
+    Mirrors _read_circuit_breaker_state() in crypto_15m.py.
+    """
+    import pytz as _pytz
+    state_path = os.path.join(str(_get_paths()['logs']), 'crypto_1h_circuit_breaker.json')
+    pdt = _pytz.timezone('America/Los_Angeles')
+    today_str = datetime.now(pdt).strftime('%Y-%m-%d')
+    try:
+        with open(state_path, 'r', encoding='utf-8') as f:
+            state = json.load(f)
+        stored_date = state.get('date', '')
+        if stored_date != today_str:
+            state['consecutive_losses'] = 0
+            state['date'] = today_str
+            tmp_path = state_path + '.tmp'
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(state, f)
+            os.replace(tmp_path, state_path)
+            return 0
+        return int(state.get('consecutive_losses', 0))
+    except (FileNotFoundError, json.JSONDecodeError, Exception):
+        return 0
+
+
+def update_1h_circuit_breaker(window_ts: str, settlements: list):
+    """
+    Update the 1h band circuit breaker state after a 1h band window settles.
+
+    Called by check_settlements() after all crypto_1h_band positions for a given
+    window_ts are settled.
+
+    A window is a "complete loss" if all positions resulted in payout=0.
+    A profitable window (any payout > 0) resets the counter.
+
+    Args:
+        window_ts:   ISO timestamp identifying the settled window
+        settlements: List of {'payout': float} dicts for the window
+    """
+    if not settlements:
+        return
+
+    import pytz as _pytz
+    state_path = os.path.join(str(_get_paths()['logs']), 'crypto_1h_circuit_breaker.json')
+    pdt = _pytz.timezone('America/Los_Angeles')
+    today_str = datetime.now(pdt).strftime('%Y-%m-%d')
+
+    payouts = [float(s.get('payout', 0.0)) for s in settlements]
+    if all(p == 0.0 for p in payouts):
+        window_result = 'loss'
+    elif any(p > 0.0 for p in payouts):
+        window_result = 'win'
+    else:
+        window_result = 'partial_loss'
+
+    try:
+        with open(state_path, 'r', encoding='utf-8') as f:
+            state = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        state = {'consecutive_losses': 0}
+    state['date'] = today_str
+
+    if window_result == 'loss':
+        state['consecutive_losses'] = state.get('consecutive_losses', 0) + 1
+    else:
+        state['consecutive_losses'] = 0
+
+    cb_n = getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3)
+    state['last_updated'] = datetime.utcnow().isoformat()
+    state['last_window_ts'] = window_ts
+    state['last_window_result'] = window_result
+
+    os.makedirs(os.path.dirname(state_path), exist_ok=True)
+    tmp_path = state_path + '.tmp'
+    try:
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(state, f, indent=2)
+        os.replace(tmp_path, state_path)
+    except Exception as e:
+        print(f'  [1h_circuit_breaker] State file write failed: {e}')
+        return
+
+    print(
+        f'  [1h_circuit_breaker] Window {window_ts} result={window_result}, '
+        f'consecutive_losses={state["consecutive_losses"]} (threshold={cb_n})'
+    )
 
 
 def push_alert(level, message, ticker=None, pnl=None):

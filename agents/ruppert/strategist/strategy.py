@@ -521,12 +521,13 @@ def should_exit(current_bid: float, entry_price: float,
     if current_bid >= 95:
         return {'exit': True, 'fraction': 1.0, 'reason': '95c_rule'}
 
-    # Rule 2 — 70% gain on max upside
+    # Rule 2 — gain threshold on max upside (config-driven)
+    _gain_threshold = getattr(config, 'EXIT_GAIN_PCT', 0.90)
     max_upside = 100.0 - entry_price
     if max_upside > 0:
         gain = (current_bid - entry_price) / max_upside
-        if gain >= 0.70:
-            return {'exit': True, 'fraction': 1.0, 'reason': 'gain_70pct'}
+        if gain >= _gain_threshold:
+            return {'exit': True, 'fraction': 1.0, 'reason': f'gain_{int(_gain_threshold*100)}pct'}
 
     # Catastrophic reversal override: if model edge has collapsed ≥0.35, exit even near settlement.
     # Only full reversal (≥0.35) overrides — trim (0.10) and half (0.20) reversals do not.
