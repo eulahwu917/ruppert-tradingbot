@@ -17,7 +17,7 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
-from agents.ruppert.data_scientist.logger import classify_module
+from agents.ruppert.data_scientist.logger import classify_module, get_parent_module
 import agents.ruppert.data_analyst.market_cache as market_cache
 
 app = FastAPI(title="Ruppert Trading Dashboard")
@@ -444,7 +444,9 @@ def get_trades():
         t['settlement_result'] = cr.get('settlement_result', '')
         t['exit_type'] = 'settle' if cr.get('action') == 'settle' else cr.get('exit_type', 'manual')
 
-        t['module'] = classify_module(t.get('source', 'bot'), ticker)
+        _mod = classify_module(t.get('source', 'bot'), ticker)
+        t['module'] = _mod
+        t['parent_module'] = get_parent_module(_mod)
 
         # Apply 15M display title transformation (mirrors open positions path)
         raw_title = (t.get('title') or ticker).replace('**', '')
@@ -514,6 +516,7 @@ def get_active_positions():
                     "side":        side,
                     "source":      'live',
                     "module":      classify_module('live', ticker),
+                    "parent_module": get_parent_module(classify_module('live', ticker)),
                     "entry_price": entry_p,
                     "cur_price":   entry_p,
                     "pnl":         0.0,
@@ -586,7 +589,8 @@ def get_active_positions():
             "title":       title,
             "side":        _translate_15m_side(ticker, side),
             "source":      source,
-            "module":      classify_module(source, ticker),
+            "module":        classify_module(source, ticker),
+            "parent_module": get_parent_module(classify_module(source, ticker)),
             "entry_price": ep,
             "cur_price":   ep,
             "pnl":         0.0,
@@ -1254,11 +1258,12 @@ def _build_state():
             _raw_title = _re3.sub(r'\s+\d{4}-\d{2}-\d{2}\b', '', _raw_title).strip()
             _raw_title = f"{_raw_title} {_win_time2}"
         positions.append({
-            'ticker':      ticker,
-            'title':       _raw_title,
-            'side':        _translate_15m_side(ticker, side),
-            'source':      source,
-            'module':      mod,
+            'ticker':        ticker,
+            'title':         _raw_title,
+            'side':          _translate_15m_side(ticker, side),
+            'source':        source,
+            'module':        mod,
+            'parent_module': get_parent_module(mod),
             'entry_price': ep,
             'cur_price':   cur_p,
             'pnl':         pnl,

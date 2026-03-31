@@ -805,7 +805,7 @@ async function loadPositions() {
     return `<tr>
       <td class="l col-title">
         <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">
-          ${moduleTag(p.module, p.ticker, p.source)}
+          ${moduleTag(p.parent_module)}
           <a href="${url}" target="_blank" style="color:#aaa;text-decoration:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:380px;">${name}</a>
           ${expiry}
         </div>
@@ -944,7 +944,7 @@ async function loadTrades() {
     const qty    = t.contracts||'--';
     return `<tr>
       <td class="l" style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:260px;">
-        <div style="display:flex;align-items:center;gap:5px;">${moduleTag(t.module, t.ticker, t.source)}<span style="color:#aaa;font-size:11px;">${title}</span></div>
+        <div style="display:flex;align-items:center;gap:5px;">${moduleTag(t.parent_module)}<span style="color:#aaa;font-size:11px;">${title}</span></div>
       </td>
       <td class="ca shrink">${dt}</td>
       <td class="ca shrink">${side}</td>
@@ -1091,20 +1091,19 @@ function doAct(uid, action, ticker, priceCents) {
 }
 
 // ── Module Tags ───────────────────────────────────────────────────────────────
-function classifyModule(ticker, source) {
-  const t = (ticker || '').toUpperCase();
-  const src = (source || '');
-  if ((src === 'weather' || src === 'bot') && t.startsWith('KXHIGH')) return 'weather';
-  if (src === 'crypto' || ['KXBTC','KXETH','KXXRP','KXDOGE'].some(p => t.startsWith(p))) return 'crypto';
-  if (src === 'fed' || t.startsWith('KXFED') || t.startsWith('KXCPI')) return 'fed';
-  return 'other';
-}
-function moduleTag(module, ticker, source) {
-  const mod = module || classifyModule(ticker, source);
-  if (mod === 'weather') return '<span style="background:#0d1f0d;color:#4ade80;border:1px solid #1a3d1a;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;flex-shrink:0;">Weather</span>';
-  if (mod === 'crypto')  return '<span style="background:#1a0d2e;color:#a78bfa;border:1px solid #2d1a4a;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;flex-shrink:0;">Crypto</span>';
-  if (mod === 'fed')     return '<span style="background:#0d1a2e;color:#60a5fa;border:1px solid #1a2d4a;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;flex-shrink:0;">Fed</span>';
-  return '<span style="color:#666;padding:2px 7px;border-radius:3px;font-size:9px;flex-shrink:0;">Other</span>';
+function moduleTag(parent_module) {
+  switch (parent_module) {
+    case 'weather':
+      return '<span style="background:#0d1f0d;color:#4ade80;border:1px solid #1a3d1a;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;flex-shrink:0;">Weather</span>';
+    case 'crypto':
+      return '<span style="background:#1a0d2e;color:#a78bfa;border:1px solid #2d1a4a;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;flex-shrink:0;">Crypto</span>';
+    case 'econ':
+      return '<span style="background:#0d1a2e;color:#60a5fa;border:1px solid #1a2d4a;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;flex-shrink:0;">Econ</span>';
+    case 'geo':
+      return '<span style="background:#1a1a0d;color:#facc15;border:1px solid #3d3a1a;padding:2px 7px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.3px;flex-shrink:0;">Geo</span>';
+    default:
+      return '<span style="color:#666;padding:2px 7px;border-radius:3px;font-size:9px;flex-shrink:0;">Other</span>';
+  }
 }
 
 // ── renderState - single state response → full UI update ──────────────────────
@@ -1216,7 +1215,7 @@ function renderState(state) {
     return `<tr>
       <td class="l col-title">
         <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">
-          ${moduleTag(p.module, p.ticker, p.source)}
+          ${moduleTag(p.parent_module)}
           <a href="${url}" target="_blank" style="color:#aaa;text-decoration:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:380px;">${name}</a>
           ${expiry}
         </div>

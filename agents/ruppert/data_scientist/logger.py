@@ -404,6 +404,34 @@ def release_exit_lock(ticker: str, side: str) -> None:
         pass
 
 
+def get_parent_module(module_name: str) -> str:
+    """Map detailed subcategory → display parent category.
+
+    Single source of truth for display grouping. Used by api.py to populate
+    the parent_module field on every position/trade dict so the frontend
+    never needs its own classification logic.
+
+    Mapping:
+        weather_band, weather_threshold          → 'weather'
+        crypto_15m_dir, crypto_1h_dir,
+          crypto_1h_band                         → 'crypto'
+        econ_cpi, econ_unemployment,
+          econ_fed_rate, econ_recession          → 'econ'
+        geo                                      → 'geo'
+        manual, other                            → 'other'
+    """
+    m = (module_name or '').lower()
+    if m.startswith('weather'):
+        return 'weather'
+    if m.startswith('crypto'):
+        return 'crypto'
+    if m.startswith('econ'):
+        return 'econ'
+    if m == 'geo':
+        return 'geo'
+    return 'other'
+
+
 def classify_module(src: str, ticker: str) -> str:
     """Classify a trade into a module bucket based on source and ticker prefix.
 
@@ -424,7 +452,7 @@ def classify_module(src: str, ticker: str) -> str:
     t = (ticker or '').upper()
 
     # ── Weather ───────────────────────────────────────────────────────────
-    if src in ('weather', 'bot') and t.startswith('KXHIGH'):
+    if t.startswith('KXHIGH'):
         if '-T' in t:
             return 'weather_threshold'
         return 'weather_band'  # default: B-type band
