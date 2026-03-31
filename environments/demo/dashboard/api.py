@@ -923,12 +923,13 @@ def get_pnl_history():
                     bot_wins += 1
 
                 _mod = classify_module(src, ticker)
-                if _mod not in module_stats:
-                    _mod = 'other'
-                module_stats[_mod]['closed_pnl'] += pnl
-                module_stats[_mod]['trade_count'] += 1
+                _parent_mod = get_parent_module(_mod)
+                if _parent_mod not in module_stats:
+                    _parent_mod = 'other'
+                module_stats[_parent_mod]['closed_pnl'] += pnl
+                module_stats[_parent_mod]['trade_count'] += 1
                 if pnl > 0:
-                    module_stats[_mod]['wins'] += 1
+                    module_stats[_parent_mod]['wins'] += 1
 
             # Bucket by close record timestamp or settlement date from ticker
             cr_ts = cr.get('timestamp') if cr else None
@@ -952,18 +953,20 @@ def get_pnl_history():
                     # Module period stats (bot only)
                     if not is_manual:
                         _mod2 = classify_module(src, ticker)
-                        if _mod2 not in module_stats: _mod2 = 'other'
-                        module_stats[_mod2]['closed_pnl_month'] += pnl
-                        module_stats[_mod2]['trade_count_month'] += 1
+                        _parent_mod2 = get_parent_module(_mod2)
+                        if _parent_mod2 not in module_stats: _parent_mod2 = 'other'
+                        module_stats[_parent_mod2]['closed_pnl_month'] += pnl
+                        module_stats[_parent_mod2]['trade_count_month'] += 1
                 if sdate.year == _today.year:
                     closed_by_period['year']  += pnl
                     if is_manual: closed_by_src_period['manual']['year']  += pnl
                     else:         closed_by_src_period['bot']['year']     += pnl
                     if not is_manual:
                         _mod3 = classify_module(src, ticker)
-                        if _mod3 not in module_stats: _mod3 = 'other'
-                        module_stats[_mod3]['closed_pnl_year'] += pnl
-                        module_stats[_mod3]['trade_count_year'] += 1
+                        _parent_mod3 = get_parent_module(_mod3)
+                        if _parent_mod3 not in module_stats: _parent_mod3 = 'other'
+                        module_stats[_parent_mod3]['closed_pnl_year'] += pnl
+                        module_stats[_parent_mod3]['trade_count_year'] += 1
                 if is_manual: closed_by_src_period['manual']['all'] += pnl
                 else:         closed_by_src_period['bot']['all']    += pnl
         except Exception:
@@ -983,8 +986,9 @@ def get_pnl_history():
         if src in ('economics', 'geo', 'manual'):
             continue
         mod = classify_module(src, ticker)
-        module_open_stats[mod]['open_deployed'] += t.get('size_dollars', 0)
-        module_open_stats[mod]['open_trades'] += 1
+        parent_mod = get_parent_module(mod)
+        module_open_stats[parent_mod]['open_deployed'] += t.get('size_dollars', 0)
+        module_open_stats[parent_mod]['open_trades'] += 1
 
     for ticker, t in open_tickers.items():
         try:
@@ -1028,7 +1032,8 @@ def get_pnl_history():
                 open_by_source['bot'] += pnl
                 # Accumulate per-module open P&L (uses live prices from orderbook above)
                 mod_open = classify_module(src, ticker)
-                module_open_stats[mod_open]['open_pnl'] += pnl
+                parent_mod_open = get_parent_module(mod_open)
+                module_open_stats[parent_mod_open]['open_pnl'] += pnl
         except Exception:
             pass
 
@@ -1217,9 +1222,10 @@ def _build_state():
         ep        = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
         cost      = float(t.get('size_dollars') or 0)
         contracts = t.get('contracts', 0) or 0
-        mod       = classify_module(source, ticker)
-        if mod not in module_open:
-            mod = 'other'
+        mod        = classify_module(source, ticker)
+        parent_mod = get_parent_module(mod)
+        if parent_mod not in module_open:
+            parent_mod = 'other'
 
         lv = prices.get(ticker)
         cur_p = None
@@ -1245,10 +1251,10 @@ def _build_state():
             open_pnl_total += pnl
             open_cost_total += cost
 
-        module_open[mod]['open_deployed'] += cost
-        module_open[mod]['open_trades']   += 1
+        module_open[parent_mod]['open_deployed'] += cost
+        module_open[parent_mod]['open_trades']   += 1
         if pnl is not None:
-            module_open[mod]['open_pnl'] += pnl
+            module_open[parent_mod]['open_pnl'] += pnl
 
         edge_val = t.get('edge')
         _raw_title = (t.get('title') or ticker).replace('**', '')
@@ -1263,7 +1269,7 @@ def _build_state():
             'side':          _translate_15m_side(ticker, side),
             'source':        source,
             'module':        mod,
-            'parent_module': get_parent_module(mod),
+            'parent_module': parent_mod,
             'entry_price': ep,
             'cur_price':   cur_p,
             'pnl':         pnl,
@@ -1338,12 +1344,13 @@ def _build_state():
 
             if not is_manual:
                 mod_c = classify_module(src, ticker)
-                if mod_c not in module_closed:
-                    mod_c = 'other'
-                module_closed[mod_c]['closed_pnl']  += pnl_val
-                module_closed[mod_c]['trade_count'] += 1
+                parent_mod_c = get_parent_module(mod_c)
+                if parent_mod_c not in module_closed:
+                    parent_mod_c = 'other'
+                module_closed[parent_mod_c]['closed_pnl']  += pnl_val
+                module_closed[parent_mod_c]['trade_count'] += 1
                 if pnl_val > 0:
-                    module_closed[mod_c]['wins'] += 1
+                    module_closed[parent_mod_c]['wins'] += 1
 
             # Period bucketing
             cr_ts2 = cr.get('timestamp') if cr else None
@@ -1365,14 +1372,16 @@ def _build_state():
                     closed_pnl_month += pnl_val
                     if not is_manual:
                         mod_cm = classify_module(src, ticker)
-                        if mod_cm not in module_closed: mod_cm = 'other'
-                        module_closed[mod_cm]['closed_pnl_month'] += pnl_val
+                        parent_mod_cm = get_parent_module(mod_cm)
+                        if parent_mod_cm not in module_closed: parent_mod_cm = 'other'
+                        module_closed[parent_mod_cm]['closed_pnl_month'] += pnl_val
                 if sdate.year == _today.year:
                     closed_pnl_year += pnl_val
                     if not is_manual:
                         mod_cy = classify_module(src, ticker)
-                        if mod_cy not in module_closed: mod_cy = 'other'
-                        module_closed[mod_cy]['closed_pnl_year'] += pnl_val
+                        parent_mod_cy = get_parent_module(mod_cy)
+                        if parent_mod_cy not in module_closed: parent_mod_cy = 'other'
+                        module_closed[parent_mod_cy]['closed_pnl_year'] += pnl_val
         except Exception:
             pass
 
