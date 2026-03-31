@@ -193,6 +193,33 @@ def classify_market_type(temp_range) -> str:
     return "B_band"
 
 
+def _ttype_margin_to_confidence(margin_f: float) -> float:
+    """
+    Convert T-type threshold margin to entry confidence.
+
+    Margin is |bias_corrected_point_estimate - threshold_f|.
+    Large margin = strong edge (we're far from the coin-flip zone).
+    Small margin = weak edge (we're near the threshold, uncertain territory).
+
+    Calibration (approximate, assuming ±3-5°F RMSE):
+      ≥8°F  → 0.90 (z≈2.7, P(win)>99%)
+      5-8°F → 0.75 (z≈1.7-2.7, P(win)~95-99%)
+      2-5°F → 0.50 (z≈0.7-1.7, P(win)~75-95%)
+      <2°F  → 0.00 (no trade — coin flip, don't play)
+
+    Returns:
+        float confidence in [0.0, 0.90], or 0.0 to signal "no trade".
+    """
+    if margin_f < getattr(config, 'TTYPE_MARGIN_NO_TRADE', 2.0):
+        return 0.0
+    elif margin_f < getattr(config, 'TTYPE_MARGIN_WEAK', 5.0):
+        return getattr(config, 'TTYPE_CONF_WEAK', 0.50)
+    elif margin_f < getattr(config, 'TTYPE_MARGIN_STRONG', 8.0):
+        return getattr(config, 'TTYPE_CONF_STANDARD', 0.75)
+    else:
+        return getattr(config, 'TTYPE_CONF_STRONG', 0.90)
+
+
 def apply_volume_tier(edge: float, volume: int) -> tuple[float, str]:
     """
     Discount edge score for thin markets.
@@ -403,6 +430,50 @@ def analyze_market(market: dict) -> dict | None:
     if model_prob is None:
         return None
 
+    # ── T-type margin-based confidence override ───────────────────────────────
+    # Replaces/augments ensemble probability confidence for T-upper / T-lower markets.
+    # Margin = |bias_corrected_point_estimate - threshold_f| measures how far the
+    # expected temperature is from the strike. Large margin = strong directional edge.
+    _ttype_result_extra: dict = {}
+    if (
+        getattr(config, 'TTYPE_ENABLED', True)
+        and market_type in ("T_upper", "T_lower")
+        and ensemble_data is not None
+    ):
+        ens = ensemble_data.get("ensemble", {})
+        point_est = ens.get("ensemble_mean")   # bias-corrected via effective_threshold shift
+
+        if point_est is not None:
+            # ensemble_mean is computed relative to the shifted effective_threshold.
+            # To get the true temperature estimate, add bias back.
+            bias_applied = ensemble_data.get("bias_applied_f", 0.0) or 0.0
+            bias_corrected_point_est = point_est + bias_applied
+
+            margin = abs(bias_corrected_point_est - threshold_f)
+            t_confidence = _ttype_margin_to_confidence(margin)
+
+            logger.info(
+                f"[Edge] {ticker}: T-type margin={margin:.1f}°F "
+                f"(est={bias_corrected_point_est:.1f}°F, threshold={threshold_f}°F) "
+                f"→ t_confidence={t_confidence:.2f} (was {confidence:.2f})"
+            )
+
+            if t_confidence == 0.0:
+                logger.info(
+                    f"[Edge] {ticker}: T-type margin <{getattr(config, 'TTYPE_MARGIN_NO_TRADE', 2.0)}°F "
+                    f"— no trade (margin too thin)"
+                )
+                return None
+
+            # Use the better of margin-based confidence and ensemble confidence
+            # (ensemble captures model agreement; margin captures signal strength)
+            confidence = max(confidence, t_confidence)
+
+            _ttype_result_extra = {
+                "ttype_margin_f":    round(margin, 1),
+                "ttype_point_est_f": round(bias_corrected_point_est, 1),
+            }
+
     # ── Confidence gate ───────────────────────────────────────────────────────
     if confidence < MIN_ENSEMBLE_CONFIDENCE and signal_src == "open_meteo_multi_model":
         logger.info(f"[Edge] {ticker}: skipping — low ensemble confidence ({confidence:.2f})")
@@ -539,6 +610,10 @@ def analyze_market(market: dict) -> dict | None:
         result['models_used']      = ensemble_data.get("models_used", [])
         # Flag whether NWS was degraded (set in confidence block above)
         result['nws_degraded']     = ensemble_data.get("nws_current_f") is None
+
+    # Attach T-type margin fields if computed
+    if _ttype_result_extra:
+        result.update(_ttype_result_extra)
 
     # Same-day cutoff handled upstream in main.py via MIN_HOURS_TO_CLOSE
     # (uses Kalshi close_time directly — no timezone math needed)

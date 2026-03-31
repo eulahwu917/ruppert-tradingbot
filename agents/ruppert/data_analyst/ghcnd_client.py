@@ -193,7 +193,7 @@ HARDCODED_BIAS_F = {
     "KXHIGHHOU": 3.0,
     "KXHIGHPHX": 3.0,
     "KXHIGHAUS": 3.0,
-    "KXHIGHDEN": 3.0,
+    "KXHIGHDEN": 4.0,   # was 3.0 — conservative step toward observed +6°F (n=1 data; 2026-03-27)
     "KXHIGHLAX": 3.0,
     "KXHIGHPHIL": 3.0,
     "KXHIGHTMIN": 3.0,
@@ -201,7 +201,7 @@ HARDCODED_BIAS_F = {
     "KXHIGHTDC": 3.0,
     "KXHIGHTLV": 3.0,
     "KXHIGHTNOU": 3.0,
-    "KXHIGHTOKC": 3.0,
+    "KXHIGHTOKC": 0.0,  # was 3.0 — REVERSED: observed error was -2°F; 0.0 is neutral pending more data (2026-03-27)
     "KXHIGHTSFO": 3.0,
     "KXHIGHTSEA": 3.0,
     "KXHIGHTSATX": 3.0,

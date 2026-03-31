@@ -224,5 +224,24 @@ EXPANDED_CITIES_SKIP = [
     "KXHIGHTATL",   # Atlanta
 ]
 
+# ── T-Type Weather Markets ────────────────────────────────────────────────────
+# Margin-based signal thresholds (°F from threshold)
+TTYPE_MARGIN_NO_TRADE = 2.0    # Below this margin: skip (coin flip territory)
+TTYPE_MARGIN_WEAK     = 5.0    # Below this: weak confidence
+TTYPE_MARGIN_STRONG   = 8.0    # Above this: strong confidence
+
+# Confidence levels per margin tier
+TTYPE_CONF_WEAK       = 0.50   # 2–5°F margin → 50% confidence
+TTYPE_CONF_STANDARD   = 0.75   # 5–8°F margin → 75% confidence
+TTYPE_CONF_STRONG     = 0.90   # ≥8°F margin → 90% confidence
+
+# Sizing — DEMO data collection phase
+TTYPE_PER_TRADE_SIZE      = 50.0    # $50 per T-type trade
+TTYPE_MAX_DAILY           = 500.0   # $500/day hard cap across all T-type trades
+TTYPE_PER_CITY_DAILY_MAX  = 100.0   # $100/city/day (across upper + lower threshold)
+
+# Enable T-type in DEMO (set False to disable without code changes)
+TTYPE_ENABLED = True
+
 # ── Capital Fallback ─────────────────────────────────────────────────────────
 CAPITAL_FALLBACK = 10000.0  # fallback capital when API unavailable
