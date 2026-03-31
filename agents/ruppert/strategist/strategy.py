@@ -39,24 +39,28 @@ import config
 # Module-specific thresholds (mirrors config.py constants)
 # ---------------------------------------------------------------------------
 MIN_EDGE = {
-    'weather':    0.12,   # lowered from 0.30 (Post-Brier review: recalibrated)
-    'crypto':     0.12,
-    'crypto_15m': getattr(config, 'CRYPTO_15M_MIN_EDGE', 0.08),
-    'geo':        0.15,   # Phase 4: higher than crypto — geo harder to model (LLM-estimated)
-    'econ':       0.12,   # Phase 5: economics/CPI — matches config.ECON_MIN_EDGE
-    'fed':        0.12,   # Phase 5: Fed rate — matches fed_client.FED_MIN_EDGE
+    'weather_band':      getattr(config, 'MIN_EDGE_WEATHER_BAND',      0.12),
+    'weather_threshold': getattr(config, 'MIN_EDGE_WEATHER_THRESHOLD',  0.12),
+    'crypto_1h_band':    getattr(config, 'MIN_EDGE_CRYPTO_1H_BAND',    0.12),
+    'crypto_15m_dir':    getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
+    'crypto_1h_dir':     getattr(config, 'MIN_EDGE_CRYPTO_1H_DIR',     0.08),
+    'geo':               getattr(config, 'MIN_EDGE_GEO',               0.15),
+    'econ_cpi':          getattr(config, 'MIN_EDGE_ECON_CPI',          0.12),
+    'econ_unemployment': getattr(config, 'MIN_EDGE_ECON_UNEMPLOYMENT', 0.12),
+    'econ_fed_rate':     getattr(config, 'MIN_EDGE_ECON_FED_RATE',     0.12),
+    'econ_recession':    getattr(config, 'MIN_EDGE_ECON_RECESSION',    0.12),
 }
-MIN_CONFIDENCE   = 0.25          # universal minimum confidence to enter (Post-Brier review)
-MIN_HOURS_ENTRY  = 0.5           # must be ≥ 30 min from settlement to open
-MIN_HOURS_ADD    = 2.0           # must be ≥ 2 h from settlement to add
-DAILY_CAP_RATIO  = 0.70          # max fraction of total capital deployable per day
+MIN_CONFIDENCE   = getattr(config, 'STRATEGY_MIN_CONFIDENCE_FLOOR', 0.25)
+MIN_HOURS_ENTRY  = 0.5           # local fallback only — strategy reads config.MIN_HOURS_ENTRY dict
+MIN_HOURS_ADD    = getattr(config, 'STRATEGY_MIN_HOURS_ADD', 2.0)
+DAILY_CAP_RATIO  = getattr(config, 'DAILY_CAP_RATIO', 0.70)
 # MAX_POSITION_CAP = 50.0        # removed: replaced by MAX_POSITION_PCT in config.py
 # PCT_CAPITAL_CAP  = 0.025       # removed: replaced by MAX_POSITION_PCT in config.py
 # NOTE: KELLY_FRACTION is currently NOT wired into kelly_fraction_for_confidence().
 # The tier table below runs actual sizing independently of this constant.
 # When the Optimizer is built, wire this as the ceiling of the tier table.
 # Until then, this serves as an audit-log anchor only.
-KELLY_FRACTION   = 0.16          # max fractional Kelly multiplier (80%+ confidence tier)
+KELLY_FRACTION   = 0.16          # audit-log anchor only — NOT wired into sizing
 
 
 # ---------------------------------------------------------------------------
@@ -84,17 +88,13 @@ def kelly_fraction_for_confidence(confidence: float) -> float:
     NOTE: The tiers below are hardcoded constants. KELLY_FRACTION (defined above)
     is NOT used here — it is an audit-log anchor only until the Optimizer is built.
     """
-    if confidence >= 0.80:
-        return 0.16
-    if confidence >= 0.70:
-        return 0.14
-    if confidence >= 0.60:
-        return 0.12
-    if confidence >= 0.50:
-        return 0.10
-    if confidence >= 0.40:
-        return 0.07
-    return 0.05  # 25-40% confidence band
+    _kt = lambda k, d: getattr(config, k, d)
+    if confidence >= 0.80: return _kt('KELLY_TIER_80', 0.16)
+    if confidence >= 0.70: return _kt('KELLY_TIER_70', 0.14)
+    if confidence >= 0.60: return _kt('KELLY_TIER_60', 0.12)
+    if confidence >= 0.50: return _kt('KELLY_TIER_50', 0.10)
+    if confidence >= 0.40: return _kt('KELLY_TIER_40', 0.07)
+    return _kt('KELLY_TIER_25', 0.05)  # 25-40% confidence band
 
 
 # ---------------------------------------------------------------------------
@@ -313,7 +313,7 @@ def should_enter(
                 'reason': f'low_confidence ({confidence:.2f} < {_per_module_thresh} for {signal_module})'}
 
     # --- Edge gate (module-specific) ---
-    min_edge = MIN_EDGE.get(signal_module, MIN_EDGE['weather'])
+    min_edge = MIN_EDGE.get(signal_module, MIN_EDGE.get('weather_band', 0.12))
     if edge < min_edge:
         return {'enter': False, 'size': 0.0,
                 'reason': f'insufficient_edge ({edge:.3f} < {min_edge} for {signal_module})'}
@@ -568,27 +568,31 @@ def get_strategy_summary() -> dict:
         dict of parameter names → values.
     """
     return {
-        'kelly_fraction_max':           KELLY_FRACTION,   # 80%+ confidence tier
-        'kelly_fraction_tier_80plus':   0.16,
-        'kelly_fraction_tier_70_80':    0.14,
-        'kelly_fraction_tier_60_70':    0.12,
-        'kelly_fraction_tier_50_60':    0.10,
-        'kelly_fraction_tier_40_50':    0.07,
-        'kelly_fraction_tier_25_40':    0.05,
+        'kelly_fraction_max':           KELLY_FRACTION,   # 80%+ confidence tier (audit anchor)
+        'kelly_fraction_tier_80plus':   getattr(config, 'KELLY_TIER_80', 0.16),
+        'kelly_fraction_tier_70_80':    getattr(config, 'KELLY_TIER_70', 0.14),
+        'kelly_fraction_tier_60_70':    getattr(config, 'KELLY_TIER_60', 0.12),
+        'kelly_fraction_tier_50_60':    getattr(config, 'KELLY_TIER_50', 0.10),
+        'kelly_fraction_tier_40_50':    getattr(config, 'KELLY_TIER_40', 0.07),
+        'kelly_fraction_tier_25_40':    getattr(config, 'KELLY_TIER_25', 0.05),
         'max_position_pct':         getattr(_cfg, 'MAX_POSITION_PCT', 0.01),
         'max_add_allocation':       getattr(_cfg, 'MAX_ADD_ALLOCATION', 50.0),
         'daily_cap_ratio':          DAILY_CAP_RATIO,
-        'min_edge_weather':         MIN_EDGE['weather'],
-        'min_edge_crypto':          MIN_EDGE['crypto'],
-        'min_edge_geo':             MIN_EDGE['geo'],
-        'min_edge_econ':            MIN_EDGE['econ'],
-        'min_edge_fed':             MIN_EDGE['fed'],
-        'min_edge_crypto_15m':      MIN_EDGE['crypto_15m'],
+        'min_edge_weather_band':         MIN_EDGE.get('weather_band', 0.12),
+        'min_edge_weather_threshold':    MIN_EDGE.get('weather_threshold', 0.12),
+        'min_edge_crypto_1h_band':       MIN_EDGE.get('crypto_1h_band', 0.12),
+        'min_edge_crypto_15m_dir':       MIN_EDGE.get('crypto_15m_dir', 0.12),
+        'min_edge_crypto_1h_dir':        MIN_EDGE.get('crypto_1h_dir', 0.08),
+        'min_edge_geo':                  MIN_EDGE.get('geo', 0.15),
+        'min_edge_econ_cpi':             MIN_EDGE.get('econ_cpi', 0.12),
+        'min_edge_econ_unemployment':    MIN_EDGE.get('econ_unemployment', 0.12),
+        'min_edge_econ_fed_rate':        MIN_EDGE.get('econ_fed_rate', 0.12),
+        'min_edge_econ_recession':       MIN_EDGE.get('econ_recession', 0.12),
         'min_confidence':           MIN_CONFIDENCE,
         'min_hours_to_entry':       MIN_HOURS_ENTRY,
         'min_hours_to_add':         MIN_HOURS_ADD,
-        'exit_95c_rule_threshold':  95,
-        'exit_gain_threshold':      0.70,
+        'exit_95c_rule_threshold':  getattr(config, 'EXIT_95C_THRESHOLD', 95),
+        'exit_gain_threshold':      getattr(config, 'EXIT_GAIN_PCT', 0.70),
         'reversal_full_threshold':  0.35,
         'reversal_half_threshold':  0.20,
         'reversal_trim_threshold':  0.10,

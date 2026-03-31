@@ -46,13 +46,26 @@ def get_environment():
     return cfg.get('environment', 'demo')
 
 # Daily cap per module — percentage of total capital (scaled dynamically)
-WEATHER_DAILY_CAP_PCT = 0.07   # 7% of capital/day
-CRYPTO_DAILY_CAP_PCT  = 0.07   # 7% of capital/day
+WEATHER_DAILY_CAP_PCT = 0.07   # DEPRECATED — use WEATHER_BAND_DAILY_CAP_PCT / WEATHER_THRESHOLD_DAILY_CAP_PCT
+CRYPTO_DAILY_CAP_PCT  = 0.07   # DEPRECATED — use CRYPTO_1H_BAND_DAILY_CAP_PCT
 GEO_DAILY_CAP_PCT     = 0.04   # 4% of capital/day
-ECON_DAILY_CAP_PCT    = 0.04   # 4% of capital/day
-FED_DAILY_CAP_PCT        = 0.03   # 3% of capital/day (fed trades are rare/high-conviction)
-CRYPTO_15M_DAILY_CAP_PCT = 0.10   # 10% of capital/day — canary threshold; not enforced
-                                   # Strategist to tune after 30 trades
+ECON_DAILY_CAP_PCT    = 0.04   # DEPRECATED — use ECON_CPI_DAILY_CAP_PCT / ECON_UNEMPLOYMENT_DAILY_CAP_PCT / ECON_RECESSION_DAILY_CAP_PCT
+FED_DAILY_CAP_PCT        = 0.03   # DEPRECATED — use ECON_FED_RATE_DAILY_CAP_PCT
+CRYPTO_15M_DAILY_CAP_PCT = 0.10   # DEPRECATED — use CRYPTO_15M_DIR_DAILY_CAP_PCT
+
+# ── Per-Module Daily Cap Percentages (new taxonomy keys) ─────────────────────
+# These are read by strategy.py should_enter() via: module.upper() + '_DAILY_CAP_PCT'
+# Legacy keys (WEATHER_DAILY_CAP_PCT etc.) kept for data_agent.py backward compat
+# until data_agent.py is updated. Remove legacy keys in follow-up.
+WEATHER_BAND_DAILY_CAP_PCT      = 0.07   # was WEATHER_DAILY_CAP_PCT
+WEATHER_THRESHOLD_DAILY_CAP_PCT = 0.07   # same budget as band
+CRYPTO_1H_BAND_DAILY_CAP_PCT    = 0.07   # was CRYPTO_DAILY_CAP_PCT
+CRYPTO_1H_DIR_DAILY_CAP_PCT     = 0.15   # from CRYPTO_1D_DAILY_CAP_PCT (already exists)
+CRYPTO_15M_DIR_DAILY_CAP_PCT    = 0.10   # was CRYPTO_15M_DAILY_CAP_PCT (canary)
+ECON_CPI_DAILY_CAP_PCT          = 0.04   # was ECON_DAILY_CAP_PCT
+ECON_UNEMPLOYMENT_DAILY_CAP_PCT = 0.04
+ECON_FED_RATE_DAILY_CAP_PCT     = 0.03   # was FED_DAILY_CAP_PCT
+ECON_RECESSION_DAILY_CAP_PCT    = 0.04
 
 # Per-trade position size cap — percentage of total capital
 MAX_POSITION_PCT = 0.01   # 1% of capital per trade (replaces fixed $25 caps)
@@ -109,21 +122,25 @@ MIN_HOURS_TO_CLOSE = 4.0
 
 # Minimum hours to settlement before allowing entry — per module
 # Default (hourly/daily markets): 0.5h (30 min)
-# crypto_15m: 0.04h (≈2.4 min) — 15m window is only 0.25h total; timing gate is the binding constraint
+# crypto_15m_dir: 0.04h (≈2.4 min) — 15m window is only 0.25h total; timing gate is the binding constraint
 MIN_HOURS_ENTRY = {
-    'default':    0.5,
-    'crypto_15m': 0.04,   # 2.4 min remaining — allows all primary + secondary window entries
-    'crypto_1d':  2.0,    # hard cutoff at 15:00 ET = 2h before 17:00 settlement
+    'default':        0.5,
+    'crypto_15m_dir': 0.04,   # ≈2.4 min remaining — allows all primary + secondary window entries
+    'crypto_1h_dir':  2.0,    # hard cutoff at 15:00 ET = 2h before 17:00 settlement
 }
 
 # Minimum confidence thresholds per module
 MIN_CONFIDENCE = {
-    'weather':    0.25,
-    'crypto':     0.50,
-    'fed':        0.55,
-    'geo':        0.50,
-    'crypto_15m': 0.50,
-    'econ':       0.55,
+    'weather_band':      0.25,
+    'weather_threshold': 0.25,
+    'crypto_1h_band':    0.50,
+    'crypto_1h_dir':     0.50,
+    'crypto_15m_dir':    0.50,   # Phase 2 changes this to 0.40
+    'econ_cpi':          0.55,
+    'econ_unemployment': 0.55,
+    'econ_fed_rate':     0.55,
+    'econ_recession':    0.55,
+    'geo':               0.50,
 }
 
 # ── Volume-Tier Edge Discounting ──────────────────────────────────────────────
@@ -157,6 +174,16 @@ CRYPTO_15M_WINDOW_CAP_PCT           = 0.02   # 2% of capital per 15-min window (
 CRYPTO_15M_DAILY_WAGER_CAP_PCT      = 0.60   # 60% backstop — raised to give strategy gate more room; CB is the daily hard stop
 CRYPTO_15M_CIRCUIT_BREAKER_N        = 3      # consecutive complete-loss windows before halt
 CRYPTO_15M_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop — halt all crypto_15m entries for rest of trading day
+
+# ── crypto_15m_dir Signal Weights ────────────────────────────────────────────
+CRYPTO_15M_DIR_W_TFI  = 0.42   # Taker Flow Imbalance weight
+CRYPTO_15M_DIR_W_OBI  = 0.25   # Orderbook Imbalance weight
+CRYPTO_15M_DIR_W_MACD = 0.15   # MACD Histogram weight
+CRYPTO_15M_DIR_W_OI   = 0.18   # Open Interest Delta weight
+# Must sum to 1.0; Optimizer owns these values
+
+CRYPTO_15M_DIR_HARD_CAP_USD     = 100.0   # absolute per-trade dollar cap (half-Kelly formula)
+CRYPTO_15M_DIR_MIN_POSITION_USD =   5.0   # minimum viable trade size
 CRYPTO_15M_MAX_SPREAD        = 25     # DATA COLLECTION: 25c max spread (was 15)
 CRYPTO_15M_THIN_MARKET_RATIO = 0.01   # DATA COLLECTION: 1% of 30d avg vol (was 0.05)
 CRYPTO_15M_MIN_CONVICTION    = 0.05   # DATA COLLECTION: min |raw_score| (was hardcoded 0.15)
@@ -257,3 +284,40 @@ TTYPE_ENABLED = True
 
 # ── Capital Fallback ─────────────────────────────────────────────────────────
 CAPITAL_FALLBACK = 10000.0  # fallback capital when API unavailable
+
+# ── Position Exit Thresholds ─────────────────────────────────────────────────
+EXIT_95C_THRESHOLD = 95     # cents — auto-exit YES position if bid >= this
+EXIT_GAIN_PCT      = 0.70   # fraction of max upside — auto-exit at this gain
+
+# ── Minimum Edge per Module (strategy gate) ───────────────────────────────────
+# These are the STRATEGY GATE minimums — a secondary check in should_enter().
+# Individual modules may also have local edge gates (e.g. CRYPTO_15M_MIN_EDGE).
+MIN_EDGE_WEATHER_BAND      = 0.12
+MIN_EDGE_WEATHER_THRESHOLD = 0.12
+MIN_EDGE_CRYPTO_1H_BAND    = 0.12
+MIN_EDGE_CRYPTO_15M_DIR    = 0.12   # strategy gate; local gate = CRYPTO_15M_MIN_EDGE (0.02)
+MIN_EDGE_CRYPTO_1H_DIR     = 0.08
+MIN_EDGE_GEO               = 0.15
+MIN_EDGE_ECON_CPI          = 0.12
+MIN_EDGE_ECON_UNEMPLOYMENT = 0.12
+MIN_EDGE_ECON_FED_RATE     = 0.12
+MIN_EDGE_ECON_RECESSION    = 0.12
+
+# ── Strategy Gate Scalars ─────────────────────────────────────────────────────
+STRATEGY_MIN_CONFIDENCE_FLOOR = 0.25   # universal fallback when module not in MIN_CONFIDENCE dict
+STRATEGY_MIN_HOURS_ADD        =  2.0   # min hours to settlement to allow add-on
+DAILY_CAP_RATIO               =  0.70  # max fraction of capital deployable per day (also: global exposure cap)
+
+# ── Confidence-Tiered Kelly Fractions ─────────────────────────────────────────
+# Higher confidence → larger Kelly fraction. Optimizer owns these values.
+# All tiers compressed (vs full Kelly) — unvalidated calibration phase.
+KELLY_TIER_80 = 0.16   # 80%+ confidence
+KELLY_TIER_70 = 0.14   # 70–80%
+KELLY_TIER_60 = 0.12   # 60–70%
+KELLY_TIER_50 = 0.10   # 50–60%
+KELLY_TIER_40 = 0.07   # 40–50%
+KELLY_TIER_25 = 0.05   # 25–40% (data accumulation floor)
+
+# ── 1h Band Circuit Breaker ───────────────────────────────────────────────────
+CRYPTO_1H_CIRCUIT_BREAKER_N        = 3      # consecutive complete-loss windows before halt
+CRYPTO_1H_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop; True = log only

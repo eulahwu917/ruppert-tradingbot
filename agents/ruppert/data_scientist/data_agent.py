@@ -53,18 +53,45 @@ REQUIRED_FIELDS = ['ticker', 'side', 'size_dollars', 'module', 'ts_or_timestamp'
 _REAL_REQUIRED = ['ticker', 'side', 'size_dollars', 'module']
 
 TICKER_MODULE_MAP = {
-    'KXHIGHT': 'weather', 'KXHIGHNY': 'weather', 'KXHIGHMI': 'weather',
-    'KXHIGHCH': 'weather', 'KXHIGHDE': 'weather', 'KXHIGHLAX': 'weather',
-    'KXHIGHAUS': 'weather', 'KXHIGHSE': 'weather', 'KXHIGHSF': 'weather',
-    'KXHIGHPH': 'weather', 'KXHIGHLV': 'weather', 'KXHIGHSA': 'weather',
-    'KXHIGHMIA': 'weather', 'KXHIGHAT': 'weather',
-    'KXBTC': 'crypto', 'KXETH': 'crypto', 'KXXRP': 'crypto',
-    'KXDOGE': 'crypto', 'KXSOL': 'crypto',
-    'KXBTC15M': 'crypto_15m', 'KXETH15M': 'crypto_15m',
-    'KXXRP15M': 'crypto_15m', 'KXDOGE15M': 'crypto_15m',
-    'KXCPI': 'econ', 'KXPCE': 'econ', 'KXJOBS': 'econ',
-    'KXFED': 'fed', 'KXFOMC': 'fed',
-    'KXBTCMAX': 'crypto_long', 'KXBTCMIN': 'crypto_long',
+    # ── Weather ──────────────────────────────────────────────────────────────
+    # NOTE: KXHIGH* can be weather_band (-B*) or weather_threshold (-T*).
+    # Prefix-only maps cannot distinguish. These default to 'weather_band'.
+    # check_module_mismatch() should migrate to classify_module() for full accuracy.
+    'KXHIGHT':   'weather_band', 'KXHIGHNY':  'weather_band',
+    'KXHIGHMI':  'weather_band', 'KXHIGHCH':  'weather_band',
+    'KXHIGHDE':  'weather_band', 'KXHIGHLAX': 'weather_band',
+    'KXHIGHAUS': 'weather_band', 'KXHIGHSE':  'weather_band',
+    'KXHIGHSF':  'weather_band', 'KXHIGHPH':  'weather_band',
+    'KXHIGHLV':  'weather_band', 'KXHIGHSA':  'weather_band',
+    'KXHIGHMIA': 'weather_band', 'KXHIGHAT':  'weather_band',
+
+    # ── Crypto 15m direction ─────────────────────────────────────────────────
+    # Must appear BEFORE base prefixes (KXBTC, KXETH, etc.)
+    'KXBTC15M':  'crypto_15m_dir', 'KXETH15M':  'crypto_15m_dir',
+    'KXXRP15M':  'crypto_15m_dir', 'KXDOGE15M': 'crypto_15m_dir',
+    'KXSOL15M':  'crypto_15m_dir',   # was missing
+
+    # ── Crypto 1h direction (above/below daily) ───────────────────────────────
+    'KXBTCD':    'crypto_1h_dir',  'KXETHD':    'crypto_1h_dir',
+    'KXSOLD':    'crypto_1h_dir',
+
+    # ── Crypto 1h band (range prediction) ────────────────────────────────────
+    'KXBTC':     'crypto_1h_band', 'KXETH':     'crypto_1h_band',
+    'KXXRP':     'crypto_1h_band', 'KXDOGE':    'crypto_1h_band',
+    'KXSOL':     'crypto_1h_band',
+
+    # ── Econ subcategories ────────────────────────────────────────────────────
+    'KXCPI':     'econ_cpi',          # CPI
+    'KXPCE':     'econ_cpi',          # PCE (same bucket as CPI)
+    'KXJOBS':    'econ_unemployment',  # Jobs report
+    'KXJOBLSS':  'econ_unemployment',  # KXJOBLESSCLAIMS prefix
+    'KXUE':      'econ_unemployment',  # Unemployment rate
+    'KXFED':     'econ_fed_rate',
+    'KXFOMC':    'econ_fed_rate',
+    'KXWRECSS':  'econ_recession',
+
+    # ── Crypto long-horizon ───────────────────────────────────────────────────
+    'KXBTCMAX':  'crypto_long', 'KXBTCMIN':  'crypto_long',
     'KXETHMAXM': 'crypto_long', 'KXETHMINY': 'crypto_long',
     'KXBTCMAXY': 'crypto_long', 'KXBTCMINY': 'crypto_long',
     'KXETHMAXY': 'crypto_long', 'KXBTC2026': 'crypto_long',
@@ -292,13 +319,17 @@ def check_daily_cap_violations(trades_today: list[dict]) -> list[dict]:
         return []
 
     caps = {
-        'weather': capital * getattr(cfg, 'WEATHER_DAILY_CAP_PCT', 0.07),
-        'crypto': capital * getattr(cfg, 'CRYPTO_DAILY_CAP_PCT', 0.07),
-        'econ': capital * getattr(cfg, 'ECON_DAILY_CAP_PCT', 0.04),
-        'fed': capital * getattr(cfg, 'FED_DAILY_CAP_PCT', 0.03),
-        'crypto_15m': capital * getattr(cfg, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04),
-        'crypto_long': capital * getattr(cfg, 'LONG_HORIZON_DAILY_CAP_PCT', 0.10),
-        'geo': capital * getattr(cfg, 'GEO_DAILY_CAP_PCT', 0.04),
+        'weather_band':      capital * getattr(cfg, 'WEATHER_BAND_DAILY_CAP_PCT',      0.07),
+        'weather_threshold': capital * getattr(cfg, 'WEATHER_THRESHOLD_DAILY_CAP_PCT', 0.07),
+        'crypto_1h_band':    capital * getattr(cfg, 'CRYPTO_1H_BAND_DAILY_CAP_PCT',    0.07),
+        'crypto_1h_dir':     capital * getattr(cfg, 'CRYPTO_1H_DIR_DAILY_CAP_PCT',     0.15),
+        'crypto_15m_dir':    capital * getattr(cfg, 'CRYPTO_15M_DIR_DAILY_CAP_PCT',    0.10),
+        'crypto_long':       capital * getattr(cfg, 'LONG_HORIZON_DAILY_CAP_PCT',      0.10),
+        'econ_cpi':          capital * getattr(cfg, 'ECON_CPI_DAILY_CAP_PCT',          0.04),
+        'econ_unemployment': capital * getattr(cfg, 'ECON_UNEMPLOYMENT_DAILY_CAP_PCT', 0.04),
+        'econ_fed_rate':     capital * getattr(cfg, 'ECON_FED_RATE_DAILY_CAP_PCT',     0.03),
+        'econ_recession':    capital * getattr(cfg, 'ECON_RECESSION_DAILY_CAP_PCT',    0.04),
+        'geo':               capital * getattr(cfg, 'GEO_DAILY_CAP_PCT',               0.04),
     }
 
     by_module = {}

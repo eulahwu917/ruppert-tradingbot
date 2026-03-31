@@ -59,11 +59,11 @@ ASSET_SYMBOLS = {
     'SOL':  'SOL-USDT-SWAP',
 }
 
-# Signal weights — must sum to 1.0
-W_TFI  = 0.42
-W_OBI  = 0.25
-W_MACD = 0.15
-W_OI   = 0.18
+# Signal weights — must sum to 1.0 (config-driven)
+W_TFI  = getattr(config, 'CRYPTO_15M_DIR_W_TFI',  0.42)
+W_OBI  = getattr(config, 'CRYPTO_15M_DIR_W_OBI',  0.25)
+W_MACD = getattr(config, 'CRYPTO_15M_DIR_W_MACD', 0.15)
+W_OI   = getattr(config, 'CRYPTO_15M_DIR_W_OI',   0.18)
 
 from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.strategist.strategy import should_enter
@@ -1126,14 +1126,17 @@ def evaluate_crypto_15m_entry(
     kelly_full = (P_win - c) / denom
     kelly_half = kelly_full / 2.0
 
+    _hard_cap  = getattr(config, 'CRYPTO_15M_DIR_HARD_CAP_USD', 100.0)
+    _min_size  = getattr(config, 'CRYPTO_15M_DIR_MIN_POSITION_USD', 5.0)
+
     position_usd = min(
         kelly_half * capital,
         capital * getattr(config, 'MAX_POSITION_PCT', 0.01),
-        100.0,  # hard $100 cap
+        _hard_cap,
     )
-    position_usd = max(position_usd, 5.0)  # minimum viable
+    position_usd = max(position_usd, _min_size)
 
-    if position_usd < 5.0:
+    if position_usd < _min_size:
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
                        signals, kalshi_info, 'SKIP', 'SIZE_TOO_SMALL',
                        edge, entry_price, position_usd)

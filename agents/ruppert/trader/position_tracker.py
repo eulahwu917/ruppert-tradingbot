@@ -31,9 +31,9 @@ TRACKER_FILE = _env_paths['logs'] / 'tracked_positions.json'
 LOGS_DIR = _env_paths['logs']
 TRADES_DIR = _env_paths['trades']  # P0-1 fix: trade files go to logs/trades/
 
-# Exit thresholds (match existing post_trade_monitor rules)
-EXIT_95C_THRESHOLD = 95       # cents — auto-exit if bid >= 95c
-EXIT_GAIN_PCT = 0.70          # 70% of max profit — auto-exit
+# Exit thresholds — config-driven (fallbacks preserve current behavior)
+EXIT_95C_THRESHOLD = getattr(config, 'EXIT_95C_THRESHOLD', 95)
+EXIT_GAIN_PCT      = getattr(config, 'EXIT_GAIN_PCT', 0.70)
 
 
 # ─────────────────────────────── In-memory state ──────────────────────────────
