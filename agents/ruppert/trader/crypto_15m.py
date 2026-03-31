@@ -846,7 +846,7 @@ def evaluate_crypto_15m_entry(
     from agents.ruppert.data_scientist.capital import get_capital
     from agents.ruppert.data_scientist.logger import log_trade, log_activity, get_daily_exposure
     from agents.ruppert.data_analyst.kalshi_client import KalshiClient
-    from agents.ruppert.trader.position_monitor import load_traded_tickers, push_alert
+    from agents.ruppert.trader.utils import load_traded_tickers, push_alert
 
     asset = _parse_asset_from_ticker(ticker)
     if not asset:

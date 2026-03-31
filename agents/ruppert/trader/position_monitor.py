@@ -1,19 +1,10 @@
+# WS mode retired 2026-03-31. Use ws_feed.py. This module is now polling-only.
 """
-position_monitor.py — replaces post_trade_monitor.py
-Combines existing poll-based logic with native WebSocket subscriptions.
+position_monitor.py — polling-only position monitor (WS mode retired 2026-03-31)
 
 Architecture:
-  - WS mode (default): event-driven settlement + price ticks for 14 minutes
-  - Poll mode (fallback): existing logic if WS unavailable
-
-Settlement handling:
-  - WebSocket: instant notification via orderbook/ticker channel
-  - Polling backstop: every 5 min inside WS loop as safety net
-
-Crypto real-time entry:
-  - WebSocket price ticks trigger evaluate_crypto_entry()
-  - Band probability computed on each tick
-  - Entry if edge > threshold AND ticker not already traded
+  - Poll mode: existing logic for settlement, exit, and position checks
+  - WS mode stubs remain but raise RuntimeError — use ws_feed.py directly
 
 Usage: python position_monitor.py
 """
@@ -58,7 +49,7 @@ TRADES_DIR.mkdir(parents=True, exist_ok=True)
 
 import config
 from scripts.event_logger import log_event
-# DRY_RUN intentionally not captured at module level — read at call time (see evaluate_crypto_entry)
+DRY_RUN = getattr(config, 'DRY_RUN', True)  # module-level for smoke test; read fresh at call time inside functions
 
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from agents.ruppert.data_scientist.logger import (
@@ -83,14 +74,8 @@ def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
-def push_alert(level, message, ticker=None, pnl=None):
-    """Log alert candidate event. Data Scientist decides if it's alertworthy."""
-    log_event('ALERT_CANDIDATE', {
-        'level': level,
-        'message': message,
-        'ticker': ticker,
-        'pnl': pnl,
-    })
+# push_alert moved to agents.ruppert.trader.utils (2026-03-31)
+from agents.ruppert.trader.utils import push_alert
 
 
 # ─────────────────────────────── Position Loading ─────────────────────────────
@@ -139,24 +124,8 @@ def load_open_positions():
     return [rec for key, rec in entries_by_key.items() if key not in exit_keys]
 
 
-def load_traded_tickers() -> set:
-    """Load set of already-traded tickers for dedup."""
-    today = date.today().isoformat()
-    trade_log = TRADES_DIR / f"trades_{today}.jsonl"
-    tickers = set()
-    
-    if trade_log.exists():
-        for line in trade_log.read_text(encoding='utf-8').splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-                if rec.get('action') not in ('exit', 'settle'):
-                    tickers.add(rec.get('ticker', ''))
-            except Exception:
-                pass
-    return tickers
+# load_traded_tickers moved to agents.ruppert.trader.utils (2026-03-31)
+from agents.ruppert.trader.utils import load_traded_tickers
 
 
 # ─────────────────────────────── Settlement Handler ───────────────────────────
@@ -547,145 +516,8 @@ def run_polling_scan(client: KalshiClient, run_settlement_check: bool = True):
 # ─────────────────────────────── WebSocket Mode ───────────────────────────────
 
 async def run_ws_mode(client: KalshiClient):
-    """
-    Run WebSocket event-driven mode for 14 minutes.
-    
-    Flow:
-    1. Full polling scan at start (auto-exit + weather alerts, skip settlement)
-    2. Connect WebSocket, subscribe to open position tickers + crypto markets
-    3. Event loop: handle settlements and crypto price ticks
-    4. Polling backstop every 5 minutes
-    """
-    try:
-        from ws.connection import KalshiWebSocket
-    except ImportError as e:
-        print(f"  [WS] Import failed: {e} — falling back to polling")
-        run_polling_mode(client)
-        return
-    
-    print(f"\n{'='*60}")
-    print(f"  POSITION MONITOR (WebSocket Mode)  {ts()}")
-    print(f"{'='*60}")
-    
-    # 1. Initial polling scan (skip settlement — WS will handle it)
-    print("\n  [Phase 1] Initial polling scan...")
-    run_polling_scan(client, run_settlement_check=False)
-    
-    # 2. Build subscription list
-    positions = load_open_positions()
-    position_tickers = [p.get('ticker', '') for p in positions if p.get('ticker')]
-    
-    # Add active crypto markets for real-time entry
-    crypto_tickers = []
-    try:
-        for series in ['KXBTC', 'KXETH'] + CRYPTO_15M_SERIES:
-            markets = client.get_markets(series_ticker=series, status='open', limit=5 if series in CRYPTO_15M_SERIES else 25)
-            crypto_tickers.extend([m.get('ticker', '') for m in markets])
-    except Exception as e:
-        print(f"  [WS] Could not fetch crypto markets: {e}")
-
-    all_tickers = list(set(filter(None, position_tickers + crypto_tickers)))
-    
-    if not all_tickers:
-        print("  [WS] No tickers to subscribe — falling back to polling")
-        run_polling_scan(client, run_settlement_check=True)
-        return
-    
-    print(f"  [Phase 2] Subscribing to {len(all_tickers)} tickers...")
-    
-    # 3. Connect WebSocket
-    ws = KalshiWebSocket(
-        api_key_id=config.get_api_key_id(),
-        private_key_path=config.get_private_key_path(),
-        environment=config.get_environment(),
-    )
-    
-    connected = await ws.connect()
-    if not connected:
-        print("  [WS] Connection failed — falling back to polling")
-        run_polling_scan(client, run_settlement_check=True)
-        return
-    
-    await ws.subscribe_ticker(all_tickers)
-    await ws.subscribe_fills()
-    
-    # 4. Event loop
-    print(f"  [Phase 3] Event loop ({WS_EVENT_LOOP_DURATION}s)...")
-    
-    start_time = asyncio.get_running_loop().time()
-    last_backstop = start_time
-    settled_tickers = set()  # Avoid re-settling
-    
-    try:
-        async for msg in ws.messages():
-            now = asyncio.get_running_loop().time()
-            elapsed = now - start_time
-            
-            # Check duration
-            if elapsed >= WS_EVENT_LOOP_DURATION:
-                print(f"  [WS] Event loop complete ({elapsed:.0f}s)")
-                break
-            
-            # Polling backstop every 5 min
-            if now - last_backstop >= POLL_BACKSTOP_INTERVAL:
-                print(f"  [WS Backstop] Running polling scan...")
-                run_polling_scan(client, run_settlement_check=True)
-                last_backstop = now
-            
-            # Handle message
-            msg_type = msg.get('type')
-            
-            if msg_type == 'ticker':
-                ticker = msg.get('market_ticker', '')
-                yes_ask = msg.get('yes_ask')
-                yes_bid = msg.get('yes_bid')
-                close_time = msg.get('close_time')
-                open_time = msg.get('open_time')
-
-                # Route 15-min crypto direction tickers to new evaluator
-                if any(ticker.upper().startswith(s) for s in CRYPTO_15M_SERIES):
-                    if yes_ask and yes_bid:
-                        try:
-                            from agents.ruppert.trader.crypto_15m import evaluate_crypto_15m_entry
-                            evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time)
-                        except Exception as e:
-                            logger.warning('[WS] 15m crypto eval error: %s', e)
-                # Hourly band crypto tickers → existing evaluator
-                elif any(ticker.upper().startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE')):
-                    if yes_ask and yes_bid:
-                        evaluate_crypto_entry(ticker, yes_ask, yes_bid, close_time)
-
-                # Check for settlement (price at 99 or 1)
-                # Use yes_bid: settlement is confirmed when buyers bid at 99c (YES) or 1c (NO).
-                # yes_ask alone is unreliable — a stale 99c ask on an illiquid market is not settlement.
-                if yes_bid is not None and ticker not in settled_tickers:
-                    if yes_bid >= 99:
-                        _settle_single_ticker(ticker, 'yes')
-                        settled_tickers.add(ticker)
-                    elif yes_bid <= 1:
-                        _settle_single_ticker(ticker, 'no')
-                        settled_tickers.add(ticker)
-            
-            elif msg_type == 'fill':
-                # Log fill confirmation
-                order_id = msg.get('order_id', '')
-                ticker = msg.get('market_ticker', '')
-                print(f"  [WS Fill] Order {order_id} filled for {ticker}")
-    
-    except asyncio.TimeoutError:
-        print(f"  [WS] Event loop timeout")
-    except Exception as e:
-        print(f"  [WS] Error: {e}")
-        import traceback
-        traceback.print_exc()
-    finally:
-        await ws.close()
-    
-    # Final polling scan
-    print("  [Phase 4] Final polling scan...")
-    run_polling_scan(client, run_settlement_check=True)
-    
-    print(f"\nWebSocket monitor complete. {ts()}")
+    """WS mode retired 2026-03-31. Use ws_feed.py directly."""
+    raise RuntimeError("WS mode retired — use ws_feed.py directly")
 
 
 # ─────────────────────────────── Persistent WS Mode ──────────────────────────
@@ -701,132 +533,8 @@ def _in_market_hours() -> bool:
 
 
 async def run_persistent_ws_mode():
-    """
-    Persistent WebSocket session that runs continuously during market hours.
-    Separate from the 15-min polling task — this is the real-time crypto entry path.
-
-    Lifecycle:
-      - Connects WS and subscribes to active crypto markets
-      - Processes ticker events for real-time crypto entry
-      - Re-fetches ticker list every 15 min (markets open/close)
-      - Reconnects automatically on disconnect
-      - Exits cleanly outside market hours (6AM–11PM)
-    """
-    try:
-        from ws.connection import KalshiWebSocket, WS_AVAILABLE
-        if not WS_AVAILABLE:
-            print("  [Persistent WS] websockets package not installed — exiting")
-            return
-    except ImportError as e:
-        print(f"  [Persistent WS] Import failed: {e}")
-        return
-
-    print(f"\n{'='*60}")
-    print(f"  PERSISTENT WS SESSION — {ts()}")
-    print(f"  Market hours: {PERSISTENT_MARKET_HOUR_START}:00–{PERSISTENT_MARKET_HOUR_END}:00")
-    print(f"{'='*60}\n")
-    log_activity('[WS] Persistent WebSocket session started')
-
-    client = KalshiClient()
-
-    while _in_market_hours():
-        # Build subscription list from active crypto markets
-        crypto_tickers = []
-        try:
-            for series in ['KXBTC', 'KXETH'] + CRYPTO_15M_SERIES:
-                markets = client.get_markets(series_ticker=series, status='open', limit=5 if series in CRYPTO_15M_SERIES else 25)
-                crypto_tickers.extend([m.get('ticker', '') for m in markets])
-        except Exception as e:
-            print(f"  [Persistent WS] Could not fetch crypto markets: {e}")
-
-        crypto_tickers = list(set(filter(None, crypto_tickers)))
-        if not crypto_tickers:
-            print(f"  [Persistent WS] No crypto tickers — sleeping 60s")
-            await asyncio.sleep(60)
-            continue
-
-        print(f"  [WS] Connecting ({len(crypto_tickers)} tickers)...")
-
-        ws = KalshiWebSocket(
-            api_key_id=config.get_api_key_id(),
-            private_key_path=config.get_private_key_path(),
-            environment=config.get_environment(),
-        )
-
-        connected = await ws.connect()
-        if not connected:
-            print(f"  [Persistent WS] Connection failed — retry in 30s")
-            log_activity('[WS] Connection failed, retrying in 30s')
-            await asyncio.sleep(30)
-            continue
-
-        await ws.subscribe_ticker(crypto_tickers)
-        print(f"  [WS] Connected and subscribed at {ts()}")
-        log_activity(f'[WS] Connected, subscribed to {len(crypto_tickers)} crypto tickers')
-
-        last_resub = asyncio.get_running_loop().time()
-
-        try:
-            async for msg in ws.messages():
-                # Exit outside market hours
-                if not _in_market_hours():
-                    print(f"  [Persistent WS] Outside market hours — shutting down")
-                    break
-
-                now = asyncio.get_running_loop().time()
-
-                # Periodically re-fetch ticker list
-                if now - last_resub >= PERSISTENT_RESUB_INTERVAL:
-                    new_tickers = []
-                    try:
-                        for series in ['KXBTC', 'KXETH'] + CRYPTO_15M_SERIES:
-                            markets = client.get_markets(series_ticker=series, status='open', limit=5 if series in CRYPTO_15M_SERIES else 25)
-                            new_tickers.extend([m.get('ticker', '') for m in markets])
-                    except Exception:
-                        pass
-                    new_tickers = list(set(filter(None, new_tickers)))
-                    added = set(new_tickers) - set(crypto_tickers)
-                    if added:
-                        await ws.subscribe_ticker(list(added))
-                        print(f"  [WS] Re-subscribed, added {len(added)} new tickers")
-                    crypto_tickers = new_tickers
-                    last_resub = now
-
-                # Handle ticker messages for crypto entry
-                msg_type = msg.get('type')
-                if msg_type == 'ticker':
-                    ticker = msg.get('market_ticker', '')
-                    yes_ask = msg.get('yes_ask')
-                    yes_bid = msg.get('yes_bid')
-                    close_time = msg.get('close_time')
-                    open_time = msg.get('open_time')
-
-                    # Route 15-min direction tickers to new evaluator
-                    if any(ticker.upper().startswith(s) for s in CRYPTO_15M_SERIES):
-                        if yes_ask and yes_bid:
-                            try:
-                                from agents.ruppert.trader.crypto_15m import evaluate_crypto_15m_entry
-                                evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time)
-                            except Exception as e:
-                                logger.warning('[Persistent WS] 15m crypto eval error: %s', e)
-                    # Hourly band tickers → existing evaluator
-                    elif any(ticker.upper().startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE')):
-                        if yes_ask and yes_bid:
-                            evaluate_crypto_entry(ticker, yes_ask, yes_bid, close_time)
-
-        except Exception as e:
-            print(f"  [Persistent WS] Error: {e}")
-            import traceback
-            traceback.print_exc()
-        finally:
-            await ws.close()
-
-        if _in_market_hours():
-            print(f"  [Persistent WS] Disconnected — reconnecting in 5s...")
-            await asyncio.sleep(5)
-
-    print(f"\n  [Persistent WS] Session ended at {ts()}")
-    log_activity('[WS] Persistent WebSocket session ended (outside market hours)')
+    """Persistent WS mode retired 2026-03-31. Use ws_feed.py directly."""
+    raise RuntimeError("WS mode retired — use ws_feed.py directly")
 
 
 # ─────────────────────────────── Polling Mode (Fallback) ──────────────────────

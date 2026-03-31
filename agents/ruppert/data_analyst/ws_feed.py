@@ -17,9 +17,10 @@ import sys
 import os
 import asyncio
 import json
+import math
 import time
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 
 # Resolve workspace root and add to path for env_config
@@ -42,6 +43,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
 import config
+from scripts.event_logger import log_event
 import agents.ruppert.data_analyst.market_cache as market_cache
 import agents.ruppert.trader.position_tracker as position_tracker
 
@@ -279,6 +281,226 @@ async def _fallback_poll_loop() -> None:
             logger.warning('[WS Feed] Fallback poll error: %s', e)
 
 
+# ─────────────────────────────── Crypto Hourly Entry Evaluator ───────────────
+
+def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: str = None):
+    """
+    Evaluate crypto market for entry based on WebSocket price tick.
+
+    Called on each ticker update for crypto markets.
+    Uses band_prob model to compute edge vs live price.
+    """
+    from agents.ruppert.trader.crypto_client import (
+        get_btc_signal, get_eth_signal, get_xrp_signal, get_doge_signal,
+        _band_probability, _t_cdf, ASSET_CONFIG, compute_composite_confidence
+    )
+    from agents.ruppert.strategist.strategy import should_enter, calculate_position_size
+    from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
+    from agents.ruppert.trader.utils import load_traded_tickers, push_alert
+
+    # Parse series from ticker (KXBTC, KXETH, etc.)
+    series = ticker.split('-')[0].upper()
+
+    # Determine asset
+    if 'BTC' in series:
+        asset = 'BTC'
+        signal = get_btc_signal()
+    elif 'ETH' in series:
+        asset = 'ETH'
+        signal = get_eth_signal()
+    elif 'XRP' in series:
+        asset = 'XRP'
+        signal = get_xrp_signal()
+    elif 'DOGE' in series:
+        asset = 'DOGE'
+        signal = get_doge_signal()
+    else:
+        return  # Unknown asset
+
+    current_price = signal['price']
+
+    # Parse strike from ticker (e.g., KXBTC-26MAR28-B87500 → 87500)
+    parts = ticker.split('-')
+    if len(parts) < 3:
+        return
+
+    strike_part = parts[-1]
+    strike_type = 'between'  # Default to band
+    strike = None
+
+    if strike_part.startswith('B'):
+        try:
+            strike = float(strike_part[1:])
+        except ValueError:
+            return
+        strike_type = 'between'
+    elif strike_part.startswith('T'):
+        try:
+            strike = float(strike_part[1:])
+        except ValueError:
+            return
+        strike_type = 'greater' if strike > current_price else 'less'
+    else:
+        return
+
+    # Get vol and compute sigma
+    cfg = ASSET_CONFIG[asset]
+    realized_vol = signal.get('realized_hourly_vol') or (cfg['hourly_vol_pct'] / 100)
+
+    # Parse hours to settlement from close_time if provided
+    hours_left = 4.0  # Default fallback
+    if close_time:
+        try:
+            close_dt = datetime.fromisoformat(close_time.replace('Z', '+00:00'))
+            now = datetime.now(timezone.utc)
+            hours_left = max((close_dt - now).total_seconds() / 3600, 0.1)
+        except Exception:
+            pass
+
+    sigma = current_price * realized_vol * math.sqrt(max(hours_left, 0.1))
+
+    # Compute model probability
+    if strike_type == 'between':
+        band_step = cfg['band_step']
+        low = strike - band_step / 2
+        high = strike + band_step / 2
+        model_prob = _band_probability(low, high, current_price, sigma)
+    elif strike_type == 'greater':
+        model_prob = 1.0 - _t_cdf(strike, current_price, sigma)
+    else:  # less
+        model_prob = _t_cdf(strike, current_price, sigma)
+
+    # Market probability from ask
+    market_prob = yes_ask / 100.0
+
+    # Compute edge
+    edge = model_prob - market_prob
+    side = 'yes' if edge > 0 else 'no'
+
+    # Check minimum edge threshold
+    min_edge = getattr(config, 'CRYPTO_MIN_EDGE_THRESHOLD', 0.12)
+    if abs(edge) < min_edge:
+        return
+
+    # Check if already traded
+    traded_tickers = load_traded_tickers()
+    if ticker in traded_tickers:
+        return
+
+    # Check daily cap
+    from agents.ruppert.data_scientist.capital import get_capital
+    from agents.ruppert.data_scientist.logger import get_daily_exposure
+    capital = get_capital()
+    daily_cap = capital * config.CRYPTO_DAILY_CAP_PCT
+    current_exposure = get_daily_exposure()
+
+    if current_exposure >= daily_cap:
+        logger.debug(f"Crypto daily cap reached: ${current_exposure:.2f} >= ${daily_cap:.2f}")
+        return
+
+    # Build opportunity dict
+    confidence = compute_composite_confidence(edge, yes_ask, yes_bid, hours_left)
+
+    opp = {
+        'ticker': ticker,
+        'title': f'{asset} price band',
+        'side': side,
+        'edge': round(edge, 4),
+        'win_prob': model_prob if side == 'yes' else (1 - model_prob),
+        'confidence': confidence,
+        'market_prob': market_prob,
+        'model_prob': model_prob,
+        'source': 'crypto',
+        'module': 'crypto',
+        'yes_ask': yes_ask,
+        'yes_bid': yes_bid,
+        'current_price': current_price,
+        'hours_to_settlement': hours_left,
+    }
+
+    # Compute open_position_value for strategy gate (same pattern as main.py)
+    from agents.ruppert.data_scientist.capital import get_buying_power
+    _total = get_capital()
+    _bp = get_buying_power()
+    opp['open_position_value'] = max(0.0, _total - _bp)
+
+    # Check entry via strategy
+    from agents.ruppert.strategist.strategy import should_enter, calculate_position_size
+    deployed_today = get_daily_exposure()
+    _module_deployed = get_daily_exposure('crypto')
+    module_deployed_pct = _module_deployed / capital if capital > 0 else 0.0
+    decision = should_enter(opp, capital, deployed_today, module='crypto', module_deployed_pct=module_deployed_pct, traded_tickers=None)
+    if not decision['enter']:
+        reason = decision['reason']
+        logger.debug(f"[WS Crypto] {ticker}: entry blocked — {reason}")
+        return
+
+    # Calculate position size
+    size = calculate_position_size(
+        edge=abs(edge),
+        win_prob=opp['win_prob'],
+        capital=capital,
+        confidence=confidence,
+    )
+    size = min(size, daily_cap - current_exposure, 100.0)  # $100 max per trade
+
+    if size < 5:
+        return
+
+    # Execute trade
+    from agents.ruppert.data_analyst.kalshi_client import KalshiClient
+    client = KalshiClient()
+    bet_price = yes_ask if side == 'yes' else (100 - yes_ask)
+    contracts = max(1, int(size / (bet_price / 100)))
+
+    print(f"  [WS Crypto Entry] {ticker} {side.upper()} | edge={edge:+.1%} | ${size:.2f}")
+
+    _dry_run = getattr(config, 'DRY_RUN', True)
+    if _dry_run:
+        order_result = {'dry_run': True, 'status': 'simulated'}
+    else:
+        from agents.ruppert.env_config import require_live_enabled
+        require_live_enabled()
+        try:
+            order_result = client.place_order(ticker, side, bet_price, contracts)
+        except Exception as e:
+            print(f"  [WS Crypto] Order failed: {e}")
+            return
+
+    from agents.ruppert.data_scientist.logger import log_trade, log_activity
+    opp['action'] = 'buy'
+    opp['contracts'] = contracts
+    opp['size_dollars'] = size
+    opp['timestamp'] = ts()
+    opp['date'] = str(date.today())
+    opp['scan_price'] = bet_price
+    opp['fill_price'] = bet_price
+
+    log_trade(opp, size, contracts, order_result)
+    log_activity(f'[WS-CRYPTO] Entered {ticker} {side.upper()} @ {bet_price}c | edge={edge:+.1%}')
+    log_event('TRADE_EXECUTED', {
+        'ticker': ticker,
+        'side': side,
+        'size': size,
+        'contracts': contracts,
+        'price': bet_price,
+        'dry_run': _dry_run,
+    })
+    push_alert('trade', f'WS Crypto Entry: {ticker} {side.upper()} @ {bet_price}c', ticker=ticker)
+
+    # ── Track position for WS exit monitoring ──
+    try:
+        fill_price = bet_price
+        fill_contracts = contracts
+        if not _dry_run and order_result and isinstance(order_result, dict):
+            fill_price = int(order_result.get('price', order_result.get('yes_price', bet_price)) or bet_price)
+            fill_contracts = int(order_result.get('contracts', order_result.get('count', contracts)) or contracts)
+        position_tracker.add_position(ticker, fill_contracts, side, fill_price,
+                                      module='crypto', title=opp.get('title', ''))
+    except Exception as _pt_err:
+        logger.warning('[WS-CRYPTO] position_tracker.add_position failed: %s', _pt_err)
+
+
 # ─────────────────────────────── Message Handler ──────────────────────────────
 
 async def handle_message(msg: dict):
@@ -364,7 +586,6 @@ async def handle_message(msg: dict):
     elif any(ticker_upper.startswith(p) for p in CRYPTO_HOURLY_PREFIXES):
         if yes_ask is not None and yes_bid is not None:
             try:
-                from agents.ruppert.trader.position_monitor import evaluate_crypto_entry
                 evaluate_crypto_entry(ticker, yes_ask, yes_bid, data.get('close_time'))
             except Exception as e:
                 logger.warning('[WS Feed] Crypto eval error: %s', e)
