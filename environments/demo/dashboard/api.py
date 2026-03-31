@@ -420,6 +420,15 @@ def get_trades():
             if ticker:
                 close_records[(ticker, side)] = t
 
+    # Build exit_correction records index: (ticker, side) -> correction record
+    correction_records = {}
+    for t in all_trades:
+        if t.get('action') == 'exit_correction':
+            ticker = t.get('ticker', '')
+            side = t.get('side', '')
+            if ticker:
+                correction_records[(ticker, side)] = t
+
     closed = []
     seen = set()
     for t in all_trades:
@@ -437,9 +446,22 @@ def get_trades():
             continue
 
         cr = close_records[key]
-        pnl = cr.get('pnl')
-        if pnl is not None:
-            t['realized_pnl'] = round(float(pnl), 2)
+        correction = correction_records.get(key)
+
+        if correction is not None:
+            # Correction exists — override with true_pnl
+            true_pnl = correction.get('true_pnl')
+            if true_pnl is not None:
+                t['realized_pnl'] = round(float(true_pnl), 2)
+            t['pnl_corrected'] = True
+            t['pnl_original'] = round(float(correction.get('logged_pnl', 0)), 2)
+            t['pnl_correction_reason'] = correction.get('reason', '')
+        else:
+            pnl = cr.get('pnl')
+            if pnl is not None:
+                t['realized_pnl'] = round(float(pnl), 2)
+            t['pnl_corrected'] = False
+
         t['exit_price'] = cr.get('exit_price') or cr.get('fill_price')
         t['settlement_result'] = cr.get('settlement_result', '')
         t['exit_type'] = 'settle' if cr.get('action') == 'settle' else cr.get('exit_type', 'manual')
