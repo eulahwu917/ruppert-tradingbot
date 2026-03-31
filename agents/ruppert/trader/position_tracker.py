@@ -496,8 +496,12 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
         if side == 'yes':
             pnl = (current_bid - entry_price) * quantity / 100
         else:
-            # NO position: our cost was (100 - entry_price), our exit value is (100 - current_bid)
-            pnl = ((100 - current_bid) - (100 - entry_price)) * quantity / 100
+            # NO position: entry_price and exit_price are both in NO-side cents.
+            # entry_price is stored as NO price (e.g. 70c if bought when YES=30c).
+            # exit_price (NO side) = 100 - current_bid (yes_bid).
+            # P&L = (exit_price_no - entry_price_no) * contracts / 100
+            exit_price_no = 100 - current_bid
+            pnl = (exit_price_no - entry_price) * quantity / 100
 
         _dry_run = getattr(config, 'DRY_RUN', True)
         if _dry_run:
@@ -518,6 +522,7 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
         # Entry_price is already stored as the NO price. Exit_price should match the same convention.
         exit_price_logged = current_bid if side == 'yes' else (100 - current_bid)
 
+        action_detail_price = current_bid if side == 'yes' else (100 - current_bid)
         exit_record = {
             'trade_id': str(uuid.uuid4()),
             'timestamp': datetime.now().isoformat(),
@@ -526,7 +531,7 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
             'title': pos.get('title', ''),
             'side': side,
             'action': 'exit',
-            'action_detail': f'WS_EXIT {rule} @ {current_bid}c',
+            'action_detail': f'WS_EXIT {rule} @ {action_detail_price}c (yes_bid={current_bid}c)',
             'source': 'ws_position_tracker',
             'module': module,
             'entry_price': entry_price,

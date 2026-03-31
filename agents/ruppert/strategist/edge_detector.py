@@ -34,11 +34,16 @@ if str(_WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKSPACE_ROOT))
 
 try:
+    import sys as _sys, pathlib as _pathlib
+    _demo_path = str(_pathlib.Path(__file__).resolve().parent.parent.parent / 'environments' / 'demo')
+    if _demo_path not in _sys.path:
+        _sys.path.insert(0, _demo_path)
     from noaa_client import get_probability_for_temp_range as _noaa_prob
     _NOAA_AVAILABLE = True
 except ImportError:
     _noaa_prob = None
     _NOAA_AVAILABLE = False
+    import logging as _log; _log.getLogger(__name__).warning('[EdgeDetector] noaa_client not found — NOAA fallback disabled')
 from agents.ruppert.data_analyst.openmeteo_client import get_full_weather_signal
 import config
 
