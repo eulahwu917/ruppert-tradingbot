@@ -35,6 +35,7 @@ from agents.ruppert.data_scientist.logger import log_activity
 from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 from agents.ruppert.data_scientist.logger import get_daily_exposure
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
+from agents.ruppert.env_config import get_paths as _get_paths
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,10 @@ BINANCE_SYMBOLS = {
 
 OKX_API = 'https://www.okx.com/api/v5'
 
-OI_SNAPSHOT_PATH = Path('environments/demo/logs/oi_1d_snapshot.json')
-DECISION_LOG_PATH = Path('environments/demo/logs/decisions_1d.jsonl')
+_LOGS_DIR = _get_paths()['logs']
+_LOGS_DIR.mkdir(exist_ok=True)
+OI_SNAPSHOT_PATH = _LOGS_DIR / 'oi_1d_snapshot.json'
+DECISION_LOG_PATH = _LOGS_DIR / 'decisions_1d.jsonl'
 
 PRIMARY_WINDOW_START_ET   = '09:30'
 PRIMARY_WINDOW_END_ET     = '11:30'
@@ -910,7 +913,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
 
     # R1: extreme volatility
     atr_pct = s3.get('ATR_pct', 0.0)
-    if atr_pct > 0.04:
+    if atr_pct > HIGH_VOL_THRESHOLD.get(asset, 0.04):
         return _skip(asset, window, f'R1_extreme_vol (ATR_pct={atr_pct:.3f})', signals_dict)
 
     # 6. Composite score
@@ -992,7 +995,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
             f"P_above={composite['P_above']:.2f} "
             f"edge={best.get('edge', 0):.2f}"
         ),
-        'timestamp': datetime.utcnow().isoformat() + 'Z',
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'date': str(date.today()),
     }
     trade_opp['strategy_size'] = actual_cost

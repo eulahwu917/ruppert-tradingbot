@@ -166,6 +166,86 @@ def get_tracked() -> dict:
     return {f'{k[0]}::{k[1]}': v for k, v in _tracked.items()}
 
 
+def get_active_positions(
+    asset: str = None,
+    settlement_date: str = None,
+) -> list[dict]:
+    """Return active tracked positions, optionally filtered by asset and/or settlement date.
+
+    Args:
+        asset:           If provided (e.g. 'BTC'), only return positions whose ticker
+                         contains this string (case-insensitive).
+        settlement_date: If provided (e.g. '2026-03-31'), only return positions whose
+                         ticker encodes this settlement date. The date is parsed from
+                         tickers in the format {EVENT}-{YY}{MON}{DD}-{STRIKE}
+                         (e.g. 'KXBTC2026-26MAR31-B90000').
+
+    Returns:
+        List of position dicts. Each dict contains at minimum:
+            ticker, side, quantity, entry_price, module, title, exit_thresholds
+        A 'market_id' key is also set to the ticker value for compatibility
+        with callers that use pos.get('market_id').
+
+    Filtering behaviour:
+        - asset=None, settlement_date=None  →  return all active positions (no filter)
+        - asset='BTC'                       →  ticker must contain 'BTC' (case-insensitive)
+        - settlement_date='2026-03-31'      →  ticker must encode settlement on 2026-03-31
+        - Both provided                     →  both conditions must match (AND logic)
+
+    No existing callers break: all kwargs default to None, so bare
+    get_active_positions() returns all positions as expected.
+    """
+    MONTH_MAP = {
+        'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+        'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12,
+    }
+
+    # Parse target settlement date once (avoid re-parsing per position)
+    target_date = None
+    if settlement_date is not None:
+        try:
+            from datetime import date as _date
+            target_date = _date.fromisoformat(settlement_date)
+        except ValueError:
+            pass  # invalid date string — filter will match nothing
+
+    results = []
+    for (ticker, side), data in _tracked.items():
+        # --- asset filter ---
+        if asset is not None:
+            if asset.upper() not in ticker.upper():
+                continue
+
+        # --- settlement_date filter ---
+        if settlement_date is not None:
+            # Parse date from ticker: look for -{YY}{MON}{DD}- pattern
+            import re as _re
+            m = _re.search(r'-(\d{2})([A-Z]{3})(\d{2})-', ticker.upper())
+            if not m:
+                continue  # no date in ticker; skip when filter is active
+            try:
+                yy  = int(m.group(1))
+                mon = MONTH_MAP.get(m.group(2))
+                dd  = int(m.group(3))
+                if mon is None:
+                    continue
+                from datetime import date as _date
+                ticker_date = _date(2000 + yy, mon, dd)
+            except (ValueError, KeyError):
+                continue
+            if target_date is None or ticker_date != target_date:
+                continue
+
+        # Build output record from stored data dict
+        record = dict(data)
+        record.setdefault('ticker', ticker)
+        record.setdefault('side', side)
+        record['market_id'] = ticker   # compatibility alias for crypto_1d callers
+        results.append(record)
+
+    return results
+
+
 def is_tracked(ticker: str, side: str) -> bool:
     return (ticker, side) in _tracked
 

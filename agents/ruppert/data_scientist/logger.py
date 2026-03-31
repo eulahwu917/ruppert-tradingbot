@@ -223,13 +223,23 @@ def log_activity(message):
         f.write(entry + '\n')
 
 
-def get_daily_exposure(module: str = None) -> float:
+def get_daily_exposure(module: str = None, asset: str = None) -> float:
     """Calculate total $ exposure from all open positions (any age).
 
     Reads all trade files from START_DATE forward — the same window used by
     data_agent.get_open_positions_from_logs() — so multi-day positions entered
     2+ days ago are correctly counted. Only sums entries (buys) that have no
     corresponding exit/settle record.
+
+    Args:
+        module: If provided, only sum exposure for positions whose module field
+                equals this value OR starts with '{module}_' (e.g. 'crypto' matches
+                'crypto' and 'crypto_15m', 'crypto_long').
+        asset:  If provided (e.g. 'BTC'), only sum exposure for positions whose
+                ticker contains this string (case-insensitive). Applied IN ADDITION
+                to the module filter — both conditions must match when both are given.
+
+    No existing callers break: both kwargs default to None.
     """
     START_DATE = '2026-03-26'  # bot launch date; matches _get_trade_files() default
 
@@ -262,6 +272,10 @@ def get_daily_exposure(module: str = None) -> float:
                             entry_module = entry.get('module', '')
                             if not (entry_module == module or
                                     entry_module.startswith(module + '_')):
+                                continue
+                        # --- asset filter ---
+                        if asset is not None:
+                            if asset.upper() not in ticker.upper():
                                 continue
                         # Skip tickers whose settlement time has already passed (aligns with dashboard)
                         try:
