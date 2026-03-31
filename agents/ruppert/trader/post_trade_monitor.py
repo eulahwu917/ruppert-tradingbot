@@ -110,6 +110,7 @@ def _update_circuit_breaker_state(module: str, window_open_ts: str, settlements:
     os.makedirs(os.path.dirname(state_path), exist_ok=True)
     tmp_path = state_path + '.tmp'
     try:
+        Path(tmp_path).unlink(missing_ok=True)  # clean up any stale .tmp
         with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(state, f, indent=2)
         os.replace(tmp_path, state_path)
@@ -396,6 +397,7 @@ def _read_1h_circuit_breaker_state() -> int:
             state['consecutive_losses'] = 0
             state['date'] = today_str
             tmp_path = state_path + '.tmp'
+            Path(tmp_path).unlink(missing_ok=True)  # clean up any stale .tmp
             with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(state, f)
             os.replace(tmp_path, state_path)
@@ -455,6 +457,7 @@ def update_1h_circuit_breaker(window_ts: str, settlements: list):
     os.makedirs(os.path.dirname(state_path), exist_ok=True)
     tmp_path = state_path + '.tmp'
     try:
+        Path(tmp_path).unlink(missing_ok=True)  # clean up any stale .tmp
         with open(tmp_path, 'w', encoding='utf-8') as f:
             json.dump(state, f, indent=2)
         os.replace(tmp_path, state_path)
