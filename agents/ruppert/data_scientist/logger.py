@@ -432,6 +432,8 @@ def classify_module(src: str, ticker: str) -> str:
     t = (ticker or '').upper()
     if src in ('weather',) or (src in ('weather', 'bot') and t.startswith('KXHIGH')):
         return 'weather'
+    if src == 'crypto_1d':
+        return 'crypto'
     if src == 'crypto' or (src in ('crypto', 'bot') and any(
         t.startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXSOL', 'KXDOGE')
     )):

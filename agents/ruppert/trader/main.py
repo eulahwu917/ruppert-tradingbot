@@ -265,6 +265,14 @@ def run_weather_scan(dry_run=True, traded_tickers=None, open_position_value=0.0)
             )
             return []
 
+        # ── T-type daily exposure accumulators ────────────────────────────────
+        # Enforces TTYPE_MAX_DAILY and TTYPE_PER_CITY_DAILY_MAX from config.
+        _ttype_max_daily      = getattr(config, 'TTYPE_MAX_DAILY', 500.0)
+        _ttype_per_trade      = getattr(config, 'TTYPE_PER_TRADE_SIZE', 50.0)
+        _ttype_city_max       = getattr(config, 'TTYPE_PER_CITY_DAILY_MAX', 100.0)
+        _ttype_daily_total    = 0.0      # total T-type deployed today (this cycle)
+        _ttype_city_deployed  = {}       # city -> dollars deployed today (T-type)
+
         for opp in opportunities:
             # ── Global 70% open exposure check ──
             if not check_open_exposure(total_capital, _open_exposure):
@@ -298,6 +306,37 @@ def run_weather_scan(dry_run=True, traded_tickers=None, open_position_value=0.0)
                         f"${_weather_daily_cap:.0f})"
                     )
                     continue
+
+                # ── T-type sizing enforcement ─────────────────────────────────
+                _market_type = opp.get('market_type', '')
+                if _market_type in ('T_upper', 'T_lower'):
+                    _city = opp.get('city') or opp.get('ticker', '').split('-')[0]
+
+                    # Hard cap: total T-type daily exposure
+                    if _ttype_daily_total >= _ttype_max_daily:
+                        log_activity(
+                            f"  [TType] SKIP {opp['ticker']}: T-type daily cap reached "
+                            f"(${_ttype_daily_total:.2f} / ${_ttype_max_daily:.0f})"
+                        )
+                        continue
+
+                    # Hard cap: per-city T-type daily exposure
+                    _city_deployed = _ttype_city_deployed.get(_city, 0.0)
+                    if _city_deployed >= _ttype_city_max:
+                        log_activity(
+                            f"  [TType] SKIP {opp['ticker']}: city '{_city}' T-type cap reached "
+                            f"(${_city_deployed:.2f} / ${_ttype_city_max:.0f})"
+                        )
+                        continue
+
+                    # Override Kelly size with fixed T-type trade size
+                    decision['size'] = _ttype_per_trade
+                    log_activity(
+                        f"  [TType] {opp['ticker']}: size capped at ${_ttype_per_trade:.0f} "
+                        f"(market_type={_market_type}, city={_city})"
+                    )
+                # ── End T-type sizing enforcement ─────────────────────────────
+
                 # Pass strategy-computed size so Trader skips redundant risk.py sizing
                 opp['strategy_size'] = decision['size']
                 approved_opps.append(opp)
@@ -306,6 +345,13 @@ def run_weather_scan(dry_run=True, traded_tickers=None, open_position_value=0.0)
                 deployed_today += decision['size']
                 _weather_deployed_this_cycle += decision['size']
                 _open_exposure += decision['size']
+
+                # ── Update T-type accumulators ────────────────────────────────
+                if _market_type in ('T_upper', 'T_lower'):
+                    _ttype_daily_total += decision['size']
+                    _ttype_city_deployed[_city] = _ttype_city_deployed.get(_city, 0.0) + decision['size']
+                # ── End T-type accumulator update ─────────────────────────────
+
                 log_activity(f"  [Strategy] ENTER {opp['ticker']}: {decision['reason']}")
             else:
                 log_activity(f"  [Strategy] SKIP  {opp['ticker']}: {decision['reason']}")

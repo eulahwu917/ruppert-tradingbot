@@ -29,6 +29,7 @@ REQUIRED_TASKS = [
     {"name": "Ruppert-Crypto-6PM", "description": "Crypto scanner — 6PM daily"},
     {"name": "Ruppert-Crypto-8AM", "description": "Crypto scanner — 8AM daily"},
     {"name": "Ruppert-Crypto-8PM", "description": "Crypto scanner — 8PM daily"},
+    {"name": "Ruppert-Crypto1D",     "description": "Crypto 1D scanner — 06:30 AM + 10:30 AM PDT"},
     {"name": "Ruppert-DailyHealthCheck", "description": "Daily health check (6:45AM)"},
     {"name": "Ruppert-DailyIntegrityCheck", "description": "Daily integrity check (6:50AM)"},
     {"name": "Ruppert-DailyProgressReport", "description": "Daily progress report (8PM)"},
