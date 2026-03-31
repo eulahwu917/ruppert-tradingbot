@@ -75,11 +75,15 @@ def _update_circuit_breaker_state(module: str, window_open_ts: str, settlements:
         window_result = 'partial_loss'  # shouldn't reach here given above logic
 
     # Read current state (or initialize)
+    import pytz as _pytz
+    pdt = _pytz.timezone('America/Los_Angeles')
+    today_str = datetime.now(pdt).strftime('%Y-%m-%d')
     try:
         with open(state_path, 'r', encoding='utf-8') as f:
             state = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         state = {'consecutive_losses': 0, 'advisory_would_have_fired_count': 0}
+    state['date'] = today_str
 
     # Update consecutive loss counter
     if window_result == 'loss':

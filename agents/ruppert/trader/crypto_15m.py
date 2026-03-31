@@ -89,12 +89,27 @@ _state_initialized = False     # guard: _rehydrate_state() runs only once per pr
 def _read_circuit_breaker_state() -> int:
     """
     Read the current consecutive_losses count from the circuit breaker state file.
+    Performs a daily reset: if the stored date differs from today (PDT), resets
+    consecutive_losses to 0 and updates the file with today's date.
     Returns 0 if the file doesn't exist or is unreadable (safe/permissive default).
     """
     state_path = LOGS_DIR / 'crypto_15m_circuit_breaker.json'
+    pdt = pytz.timezone('America/Los_Angeles')
+    today_str = datetime.now(pdt).strftime('%Y-%m-%d')
     try:
         with open(state_path, 'r', encoding='utf-8') as f:
             state = json.load(f)
+        stored_date = state.get('date', '')
+        if stored_date != today_str:
+            # New day — reset consecutive losses
+            state['consecutive_losses'] = 0
+            state['date'] = today_str
+            tmp_path = str(state_path) + '.tmp'
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(state, f)
+            import os as _os
+            _os.replace(tmp_path, state_path)
+            return 0
         return int(state.get('consecutive_losses', 0))
     except (FileNotFoundError, json.JSONDecodeError, Exception):
         return 0
