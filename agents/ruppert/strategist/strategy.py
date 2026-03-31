@@ -132,19 +132,25 @@ def apply_market_impact_ceiling(
     """
     spread = yes_ask - yes_bid  # cents
 
-    if spread <= 3:
+    _spread_liquid   = getattr(config, 'MARKET_IMPACT_SPREAD_LIQUID', 3)
+    _spread_thin     = getattr(config, 'MARKET_IMPACT_SPREAD_THIN', 7)
+    _thin_size_cap   = getattr(config, 'MARKET_IMPACT_THIN_SIZE_CAP', 25.0)
+    _moderate_scale  = getattr(config, 'MARKET_IMPACT_MODERATE_SCALE', 0.5)
+    _oi_cap_pct      = getattr(config, 'MARKET_IMPACT_OI_CAP_PCT', 0.05)
+
+    if spread <= _spread_liquid:
         size = base_size
         reason = "liquid"
-    elif spread <= 7:
-        size = base_size * 0.5
+    elif spread <= _spread_thin:
+        size = base_size * _moderate_scale
         reason = f"moderate_spread({spread}c)"
     else:
-        size = min(base_size, 25.0)
+        size = min(base_size, _thin_size_cap)
         reason = f"thin_spread({spread}c)_capped"
 
     # Phase 2: OI cap (when open_interest available)
     if open_interest is not None and open_interest > 0:
-        oi_cap = open_interest * 0.05
+        oi_cap = open_interest * _oi_cap_pct
         if size > oi_cap:
             size = oi_cap
             reason += f"_oi_cap({oi_cap:.0f})"
@@ -396,10 +402,12 @@ def should_enter(
                 'market_impact_reason': market_impact_reason}
 
     # --- Minimum viable trade ---
-    # min_viable: hard floor of $5, or 10% of the per-trade cap — whichever is larger.
+    # min_viable: hard floor of MIN_VIABLE_TRADE_USD, or MIN_VIABLE_TRADE_POSITION_PCT of per-trade cap — whichever is larger.
     # Decoupled from capital * MAX_POSITION_PCT to avoid shrinking the viable window at scale.
     _position_cap = capital * getattr(_cfg, 'MAX_POSITION_PCT', 0.01)
-    min_viable = round(max(5.0, _position_cap * 0.10), 2)
+    _min_viable_usd  = getattr(config, 'MIN_VIABLE_TRADE_USD', 5.0)
+    _min_viable_pct  = getattr(config, 'MIN_VIABLE_TRADE_POSITION_PCT', 0.10)
+    min_viable = round(max(_min_viable_usd, _position_cap * _min_viable_pct), 2)
     if size < min_viable:
         return {'enter': False, 'size': 0.0,
                 'reason': f'below_min_viable (${size:.2f} < ${min_viable:.2f})',
@@ -455,7 +463,8 @@ def should_add(signal: dict, entry_signal: dict,
                 'reason': f'too_close_to_settlement ({hours:.2f}h < {MIN_HOURS_ADD}h)'}
 
     # --- Confidence drift gate ---
-    if confidence_delta < 0.10:
+    _add_delta_min_gate = getattr(config, 'ADD_DELTA_MIN', 0.10)
+    if confidence_delta < _add_delta_min_gate:
         return {'add': False, 'size': 0.0, 'reason': 'drift_too_small'}
 
     remaining = max_allocation - current_allocation
@@ -463,15 +472,22 @@ def should_add(signal: dict, entry_signal: dict,
         return {'add': False, 'size': 0.0, 'reason': 'max_allocation_reached'}
 
     # --- Scale add size by confidence delta ---
-    if confidence_delta >= 0.50:
-        scale = 1.00       # 100% of remaining
-        tier  = 'delta≥0.50'
-    elif confidence_delta >= 0.25:
-        scale = 0.50       # 50% of remaining
-        tier  = 'delta≥0.25'
+    _add_delta_high = getattr(config, 'ADD_DELTA_HIGH', 0.50)
+    _add_delta_mid  = getattr(config, 'ADD_DELTA_MID', 0.25)
+    _add_delta_min  = getattr(config, 'ADD_DELTA_MIN', 0.10)
+    _add_scale_high = getattr(config, 'ADD_SCALE_HIGH', 1.00)
+    _add_scale_mid  = getattr(config, 'ADD_SCALE_MID', 0.50)
+    _add_scale_min  = getattr(config, 'ADD_SCALE_MIN', 0.25)
+
+    if confidence_delta >= _add_delta_high:
+        scale = _add_scale_high    # 100% of remaining
+        tier  = f'delta≥{_add_delta_high}'
+    elif confidence_delta >= _add_delta_mid:
+        scale = _add_scale_mid     # 50% of remaining
+        tier  = f'delta≥{_add_delta_mid}'
     else:
-        scale = 0.25       # 25% of remaining (0.10–0.25 bucket)
-        tier  = 'delta≥0.10'
+        scale = _add_scale_min     # 25% of remaining (0.10–0.25 bucket)
+        tier  = f'delta≥{_add_delta_min}'
 
     size = round(remaining * scale, 2)
 
@@ -529,13 +545,20 @@ def should_exit(current_bid: float, entry_price: float,
         if gain >= _gain_threshold:
             return {'exit': True, 'fraction': 1.0, 'reason': f'gain_{int(_gain_threshold*100)}pct'}
 
-    # Catastrophic reversal override: if model edge has collapsed ≥0.35, exit even near settlement.
-    # Only full reversal (≥0.35) overrides — trim (0.10) and half (0.20) reversals do not.
+    # Catastrophic reversal override: if model edge has collapsed ≥EXIT_REVERSAL_FULL, exit even near settlement.
+    # Only full reversal overrides — trim and half reversals do not.
+    _rev_full  = getattr(config, 'EXIT_REVERSAL_FULL', 0.35)
+    _rev_half  = getattr(config, 'EXIT_REVERSAL_HALF', 0.20)
+    _rev_trim  = getattr(config, 'EXIT_REVERSAL_TRIM', 0.10)
+    _rev_full_frac = getattr(config, 'EXIT_REVERSAL_FULL_FRACTION', 1.0)
+    _rev_half_frac = getattr(config, 'EXIT_REVERSAL_HALF_FRACTION', 0.50)
+    _rev_trim_frac = getattr(config, 'EXIT_REVERSAL_TRIM_FRACTION', 0.25)
+
     entry_edge  = entry_signal.get('edge', 0.0)
     current_edge = signal.get('edge', 0.0)
     reversal = entry_edge - current_edge
-    if reversal >= 0.35 and hours_to_settlement < 0.5:
-        return {'exit': True, 'fraction': 1.0, 'reason': 'catastrophic_reversal_full'}
+    if reversal >= _rev_full and hours_to_settlement < 0.5:
+        return {'exit': True, 'fraction': _rev_full_frac, 'reason': 'catastrophic_reversal_full'}
 
     # Rule 3 — Near-settlement hold (let contract settle)
     if hours_to_settlement < 0.5:
@@ -543,12 +566,12 @@ def should_exit(current_bid: float, entry_price: float,
 
     # Rule 4 — Reversal: edge has collapsed vs entry
     # (entry_edge, current_edge, reversal already computed above for catastrophic override)
-    if reversal >= 0.35:
-        return {'exit': True,  'fraction': 1.0,  'reason': 'reversal_full'}
-    if reversal >= 0.20:
-        return {'exit': True,  'fraction': 0.50, 'reason': 'reversal_half'}
-    if reversal >= 0.10:
-        return {'exit': True,  'fraction': 0.25, 'reason': 'reversal_trim'}
+    if reversal >= _rev_full:
+        return {'exit': True,  'fraction': _rev_full_frac,  'reason': 'reversal_full'}
+    if reversal >= _rev_half:
+        return {'exit': True,  'fraction': _rev_half_frac, 'reason': 'reversal_half'}
+    if reversal >= _rev_trim:
+        return {'exit': True,  'fraction': _rev_trim_frac, 'reason': 'reversal_trim'}
 
     # Default — hold
     return {'exit': False, 'fraction': 0.0, 'reason': 'hold'}
@@ -594,12 +617,25 @@ def get_strategy_summary() -> dict:
         'min_hours_to_add':         MIN_HOURS_ADD,
         'exit_95c_rule_threshold':  getattr(config, 'EXIT_95C_THRESHOLD', 95),
         'exit_gain_threshold':      getattr(config, 'EXIT_GAIN_PCT', 0.70),
-        'reversal_full_threshold':  0.35,
-        'reversal_half_threshold':  0.20,
-        'reversal_trim_threshold':  0.10,
-        'add_scale_100pct_delta':   0.50,
-        'add_scale_50pct_delta':    0.25,
-        'add_scale_25pct_delta':    0.10,
+        'reversal_full_threshold':  getattr(config, 'EXIT_REVERSAL_FULL', 0.35),
+        'reversal_half_threshold':  getattr(config, 'EXIT_REVERSAL_HALF', 0.20),
+        'reversal_trim_threshold':  getattr(config, 'EXIT_REVERSAL_TRIM', 0.10),
+        'reversal_full_fraction':   getattr(config, 'EXIT_REVERSAL_FULL_FRACTION', 1.0),
+        'reversal_half_fraction':   getattr(config, 'EXIT_REVERSAL_HALF_FRACTION', 0.50),
+        'reversal_trim_fraction':   getattr(config, 'EXIT_REVERSAL_TRIM_FRACTION', 0.25),
+        'add_scale_100pct_delta':   getattr(config, 'ADD_DELTA_HIGH', 0.50),
+        'add_scale_50pct_delta':    getattr(config, 'ADD_DELTA_MID', 0.25),
+        'add_scale_25pct_delta':    getattr(config, 'ADD_DELTA_MIN', 0.10),
+        'add_scale_high':           getattr(config, 'ADD_SCALE_HIGH', 1.00),
+        'add_scale_mid':            getattr(config, 'ADD_SCALE_MID', 0.50),
+        'add_scale_min':            getattr(config, 'ADD_SCALE_MIN', 0.25),
+        'market_impact_spread_liquid':  getattr(config, 'MARKET_IMPACT_SPREAD_LIQUID', 3),
+        'market_impact_spread_thin':    getattr(config, 'MARKET_IMPACT_SPREAD_THIN', 7),
+        'market_impact_thin_size_cap':  getattr(config, 'MARKET_IMPACT_THIN_SIZE_CAP', 25.0),
+        'market_impact_moderate_scale': getattr(config, 'MARKET_IMPACT_MODERATE_SCALE', 0.5),
+        'market_impact_oi_cap_pct':     getattr(config, 'MARKET_IMPACT_OI_CAP_PCT', 0.05),
+        'min_viable_trade_usd':         getattr(config, 'MIN_VIABLE_TRADE_USD', 5.0),
+        'min_viable_trade_position_pct':getattr(config, 'MIN_VIABLE_TRADE_POSITION_PCT', 0.10),
     }
 
 

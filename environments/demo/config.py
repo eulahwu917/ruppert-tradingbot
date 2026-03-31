@@ -297,6 +297,37 @@ CAPITAL_FALLBACK = 10000.0  # fallback capital when API unavailable
 EXIT_95C_THRESHOLD = 95     # cents — auto-exit YES position if bid >= this
 EXIT_GAIN_PCT      = 0.90   # fraction of max upside — auto-exit at this gain (Phase 2; was 0.70)
 
+# Reversal exit thresholds (edge collapse from entry)
+EXIT_REVERSAL_FULL = 0.35   # full exit if edge collapsed by this much
+EXIT_REVERSAL_HALF = 0.20   # half exit if edge collapsed by this much
+EXIT_REVERSAL_TRIM = 0.10   # trim (25%) exit if edge collapsed by this much
+
+# Reversal exit fractions (portion of position to close)
+EXIT_REVERSAL_FULL_FRACTION = 1.0    # 100% of position
+EXIT_REVERSAL_HALF_FRACTION = 0.50   # 50% of position
+EXIT_REVERSAL_TRIM_FRACTION = 0.25   # 25% of position
+
+# Add-on confidence delta gates
+ADD_DELTA_HIGH = 0.50   # confidence delta >= this: full add scale
+ADD_DELTA_MID  = 0.25   # confidence delta >= this: mid add scale
+ADD_DELTA_MIN  = 0.10   # minimum confidence delta to allow add-on at all
+
+# Add-on scale factors (fraction of remaining allocation)
+ADD_SCALE_HIGH = 1.00   # 100% of remaining when delta >= ADD_DELTA_HIGH
+ADD_SCALE_MID  = 0.50   # 50% of remaining when delta >= ADD_DELTA_MID
+ADD_SCALE_MIN  = 0.25   # 25% of remaining when delta >= ADD_DELTA_MIN
+
+# ── Market Impact Ceiling ─────────────────────────────────────────────────────
+MARKET_IMPACT_SPREAD_LIQUID   = 3      # cents — spread at or below = liquid market, full size
+MARKET_IMPACT_SPREAD_THIN     = 7      # cents — spread above = thin market, hard cap
+MARKET_IMPACT_THIN_SIZE_CAP   = 25.0   # max $ size for thin markets
+MARKET_IMPACT_MODERATE_SCALE  = 0.5    # size scale factor for moderate spread (4–7c)
+MARKET_IMPACT_OI_CAP_PCT      = 0.05   # OI cap: max 5% of open interest
+
+# ── Minimum Viable Trade ──────────────────────────────────────────────────────
+MIN_VIABLE_TRADE_USD          = 5.0    # hard floor in dollars
+MIN_VIABLE_TRADE_POSITION_PCT = 0.10   # or 10% of the per-trade cap, whichever is larger
+
 # ── Settlement Guard ──────────────────────────────────────────────────────────
 # When yes_bid = 0 fires a NO exit, if we are within this many seconds of the
 # contract's close_time, call REST to verify the actual result before executing.

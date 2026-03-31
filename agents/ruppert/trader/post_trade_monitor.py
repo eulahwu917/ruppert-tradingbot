@@ -556,11 +556,12 @@ def check_weather_position(pos, market):
     if side == 'yes' and yes_ask >= 95:
         return 'auto_exit', f'95c rule: yes_ask={yes_ask}c P&L=${pnl:+.2f}', cur_price, contracts, pnl
 
-    # 70% gain rule
+    # Gain exit rule (config-driven threshold)
+    _exit_gain_pct = getattr(config, 'EXIT_GAIN_PCT', 0.70)
     if entry_price and entry_price < 100:
         gain_pct = (cur_price - entry_price) / (100 - entry_price) if (100 - entry_price) > 0 else 0
-        if gain_pct >= 0.70:
-            return 'auto_exit', f'70% gain: {gain_pct:.0%} gain P&L=${pnl:+.2f}', cur_price, contracts, pnl
+        if gain_pct >= _exit_gain_pct:
+            return 'auto_exit', f'{_exit_gain_pct:.0%} gain: {gain_pct:.0%} gain P&L=${pnl:+.2f}', cur_price, contracts, pnl
 
     # Ensemble prob flip check (weather-specific)
     try:
@@ -613,11 +614,12 @@ def check_crypto_position(pos, market):
     if side == 'yes' and yes_ask >= 95:
         return 'auto_exit', f'95c rule: yes_ask={yes_ask}c P&L=${pnl:+.2f}', cur_price, contracts, pnl
 
-    # 70% gain rule
+    # Gain exit rule (config-driven threshold)
+    _exit_gain_pct = getattr(config, 'EXIT_GAIN_PCT', 0.70)
     if entry_price and entry_price < 100:
         gain_pct = (cur_price - entry_price) / (100 - entry_price) if (100 - entry_price) > 0 else 0
-        if gain_pct >= 0.70:
-            return 'auto_exit', f'70% gain: {gain_pct:.0%} gain P&L=${pnl:+.2f}', cur_price, contracts, pnl
+        if gain_pct >= _exit_gain_pct:
+            return 'auto_exit', f'{_exit_gain_pct:.0%} gain: {gain_pct:.0%} gain P&L=${pnl:+.2f}', cur_price, contracts, pnl
 
     return None, None, cur_price, contracts, pnl
 
