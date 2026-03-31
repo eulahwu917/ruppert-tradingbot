@@ -280,10 +280,15 @@ def is_tracked(ticker: str, side: str) -> bool:
     return (ticker, side) in _tracked
 
 
-async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None):
+async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
+                      close_time: str | None = None):
     """
     Called by WS feed on every tick for tracked tickers.
     yes_bid/yes_ask in cents (as received from WS, already divided by 100 not needed).
+    close_time: ISO 8601 UTC string from WS message (e.g. '2026-03-31T14:30:00Z').
+                Used for settlement guard — when provided and current time is within
+                SETTLEMENT_GUARD_WINDOW_SECS of close_time, REST-verify result before
+                executing any 'lte' (NO-side) exit triggered by yes_bid = 0.
     """
     if yes_bid is None:
         return
@@ -326,6 +331,88 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None):
 
             if triggered:
                 rule = threshold.get('rule', 'threshold')
+
+                # ── Settlement Guard (P0 fix 2026-03-31) ──────────────────────
+                # When yes_bid = 0 at settlement time, the orderbook has cleared
+                # regardless of outcome. Verify actual result via REST before
+                # acting on any lte-triggered NO exit near the settlement window.
+                if compare == 'lte' and yes_bid == 0 and close_time is not None:
+                    _guard_secs = getattr(config, 'SETTLEMENT_GUARD_WINDOW_SECS', 90)
+                    _guarded = False
+                    try:
+                        from datetime import timezone as _tz
+                        _close_dt = datetime.fromisoformat(
+                            close_time.replace('Z', '+00:00')
+                        )
+                        _now_utc = datetime.now(tz=_tz.utc)
+                        _secs_to_close = (_close_dt - _now_utc).total_seconds()
+                        if abs(_secs_to_close) <= _guard_secs:
+                            _guarded = True
+                    except Exception as _e:
+                        logger.warning(
+                            '[PositionTracker] Settlement guard: close_time parse failed '
+                            'for %s (%s): %s — proceeding without guard',
+                            ticker, close_time, _e
+                        )
+
+                    if _guarded:
+                        # We are within the settlement window. Verify via REST.
+                        try:
+                            from agents.ruppert.data_analyst.kalshi_client import KalshiClient as _KC
+                            _client = _KC()
+                            _market = _client.get_market(ticker)
+                            _result = _market.get('result') if _market else None
+                        except Exception as _e:
+                            logger.error(
+                                '[PositionTracker] Settlement guard: REST get_market failed '
+                                'for %s: %s — skipping this tick (will retry)',
+                                ticker, _e
+                            )
+                            continue  # skip tick; retry on next WS message
+
+                        if _result is None:
+                            # Not yet settled — orderbook cleared but result pending.
+                            # Skip this tick. Next tick will retry.
+                            logger.info(
+                                '[PositionTracker] Settlement guard: %s result=None '
+                                '(not yet settled) — holding, will retry next tick',
+                                ticker
+                            )
+                            continue  # retry next tick
+
+                        elif _result == 'no':
+                            # NO won — proceed with exit at exit price 0c (correct win).
+                            # yes_bid = 0 is accurate here: YES is worthless.
+                            logger.info(
+                                '[PositionTracker] Settlement guard: %s result=no '
+                                '— NO won, proceeding with exit at 0c',
+                                ticker
+                            )
+                            # Fall through to execute_exit below (no changes needed)
+
+                        elif _result == 'yes':
+                            # YES won — our NO position is worthless. Log as loss.
+                            logger.info(
+                                '[PositionTracker] Settlement guard: %s result=yes '
+                                '— YES won, logging SETTLE_LOSS and removing position',
+                                ticker
+                            )
+                            await execute_exit(
+                                key, pos, current_bid=0, rule='SETTLE_LOSS',
+                                settle_loss=True
+                            )
+                            break
+
+                        else:
+                            # Unexpected result value — log and skip safely
+                            logger.warning(
+                                '[PositionTracker] Settlement guard: %s unexpected result=%r '
+                                '— skipping exit, investigate manually',
+                                ticker, _result
+                            )
+                            continue
+                # ── End Settlement Guard ───────────────────────────────────────
+
                 log_activity(
                     f'[WS Exit] {ticker} hit {rule} (bid={yes_bid}c, target={price_target}c) — exiting'
                 )
@@ -333,8 +420,14 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None):
                 break
 
 
-async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str):
-    """Execute the exit order via REST."""
+async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
+                       settle_loss: bool = False):
+    """Execute the exit order via REST.
+
+    settle_loss: When True, this is a confirmed settlement loss (YES won while we
+                 held NO). Skip the actual sell order (position is already worthless),
+                 log with SETTLE_LOSS action_detail, and record correct negative P&L.
+    """
     ticker, side = key
 
     # Dedup guard: if this (ticker, side) exit is already in-flight, skip.
@@ -357,6 +450,47 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str):
         entry_price = pos['entry_price']
         quantity = pos['quantity']
         module = pos.get('module', '')
+
+        # ── Settlement Loss Path ──────────────────────────────────────────────
+        # When settle_loss=True: YES won, our NO is worthless.
+        # exit_price = 0c (NO value at settlement = 0), P&L is negative.
+        # Do NOT submit a sell order — position has already settled to zero.
+        if settle_loss:
+            # NO entry_price is stored as NO price (e.g. 70c for a 30c YES entry).
+            # At settlement loss: NO is worth 0c. P&L = (0 - entry_price) * qty / 100.
+            pnl = (0 - entry_price) * quantity / 100
+            log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
+            exit_record = {
+                'trade_id': str(uuid.uuid4()),
+                'timestamp': datetime.now().isoformat(),
+                'date': str(date.today()),
+                'ticker': ticker,
+                'title': pos.get('title', ''),
+                'side': side,
+                'action': 'exit',
+                'action_detail': f'SETTLE_LOSS yes_won @ 0c',
+                'source': 'ws_position_tracker',
+                'module': module,
+                'entry_price': entry_price,
+                'exit_price': 0,
+                'contracts': quantity,
+                'pnl': round(pnl, 2),
+            }
+            try:
+                with open(log_path, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(exit_record) + '\n')
+            except Exception as e:
+                logger.error('[WS Exit] SETTLE_LOSS log write failed for %s: %s', ticker, e)
+            log_activity(
+                f'[WS EXIT] {ticker} {side.upper()} SETTLE_LOSS | YES won | P&L=${pnl:+.2f}'
+            )
+            print(
+                f'  [WS EXIT] {ticker} {side.upper()} SETTLE_LOSS | YES won | P&L=${pnl:+.2f}'
+            )
+            remove_position(ticker, side)
+            _recently_exited[(ticker, side)] = time.time()
+            return  # Do NOT fall through to sell order logic
+        # ── End Settlement Loss Path ──────────────────────────────────────────
 
         # P&L in dollars
         if side == 'yes':
@@ -438,8 +572,9 @@ async def recovery_poll_positions():
                 continue
             yes_bid = market.get('yes_bid')
             yes_ask = market.get('yes_ask')
+            close_time = market.get('close_time')  # pass for settlement guard
             if yes_bid is not None:
-                await check_exits(ticker, yes_bid, yes_ask)
+                await check_exits(ticker, yes_bid, yes_ask, close_time=close_time)
         except Exception as e:
             logger.warning('[PositionTracker] Recovery poll failed for %s: %s', ticker, e)
 

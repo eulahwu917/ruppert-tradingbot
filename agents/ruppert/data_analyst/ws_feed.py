@@ -307,14 +307,17 @@ async def handle_message(msg: dict):
     if yes_bid is not None and yes_ask is not None:
         market_cache.update(ticker, float(yes_bid_d), float(yes_ask_d))
 
+    # Extract close_time early — needed for settlement guard in check_exits()
+    # (also used below in crypto-15m entry evaluation)
+    close_time = data.get('close_time')
+
     # Check exit triggers for tracked positions (only when both prices are present)
     if yes_bid is not None and yes_ask is not None:
-        await position_tracker.check_exits(ticker, yes_bid, yes_ask)
+        await position_tracker.check_exits(ticker, yes_bid, yes_ask, close_time=close_time)
 
     # Route crypto 15m tickers to evaluate entry
     ticker_upper = ticker.upper()
     if any(ticker_upper.startswith(s) for s in CRYPTO_15M_SERIES):
-        close_time = data.get('close_time')
         open_time = data.get('open_time')
         # Estimate book depth from WS message size fields (dollars).
         # yes_ask_size_fp / yes_bid_size_fp are single best-level sizes only.

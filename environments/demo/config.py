@@ -297,6 +297,12 @@ CAPITAL_FALLBACK = 10000.0  # fallback capital when API unavailable
 EXIT_95C_THRESHOLD = 95     # cents — auto-exit YES position if bid >= this
 EXIT_GAIN_PCT      = 0.90   # fraction of max upside — auto-exit at this gain (Phase 2; was 0.70)
 
+# ── Settlement Guard ──────────────────────────────────────────────────────────
+# When yes_bid = 0 fires a NO exit, if we are within this many seconds of the
+# contract's close_time, call REST to verify the actual result before executing.
+# Prevents phantom wins from orderbook-cleared settlement messages.
+SETTLEMENT_GUARD_WINDOW_SECS = 90   # seconds before/after close_time to guard
+
 # ── Minimum Edge per Module (strategy gate) ───────────────────────────────────
 # These are the STRATEGY GATE minimums — a secondary check in should_enter().
 # Individual modules may also have local edge gates (e.g. CRYPTO_15M_MIN_EDGE).
