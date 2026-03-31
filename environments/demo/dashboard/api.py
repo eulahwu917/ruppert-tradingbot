@@ -869,6 +869,8 @@ def get_pnl_history():
     module_keys = ['weather', 'crypto', 'fed', 'other']
     module_stats = {m: {
         'closed_pnl': 0.0,
+        'closed_pnl_day': 0.0,
+        'closed_pnl_week': 0.0,
         'closed_pnl_month': 0.0,
         'closed_pnl_year': 0.0,
         'trade_count': 0,
@@ -944,8 +946,21 @@ def get_pnl_history():
             else:
                 sdate = settlement_date_from_ticker(ticker)
             if sdate:
+                from datetime import timedelta as _td
+                _week_start = _today - _td(days=_today.weekday())
                 if sdate == _today:
                     closed_by_period['day']   += pnl
+                    if not is_manual:
+                        _mod_day = classify_module(src, ticker)
+                        _pmod_day = get_parent_module(_mod_day)
+                        if _pmod_day not in module_stats: _pmod_day = 'other'
+                        module_stats[_pmod_day]['closed_pnl_day'] += pnl
+                if sdate >= _week_start:
+                    if not is_manual:
+                        _mod_wk = classify_module(src, ticker)
+                        _pmod_wk = get_parent_module(_mod_wk)
+                        if _pmod_wk not in module_stats: _pmod_wk = 'other'
+                        module_stats[_pmod_wk]['closed_pnl_week'] += pnl
                 if sdate.year == _today.year and sdate.month == _today.month:
                     closed_by_period['month'] += pnl
                     if is_manual: closed_by_src_period['manual']['month'] += pnl
@@ -969,6 +984,58 @@ def get_pnl_history():
                         module_stats[_parent_mod3]['trade_count_year'] += 1
                 if is_manual: closed_by_src_period['manual']['all'] += pnl
                 else:         closed_by_src_period['bot']['all']    += pnl
+        except Exception:
+            pass
+
+    # ── Exit corrections (phantom win adjustments) ──────────────────────────
+    # Records with action='exit_correction' carry a pnl_correction field that
+    # adjusts closed_pnl_total for settlement bugs.  Apply them here.
+    for t in all_trades:
+        if t.get('action') != 'exit_correction':
+            continue
+        try:
+            correction = float(t.get('pnl_correction', 0))
+            if correction == 0:
+                continue
+            closed_pnl_total += correction
+            closed_by_source['bot'] += correction
+            closed_by_src_period['bot']['all'] += correction
+
+            # Module-level correction
+            src = t.get('source', 'bot')
+            ticker = t.get('ticker', '')
+            _mod_c = classify_module(src, ticker)
+            _pmod_c = get_parent_module(_mod_c)
+            if _pmod_c not in module_stats:
+                _pmod_c = 'other'
+            module_stats[_pmod_c]['closed_pnl'] += correction
+
+            # Period bucketing
+            cr_ts = t.get('timestamp')
+            if cr_ts:
+                try:
+                    from datetime import datetime as _dt3
+                    sdate_c = _dt3.fromisoformat(cr_ts.split('+')[0]).date()
+                except Exception:
+                    sdate_c = None
+            else:
+                sdate_c = None
+            if sdate_c:
+                from datetime import timedelta as _tdc
+                _week_start_c = _today - _tdc(days=_today.weekday())
+                if sdate_c == _today:
+                    closed_by_period['day'] += correction
+                    module_stats[_pmod_c]['closed_pnl_day'] += correction
+                if sdate_c >= _week_start_c:
+                    module_stats[_pmod_c]['closed_pnl_week'] += correction
+                if sdate_c.year == _today.year and sdate_c.month == _today.month:
+                    closed_by_period['month'] += correction
+                    closed_by_src_period['bot']['month'] += correction
+                    module_stats[_pmod_c]['closed_pnl_month'] += correction
+                if sdate_c.year == _today.year:
+                    closed_by_period['year'] += correction
+                    closed_by_src_period['bot']['year'] += correction
+                    module_stats[_pmod_c]['closed_pnl_year'] += correction
         except Exception:
             pass
 
@@ -1071,6 +1138,8 @@ def get_pnl_history():
         wr = round(ms['wins'] / ms['trade_count'] * 100, 1) if ms['trade_count'] > 0 else None
         modules_out[mod] = {
             'closed_pnl':        round(ms['closed_pnl'], 2),
+            'closed_pnl_day':    round(ms['closed_pnl_day'], 2),
+            'closed_pnl_week':   round(ms['closed_pnl_week'], 2),
             'closed_pnl_month':  round(ms['closed_pnl_month'], 2),
             'closed_pnl_year':   round(ms['closed_pnl_year'], 2),
             'trade_count':       ms['trade_count'],
@@ -1294,6 +1363,8 @@ def _build_state():
 
     module_closed: dict = {m: {
         'closed_pnl': 0.0,
+        'closed_pnl_day': 0.0,
+        'closed_pnl_week': 0.0,
         'closed_pnl_month': 0.0,
         'closed_pnl_year': 0.0,
         'trade_count': 0,
@@ -1366,8 +1437,21 @@ def _build_state():
                 sdate = settlement_date_from_ticker(ticker)
 
             if sdate:
+                from datetime import timedelta as _td2
+                _week_start2 = _today - _td2(days=_today.weekday())
                 if sdate == _today:
                     closed_pnl_day += pnl_val
+                    if not is_manual:
+                        mod_cd = classify_module(src, ticker)
+                        parent_mod_cd = get_parent_module(mod_cd)
+                        if parent_mod_cd not in module_closed: parent_mod_cd = 'other'
+                        module_closed[parent_mod_cd]['closed_pnl_day'] += pnl_val
+                if sdate >= _week_start2:
+                    if not is_manual:
+                        mod_cwk = classify_module(src, ticker)
+                        parent_mod_cwk = get_parent_module(mod_cwk)
+                        if parent_mod_cwk not in module_closed: parent_mod_cwk = 'other'
+                        module_closed[parent_mod_cwk]['closed_pnl_week'] += pnl_val
                 if sdate.year == _today.year and sdate.month == _today.month:
                     closed_pnl_month += pnl_val
                     if not is_manual:
@@ -1385,6 +1469,63 @@ def _build_state():
         except Exception:
             pass
 
+    # ── Exit corrections (phantom win adjustments) ──────────────────────────
+    # Records with action='exit_correction' carry a pnl_correction field that
+    # adjusts closed_pnl_total for settlement bugs (Kalshi yes-settlement phantom wins).
+    # IMPORTANT: Also update closed_wins — each correction represents a phantom win
+    # that should have been a loss, so subtract 1 from closed_wins per correction.
+    for t in all_trades:
+        if t.get('action') != 'exit_correction':
+            continue
+        try:
+            correction = float(t.get('pnl_correction', 0))
+            if correction == 0:
+                continue
+            closed_pnl_total += correction
+
+            # Flip phantom win → loss in win counter
+            # logged_pnl > 0 means it was counted as a win; correction reverses it
+            if float(t.get('logged_pnl', 0)) > 0:
+                closed_wins = max(0, closed_wins - 1)
+
+            # Module-level correction
+            src = t.get('source', 'bot')
+            ticker = t.get('ticker', '')
+            mod_c = classify_module(src, ticker)
+            parent_mod_c = get_parent_module(mod_c)
+            if parent_mod_c not in module_closed:
+                parent_mod_c = 'other'
+            module_closed[parent_mod_c]['closed_pnl'] += correction
+            # Flip win in module wins counter
+            if float(t.get('logged_pnl', 0)) > 0:
+                module_closed[parent_mod_c]['wins'] = max(0, module_closed[parent_mod_c]['wins'] - 1)
+
+            # Period bucketing
+            cr_ts = t.get('timestamp')
+            sdate_c = None
+            if cr_ts:
+                try:
+                    from datetime import datetime as _dt3
+                    sdate_c = _dt3.fromisoformat(cr_ts.split('+')[0]).date()
+                except Exception:
+                    sdate_c = None
+            if sdate_c:
+                from datetime import timedelta as _tdc
+                _week_start_c = _today - _tdc(days=_today.weekday())
+                if sdate_c == _today:
+                    closed_pnl_day += correction
+                    module_closed[parent_mod_c]['closed_pnl_day'] += correction
+                if sdate_c >= _week_start_c:
+                    module_closed[parent_mod_c]['closed_pnl_week'] += correction
+                if sdate_c.year == _today.year and sdate_c.month == _today.month:
+                    closed_pnl_month += correction
+                    module_closed[parent_mod_c]['closed_pnl_month'] += correction
+                if sdate_c.year == _today.year:
+                    closed_pnl_year += correction
+                    module_closed[parent_mod_c]['closed_pnl_year'] += correction
+        except Exception:
+            pass
+
     # ── Finalize module stats ─────────────────────────────────────────────────
     modules_out: dict = {}
     for mod in ['weather', 'crypto', 'fed', 'geo']:
@@ -1393,14 +1534,16 @@ def _build_state():
         tc = cc.get('trade_count', 0)
         wr = round(cc['wins'] / tc * 100, 1) if tc > 0 else None
         modules_out[mod] = {
-            'open_trades':      oc.get('open_trades', 0),
-            'open_deployed':    round(oc.get('open_deployed', 0.0), 2),
-            'open_pnl':         round(oc.get('open_pnl', 0.0), 2),
-            'closed_pnl':       round(cc.get('closed_pnl', 0.0), 2),
-            'closed_pnl_month': round(cc.get('closed_pnl_month', 0.0), 2),
-            'closed_pnl_year':  round(cc.get('closed_pnl_year', 0.0), 2),
-            'win_rate':         wr,
-            'trade_count':      tc,
+            'open_trades':       oc.get('open_trades', 0),
+            'open_deployed':     round(oc.get('open_deployed', 0.0), 2),
+            'open_pnl':          round(oc.get('open_pnl', 0.0), 2),
+            'closed_pnl':        round(cc.get('closed_pnl', 0.0), 2),
+            'closed_pnl_day':    round(cc.get('closed_pnl_day', 0.0), 2),
+            'closed_pnl_week':   round(cc.get('closed_pnl_week', 0.0), 2),
+            'closed_pnl_month':  round(cc.get('closed_pnl_month', 0.0), 2),
+            'closed_pnl_year':   round(cc.get('closed_pnl_year', 0.0), 2),
+            'win_rate':          wr,
+            'trade_count':       tc,
         }
 
     # ── Account ───────────────────────────────────────────────────────────────
