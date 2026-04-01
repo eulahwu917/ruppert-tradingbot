@@ -348,24 +348,28 @@ def check_daily_cap_violations(trades_today: list[dict]) -> list[dict]:
 
 
 def compute_pnl_from_logs() -> float:
-    """Compute closed P&L from all trade logs (exit records with pnl field)."""
+    """Compute closed P&L from all trade logs.
+
+    Sums all three record types to match logger.compute_closed_pnl_from_logs():
+      1. action='exit'            — pnl field
+      2. action='settle'          — pnl field
+      3. action='exit_correction' — pnl_correction field
+    """
     total_pnl = 0.0
     for path in _get_trade_files():
         for t in _read_trades_file(path):
-            if t.get('action') in ('exit', 'settle') and t.get('pnl') is not None:
+            action = t.get('action')
+            if action in ('exit', 'settle') and t.get('pnl') is not None:
                 try:
                     total_pnl += float(t['pnl'])
                 except (ValueError, TypeError):
                     pass
+            elif action == 'exit_correction' and t.get('pnl_correction') is not None:
+                try:
+                    total_pnl += float(t['pnl_correction'])
+                except (ValueError, TypeError):
+                    pass
     return round(total_pnl, 2)
-
-
-def check_pnl_consistency() -> tuple:
-    """Returns (is_mismatch, cached_pnl, computed_pnl).
-    pnl_cache.json removed — always consistent now (no-op).
-    """
-    computed = compute_pnl_from_logs()
-    return False, computed, computed
 
 
 def _parse_ticker_expiry(ticker: str) -> date | None:
@@ -1017,10 +1021,6 @@ def _remove_tracker_orphans(orphan_tickers: list, open_positions: list = None):
         print(f'[DataAgent] Tracker orphan cleanup failed: {e}')
 
 
-def _regenerate_pnl_cache():
-    """No-op — pnl_cache.json removed. P&L computed live from logs."""
-    return compute_pnl_from_logs()
-
 
 # ─────────────────────────────── Alert formatting ─────────────────────────────
 
@@ -1253,22 +1253,6 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
                 _mark_alerted(state, ih)
                 state['cumulative_stats']['alerts_sent'] = state['cumulative_stats'].get('alerts_sent', 0) + 1
 
-        # 8. P&L consistency
-        pnl_mismatch, cached_pnl, computed_pnl = check_pnl_consistency()
-        if pnl_mismatch:
-            delta = round(cached_pnl - computed_pnl, 2)
-            # Tier 1 auto-fix: regenerate cache from logs
-            _regenerate_pnl_cache()
-            auto_fixed += 1
-            issues.append({
-                'type': 'pnl_mismatch',
-                'cached': cached_pnl,
-                'computed': computed_pnl,
-                'delta': delta,
-                'action': 'cache regenerated',
-            })
-            log_activity(f'[DataAgent] P&L mismatch: cached=${cached_pnl} vs computed=${computed_pnl} (delta=${delta}). Cache regenerated.')
-
         # 9. Decision log orphans
         orphan_decisions = check_decision_log_orphans()
         if orphan_decisions:
@@ -1477,17 +1461,6 @@ def run_historical_audit(since_date: str = '2026-03-26') -> dict:
             'type': 'ws_stale_at_entry',
             'count': len(stale),
             'tickers': [t.get('ticker', '') for t in stale[:10]],
-        })
-
-    # P&L consistency
-    pnl_mismatch, cached_pnl, computed_pnl = check_pnl_consistency()
-    if pnl_mismatch:
-        _regenerate_pnl_cache()
-        total_auto_fixed += 1
-        all_issues.append({
-            'type': 'pnl_mismatch',
-            'cached': cached_pnl, 'computed': computed_pnl,
-            'action': 'cache regenerated',
         })
 
     # Write audit report

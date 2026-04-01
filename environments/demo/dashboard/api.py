@@ -17,7 +17,7 @@ import time
 from datetime import date, datetime
 from pathlib import Path
 from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
-from agents.ruppert.data_scientist.logger import classify_module, get_parent_module
+from agents.ruppert.data_scientist.logger import classify_module, get_parent_module, compute_closed_pnl_from_logs
 import agents.ruppert.data_analyst.market_cache as market_cache
 
 app = FastAPI(title="Ruppert Trading Dashboard")
@@ -1061,6 +1061,9 @@ def get_pnl_history():
         except Exception:
             pass
 
+    # ── Override closed_pnl_total with canonical single source of truth ────
+    closed_pnl_total = compute_closed_pnl_from_logs()
+
     # ── Open positions ───────────────────────────────────────────────────────
     open_pnl_total = 0.0
     open_by_source = {'bot': 0.0, 'manual': 0.0}
@@ -1547,6 +1550,9 @@ def _build_state():
                     module_closed[parent_mod_c]['closed_pnl_year'] += correction
         except Exception:
             pass
+
+    # ── Override closed_pnl_total with canonical single source of truth ────
+    closed_pnl_total = compute_closed_pnl_from_logs()
 
     # ── Finalize module stats ─────────────────────────────────────────────────
     modules_out: dict = {}
