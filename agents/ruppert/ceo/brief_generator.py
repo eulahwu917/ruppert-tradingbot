@@ -36,8 +36,7 @@ CEO_ALLOWED_TASKS = [
     'alert_anomaly',
 ]
 
-# All known trading modules — used to backfill zero-trade entries in the brief
-KNOWN_MODULES = ['crypto', 'weather', 'geo', 'fed', 'econ', 'crypto_15m']
+# Dynamic module detection — no hardcoded module list; derived from actual trade logs
 
 
 def check_role_boundary(task: str):
@@ -130,50 +129,64 @@ def _load_all_trades_for_pnl() -> list[dict]:
 def _compute_pnl_from_trades(trades: list[dict]) -> dict:
     """
     Compute P&L summary from trade records.
+    Includes exit, settle, AND exit_correction actions for accurate P&L.
     Returns: {closed_pnl, open_cost, wins, losses, total_trades}
     """
     closed_pnl = 0.0
     open_cost = 0.0
-    wins = 0
-    losses = 0
     open_positions = {}
+    # Track wins/losses by trade_id so corrections can override
+    win_ids = set()
+    loss_ids = set()
 
     for t in trades:
         action = t.get('action', 'buy')
         size = float(t.get('size_dollars', 0) or 0)
         ticker = t.get('ticker', '')
+        trade_id = t.get('trade_id') or t.get('original_trade_id') or ticker
 
         if action in ('buy', 'open'):
             open_positions[ticker] = open_positions.get(ticker, 0) + size
             open_cost += size
-        elif action in ('exit', 'settle'):
-            # Remove from open if present
-            open_cost -= open_positions.pop(ticker, 0)
+        elif action in ('exit', 'settle', 'exit_correction'):
+            if action in ('exit', 'settle'):
+                # Remove from open if present
+                open_cost -= open_positions.pop(ticker, 0)
             # Try 'pnl' first (current field name), fall back to 'realized_pnl' for older records
             pnl_raw = t.get('pnl') if t.get('pnl') is not None else t.get('realized_pnl')
             if pnl_raw is not None:
                 pnl_val = float(pnl_raw)
                 closed_pnl += pnl_val
-                if pnl_val >= 0:
-                    wins += 1
+                if action == 'exit_correction':
+                    # Correction overrides original win/loss classification
+                    ref_id = t.get('original_trade_id') or ticker
+                    win_ids.discard(ref_id)
+                    if pnl_val >= 0:
+                        win_ids.add(ref_id)
+                    else:
+                        loss_ids.add(ref_id)
                 else:
-                    losses += 1
+                    if pnl_val >= 0:
+                        win_ids.add(trade_id)
+                    else:
+                        loss_ids.add(trade_id)
             else:
                 # Fallback: use settlement_result field if available
                 result = t.get('settlement_result')
                 if result == 'yes':
-                    wins += 1
+                    win_ids.add(trade_id)
                 elif result == 'no':
-                    losses += 1
-                elif size > 0:
-                    wins += 1  # last resort estimate
+                    loss_ids.add(trade_id)
+
+    # Bug 2: total_trades = positions entered (buy/open only)
+    total_trades = len([t for t in trades if t.get('action') in ('buy', 'open')])
 
     return {
         'closed_pnl': round(closed_pnl, 2),
         'open_cost': round(open_cost, 2),
-        'wins': wins,
-        'losses': losses,
-        'total_trades': len(trades),
+        'wins': len(win_ids),
+        'losses': len(loss_ids),
+        'total_trades': total_trades,
     }
 
 
@@ -276,9 +289,12 @@ def _summarize_events(events: list[dict]) -> dict:
 
 
 def _get_capital_summary() -> dict:
-    """Get capital info from Data Scientist's truth file + capital module."""
-    pnl_cache = _read_json(TRUTH_DIR / 'pnl_cache.json', {})
-    closed_pnl = pnl_cache.get('closed_pnl', 0.0)
+    """Get capital info from live log computation + capital module."""
+    try:
+        from agents.ruppert.data_scientist.logger import compute_closed_pnl_from_logs
+        closed_pnl = compute_closed_pnl_from_logs()
+    except Exception:
+        closed_pnl = 0.0
 
     try:
         from agents.ruppert.data_scientist.capital import get_capital
@@ -330,10 +346,6 @@ def build_brief() -> str:
     pnl_today = _compute_pnl_from_trades(today_trades)
     pnl_week = _compute_pnl_from_trades(weekly_trades)
     module_stats = _summarize_trades_by_module(today_trades)
-    # Backfill zero-trade entries so all known modules always appear
-    for _mod in KNOWN_MODULES:
-        if _mod not in module_stats:
-            module_stats[_mod] = {'count': 0, 'total_size': 0.0, 'avg_edge_pct': 0.0, 'exits': 0}
     open_pos = _get_open_positions_summary(today_trades)
     event_summary = _summarize_events(events)
     capital_info = _get_capital_summary()
@@ -544,10 +556,6 @@ def _build_telegram_summary() -> str:
     capital_info = _get_capital_summary()
     alerts = _get_pending_alerts()
     module_stats = _summarize_trades_by_module(today_trades)
-    # Backfill zero-trade entries so all known modules always appear
-    for _mod in KNOWN_MODULES:
-        if _mod not in module_stats:
-            module_stats[_mod] = {'count': 0, 'total_size': 0.0, 'avg_edge_pct': 0.0, 'exits': 0}
 
     mode_tag = '🔴 LIVE' if _is_live_mode() else '🔵 DEMO'
     circuit_tag = '⛔ CIRCUIT BREAKER TRIPPED\n' if event_summary['circuit_breaker_trips'] > 0 else ''
