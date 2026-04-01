@@ -13,7 +13,7 @@ sys.path.insert(0, r'C:\Users\David Wu\.openclaw\workspace\environments\demo')
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 
 TRADES_DIR = r'C:\Users\David Wu\.openclaw\workspace\environments\demo\logs\trades'
-PNL_CACHE_PATH = r'C:\Users\David Wu\.openclaw\workspace\environments\demo\logs\truth\pnl_cache.json'
+# pnl_cache.json removed — P&L computed live from logs by compute_closed_pnl_from_logs()
 REPORT_PATH = r'C:\Users\David Wu\.openclaw\workspace\memory\agents\ds-pnl-correction-2026-03-31.md'
 
 # Settlement minutes
@@ -65,14 +65,16 @@ def load_all_trades():
                     pass
     return trades
 
+LOW_BID_PATTERN = re.compile(r'@ [0-9]c\b')  # matches @ 0c through @ 9c
+
 def find_suspect_exits(trades):
-    """Find all @ 0c exits near settlement time."""
+    """Find all low-bid (0c-9c) NO-side exits near settlement time."""
     suspects = []
     for t in trades:
         if t.get('action') != 'exit':
             continue
         ad = t.get('action_detail', '')
-        if '@ 0c' not in ad:
+        if not LOW_BID_PATTERN.search(ad):
             continue
         ts = t.get('timestamp', '')
         if is_near_settlement(ts):
@@ -85,7 +87,7 @@ def main():
     print(f"Total records: {len(trades)}")
     
     suspects = find_suspect_exits(trades)
-    print(f"Suspect @ 0c settlement exits: {len(suspects)}")
+    print(f"Suspect low-bid (0-9c) settlement exits: {len(suspects)}")
     
     # Get unique tickers
     unique_tickers = list(set(t['ticker'] for t in suspects))
@@ -305,18 +307,9 @@ def main():
         s['pnl_logged'] += lpnl
         s['pnl_true'] += tpnl
     
-    # Update pnl_cache.json
-    pnl_cache = {
-        'closed_pnl': round(total_true_pnl, 2),
-        'open_pnl': 0.0,
-        'logged_closed_pnl': round(total_logged_pnl, 2),
-        'correction_applied': round(total_correction, 2),
-        'last_corrected': datetime.now().strftime('%Y-%m-%dT%H:%M:%S'),
-        'correction_reason': 'P0 bug: 95c_rule_no @ 0c at settlement - orderbook clearing misidentified as NO win'
-    }
-    with open(PNL_CACHE_PATH, 'w') as f:
-        json.dump(pnl_cache, f, indent=2)
-    print(f"\nUpdated pnl_cache.json")
+    # P&L is now computed live from logs by compute_closed_pnl_from_logs().
+    # No pnl_cache.json write — correction records in .jsonl are the source of truth.
+    print(f"\nCorrection records written to .jsonl logs (no pnl_cache.json — live compute).")
     
     # Generate report
     print("\nGenerating report...")
@@ -324,14 +317,14 @@ def main():
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S PDT')
     
     report_lines = [
-        "# P&L Correction Report — P0 Bug: 95c_rule_no @ 0c Settlement",
+        "# P&L Correction Report — P0 Bug: NO-side low-bid (0-9c) Settlement Exits",
         f"**Generated:** {now_str}",
         "",
         "## Summary",
         "",
-        "**Bug:** `WS_EXIT 95c_rule_no @ 0c` triggered when Kalshi orderbook clears at settlement.",
-        "The code fired assuming NO was winning (yes_bid = 0), but orderbook clears regardless of winner.",
-        "All confirmed suspect trades were losses (Kalshi result = YES won, we held NO).",
+        "**Bug:** `WS_EXIT 95c_rule_no @ 0-9c` triggered when Kalshi orderbook thins at settlement.",
+        "The code fired assuming NO was winning (yes_bid low), but low bids near settlement can indicate",
+        "orderbook clearing regardless of winner. All confirmed suspect trades verified via Kalshi API.",
         "",
         f"- Suspect exits identified: **{len(suspects)}**",
         f"- API-confirmed losses (result=yes): **{len([c for c in corrected_exits if c['result'] == 'yes'])}**",
@@ -426,23 +419,15 @@ def main():
         "",
         "---",
         "",
-        "## Updated pnl_cache.json",
-        "",
-        "```json",
-        json.dumps(pnl_cache, indent=2),
-        "```",
-        "",
-        "---",
-        "",
         "## Methodology",
         "",
-        "1. Scanned all `.jsonl` trade logs for records where `action='exit'` and `action_detail` contains `@ 0c`",
+        "1. Scanned all `.jsonl` trade logs for records where `action='exit'` and `action_detail` contains `@ 0-9c`",
         "2. Filtered to exits within ±30 seconds of settlement time (XX:00, XX:15, XX:30, XX:45)",
         "3. Called `KalshiClient.get_market(ticker)` for each unique ticker to get `result` field",
         "4. For `result='yes'`: true P&L = -(logged P&L), pnl_delta = -2 * logged_pnl",
         "5. For `result='no'`: P&L is correct, no correction needed",
         "6. Appended correction records (action='exit_correction') to original trade log files",
-        "7. Regenerated `pnl_cache.json` with corrected totals",
+        "7. P&L recomputed live from logs (no pnl_cache.json)",
     ]
     
     report_content = '\n'.join(report_lines)
