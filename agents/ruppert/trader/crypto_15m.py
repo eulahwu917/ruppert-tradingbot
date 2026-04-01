@@ -1302,6 +1302,7 @@ def evaluate_crypto_15m_entry(
             module='crypto_15m_dir',
             title=f'{asset} 15m direction',
             entry_raw_score=raw_score,
+            size_dollars=round(position_usd, 2),
         )
     except Exception as _pt_err:
         logger.warning(f'[15m] position_tracker.add_position failed: {_pt_err}')

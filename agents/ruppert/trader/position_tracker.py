@@ -134,16 +134,25 @@ def _build_thresholds(side: str, entry_price: float, holding_type: str = '') -> 
 
 def add_position(ticker: str, quantity: int, side: str, entry_price: float,
                  module: str = '', title: str = '', holding_type: str = '',
-                 entry_raw_score: float | None = None):
+                 entry_raw_score: float | None = None,
+                 size_dollars: float | None = None):
     """
     Call after every trade execution.
     entry_price: in cents (e.g. 45 = 45c).
     holding_type: 'long_horizon' skips the 70% gain exit threshold.
+    size_dollars: actual dollar cost paid for this leg. If not provided,
+                  computed as entry_price * quantity / 100 BEFORE any NO-side
+                  price flip (so the value reflects true cost even when the
+                  flip transforms entry_price).
 
     When a position for (ticker, side) already exists, accumulates the new leg:
     total quantity is summed and entry_price is blended (weighted average).
     This preserves all legs for correct P&L and settlement tracking.
     """
+    # Compute size_dollars BEFORE the NO-side price flip so it reflects true cost.
+    if size_dollars is None:
+        size_dollars = round(entry_price * quantity / 100, 2)
+
     # P0-4 fix: standardize NO positions to always use NO price.
     # DRY_RUN sometimes passes YES price for NO side (entry_price < 50 when side='no').
     # Convert: if side='no' and entry_price looks like YES price (< 50), flip it.
@@ -161,6 +170,7 @@ def add_position(ticker: str, quantity: int, side: str, entry_price: float,
         blended_price = round((old_price * old_qty + entry_price * quantity) / new_qty, 2)
         existing['quantity'] = new_qty
         existing['entry_price'] = blended_price
+        existing['size_dollars'] = round(existing.get('size_dollars', 0) + size_dollars, 2)
         # Refresh thresholds for new blended price
         existing['exit_thresholds'] = _build_thresholds(side, blended_price, holding_type)
         logger.info(
@@ -179,6 +189,7 @@ def add_position(ticker: str, quantity: int, side: str, entry_price: float,
             'added_at': time.time(),
             'exit_thresholds': thresholds,
             'entry_raw_score': entry_raw_score,
+            'size_dollars': size_dollars,
         }
         logger.info('[PositionTracker] Tracking %s %s @ %dc (%d contracts)', ticker, side, entry_price, quantity)
     _persist()
@@ -495,9 +506,10 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
         # exit_price = 0c (NO value at settlement = 0), P&L is negative.
         # Do NOT submit a sell order — position has already settled to zero.
         if settle_loss:
-            # NO entry_price is stored as NO price (e.g. 70c for a 30c YES entry).
-            # At settlement loss: NO is worth 0c. P&L = (0 - entry_price) * qty / 100.
-            pnl = (0 - entry_price) * quantity / 100
+            # NO-side loss: use size_dollars as the true cost (entry_price is unreliable
+            # due to the NO-side flip in add_position — 15m passes correct NO price but
+            # flip converts e.g. 3c → 97c, inflating the calculated loss).
+            pnl = -pos.get('size_dollars', entry_price * quantity / 100)
             log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
             exit_record = {
                 'trade_id': str(uuid.uuid4()),
@@ -665,9 +677,17 @@ async def check_expired_positions():
             settlement_price = 100 if result == 'yes' else 0
             pnl = (settlement_price - entry_price) * quantity / 100
         else:
-            # NO side: settlement_price_no = 100 if result='no', 0 if result='yes'
-            settlement_price = 100 if result == 'no' else 0
-            pnl = (settlement_price - entry_price) * quantity / 100
+            # NO side: entry_price is unreliable due to the NO-side flip in
+            # add_position() (15m passes correct NO price but flip converts
+            # e.g. 3c → 97c). Use size_dollars for losses, formula for wins.
+            if result == 'no':
+                # NO won — full payout minus cost
+                settlement_price = 100
+                pnl = (100 - entry_price) * quantity / 100
+            else:
+                # NO lost (YES won) — loss equals what we paid
+                settlement_price = 0
+                pnl = -pos.get('size_dollars', entry_price * quantity / 100)
 
         # Log settlement trade
         log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
