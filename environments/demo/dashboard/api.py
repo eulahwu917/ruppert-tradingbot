@@ -897,7 +897,7 @@ def get_pnl_history():
     manual_cost_basis = 0.0
 
     # Per-module stats (bot trades only)
-    module_keys = ['weather', 'crypto', 'fed', 'geo', 'sports', 'other']
+    module_keys = ['weather', 'crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'fed', 'geo', 'sports', 'other']
     module_stats = {m: {
         'closed_pnl': 0.0,
         'closed_pnl_day': 0.0,
