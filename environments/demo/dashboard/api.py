@@ -453,6 +453,9 @@ def get_trades():
             true_pnl = correction.get('true_pnl')
             if true_pnl is not None:
                 t['realized_pnl'] = round(float(true_pnl), 2)
+            elif cr.get('pnl') is not None:
+                # Fallback: use settle/exit record pnl when correction lacks true_pnl
+                t['realized_pnl'] = round(float(cr['pnl']), 2)
             t['pnl_corrected'] = True
             t['pnl_original'] = round(float(correction.get('logged_pnl', 0)), 2)
             t['pnl_correction_reason'] = correction.get('reason', '')
