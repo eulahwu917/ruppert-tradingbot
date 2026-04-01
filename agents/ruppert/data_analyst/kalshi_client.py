@@ -123,6 +123,8 @@ class KalshiClient:
                     # no_ask/no_bid; the orderbook endpoint (orderbook_fp) has the live
                     # bid/ask via no_dollars and yes_dollars (float-dollar fractions, 0–1).
                     # volume/open_interest come from the market list response directly.
+                    # TODO: Kalshi may rename volume → volume_dollars, open_interest → open_interest_dollars
+                    # (FixedPointDollars strings) when legacy fields are dropped. Update parsing when that happens.
                     for market in markets:
                         ticker = market.get('ticker', '')
                         if not ticker:
@@ -260,6 +262,9 @@ class KalshiClient:
 
     def _get_market_raw(self, ticker):
         """Raw HTTP fetch for a single market, with orderbook enrichment."""
+        # TODO: When Kalshi drops legacy market fields (volume, open_interest, yes_bid, etc.),
+        # parse the new _dollars / _fp string equivalents here. Orderbook prices already use
+        # float-dollar parsing via orderbook_fp, so those are fine.
         host = DEMO_HOST if self.environment == 'demo' else PROD_HOST
         url = f"{host}/markets/{ticker}"
         resp = _get_with_retry(url, timeout=10)
@@ -398,13 +403,30 @@ class KalshiClient:
                 raw = resp.json().get('market_positions') or []
                 positions = []
                 for p in raw:
+                    # Kalshi renamed fields: position → position_fp (string count),
+                    # total_traded → total_traded_dollars, market_exposure → market_exposure_dollars,
+                    # realized_pnl → realized_pnl_dollars, fees_paid → fees_paid_dollars.
+                    # New _dollars fields are FixedPointDollars strings (e.g. '0.5600').
+                    # Fall back to old field names for backward compat.
+                    def _parse_dollar(new_key, old_key):
+                        val = p.get(new_key)
+                        if val is not None:
+                            return float(val)
+                        return int(p.get(old_key) or 0)
+
+                    pos_raw = p.get('position_fp')
+                    if pos_raw is not None:
+                        position_val = int(float(pos_raw))
+                    else:
+                        position_val = int(p.get('position') or 0)
+
                     positions.append(SimpleNamespace(
                         ticker=p.get('ticker') or '',
-                        position=int(p.get('position') or 0),
-                        total_traded=int(p.get('total_traded') or 0),
-                        market_exposure=int(p.get('market_exposure') or 0),
-                        realized_pnl=int(p.get('realized_pnl') or 0),
-                        fees_paid=int(p.get('fees_paid') or 0),
+                        position=position_val,
+                        total_traded=_parse_dollar('total_traded_dollars', 'total_traded'),
+                        market_exposure=_parse_dollar('market_exposure_dollars', 'market_exposure'),
+                        realized_pnl=_parse_dollar('realized_pnl_dollars', 'realized_pnl'),
+                        fees_paid=_parse_dollar('fees_paid_dollars', 'fees_paid'),
                     ))
                 return positions
             except Exception as e:
