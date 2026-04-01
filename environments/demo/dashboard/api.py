@@ -1616,6 +1616,38 @@ def _build_state():
     }
 
 
+@app.get("/api/sports")
+def api_sports():
+    today = date.today().isoformat()
+    sports_log = LOGS_DIR / "sports_odds_log.jsonl"
+    records = []
+    if not sports_log.exists():
+        return []
+    with open(sports_log, 'r', encoding='utf-8') as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rec = json.loads(line)
+            except Exception:
+                continue
+            if rec.get('event_type') != 'odds_snapshot':
+                continue
+            if not rec.get('logged_at', '').startswith(today):
+                continue
+            records.append({
+                'sport': rec.get('sport'),
+                'matchup': rec.get('matchup'),
+                'game_time': rec.get('game_time'),
+                'kalshi_yes_price': rec.get('kalshi_yes_price'),
+                'vegas_prob': rec.get('vegas_prob'),
+                'gap': rec.get('gap'),
+            })
+    records.sort(key=lambda r: r.get('gap') or 0, reverse=True)
+    return records
+
+
 @app.get("/api/state")
 def get_state():
     """Single snapshot endpoint: account, positions, module stats, smart money.

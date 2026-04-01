@@ -118,6 +118,14 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 .conf-lbl { font-size: 10px; color: #4ade80; font-weight: 700; }
 .bb-rationale { font-size: 11px; color: #666; line-height: 1.5; }
 
+/* Sports table */
+.sports-table { width:100%;border-collapse:collapse;font-size:12px; }
+.sports-table th { padding:7px 12px;color:#2a2a2a;font-size:10px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #1a1a1a;text-align:left; }
+.sports-table td { padding:9px 12px;border-bottom:1px solid #141414;vertical-align:middle; }
+.sports-table tr:last-child td { border-bottom:none; }
+.sports-table tr:hover td { background:#141414; }
+.sports-table .highlight { color:#fbbf24;font-weight:700; }
+
 /* Weather table */
 .wt th { text-align: left; }
 .wt td { text-align: left; }
@@ -335,6 +343,8 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
               <select id="crypto-module-period" onchange="setModulePeriod('crypto',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
+                <option value="day">Today</option>
+                <option value="week">This Week</option>
                 <option value="month" selected>This Month</option>
                 <option value="year">This Year</option>
                 <option value="all">All Time</option>
@@ -458,6 +468,19 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       </div>
     </div>
 
+    <!-- ⚽ Sports Odds -->
+    <div class="card" style="border-left:3px solid #f59e0b;grid-column:1/-1;">
+      <div class="card-head">
+        <span class="sec"><span class="dot dot-y"></span> Sports Odds</span>
+        <span class="ref" id="sports-ts">--</span>
+      </div>
+      <div class="card-body">
+        <div id="sports-body">
+          <div class="loading">Loading...</div>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <!-- P&L Chart | Positions + Trades -->
@@ -534,7 +557,11 @@ function renderModuleCard(mod) {
   if (!d) return;
   const period  = window._modulePeriod[mod] || 'month';
   const pfx     = MODULE_ID[mod] || mod;
-  const pnl     = period === 'month' ? d.closed_pnl_month  : period === 'year' ? d.closed_pnl_year  : d.closed_pnl;
+  const pnl     = period === 'day'   ? (d.closed_pnl_day   ?? 0)
+                : period === 'week'  ? (d.closed_pnl_week  ?? 0)
+                : period === 'month' ? (d.closed_pnl_month ?? 0)
+                : period === 'year'  ? (d.closed_pnl_year  ?? 0)
+                : d.closed_pnl;
 
   // Open P&L (always current, not period-filtered - from live Kalshi prices)
   const openPnlEl = document.getElementById(pfx + '-open-pnl');
@@ -1314,10 +1341,31 @@ async function loadCryptoSignal() {
 async function loadScouts(){
   await Promise.all([loadCryptoSignal()]);
 }
+async function refreshSports(){
+  const data = await api('/api/sports');
+  const wrap = $('sports-body');
+  const ts = $('sports-ts');
+  ts.textContent = new Date().toLocaleTimeString();
+  if(!data || data.length===0){
+    wrap.innerHTML='<div style="color:#333;text-align:center;padding:24px;font-size:12px;">No games in window today</div>';
+    return;
+  }
+  let html='<table class="sports-table"><thead><tr><th>Matchup</th><th>Vegas</th><th>Kalshi</th><th>Gap</th></tr></thead><tbody>';
+  data.forEach(r=>{
+    const gap=r.gap||0;
+    const hl=gap>5?'highlight':'';
+    const vegas=r.vegas_prob!=null?r.vegas_prob.toFixed(1)+'%':'--';
+    const kalshi=r.kalshi_yes_price!=null?(r.kalshi_yes_price*100).toFixed(1)+'%':'--';
+    const gapTxt=gap.toFixed(1)+'%';
+    html+=`<tr class="${hl}"><td>${r.matchup||'--'}</td><td>${vegas}</td><td>${kalshi}</td><td>${gapTxt}</td></tr>`;
+  });
+  html+='</tbody></table>';
+  wrap.innerHTML=html;
+}
 async function loadAll(){
   const state = await api('/api/state');
   if (state) renderState(state);
-  await Promise.all([loadTrades(), loadScouts()]);
+  await Promise.all([loadTrades(), loadScouts(), refreshSports()]);
 }
 loadMode();
 loadAll();
