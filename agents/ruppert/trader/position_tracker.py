@@ -323,6 +323,13 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
         except Exception as _tsl_err:
             logger.debug('[PositionTracker] terminal_signal_logger: %s', _tsl_err)
 
+        # Intra-window price logger — shadow log for crypto_15m_dir positions
+        try:
+            from intra_window_logger import maybe_log_price
+            maybe_log_price(ticker, pos, yes_bid, yes_ask)
+        except Exception as _iwl_err:
+            logger.debug('[PositionTracker] intra_window_logger: %s', _iwl_err)
+
         thresholds = pos.get('exit_thresholds')
         if thresholds is None:
             logger.warning('[PositionTracker] %s missing exit_thresholds — skipping exit check', ticker)
