@@ -318,19 +318,29 @@ def check_daily_cap_violations(trades_today: list[dict]) -> list[dict]:
     except Exception:
         return []
 
-    caps = {
-        'weather_band':      capital * getattr(cfg, 'WEATHER_BAND_DAILY_CAP_PCT',      0.07),
-        'weather_threshold': capital * getattr(cfg, 'WEATHER_THRESHOLD_DAILY_CAP_PCT', 0.07),
-        'crypto_1h_band':    capital * getattr(cfg, 'CRYPTO_1H_BAND_DAILY_CAP_PCT',    0.07),
-        'crypto_1h_dir':     capital * getattr(cfg, 'CRYPTO_1H_DIR_DAILY_CAP_PCT',     0.15),
-        'crypto_15m_dir':    capital * getattr(cfg, 'CRYPTO_15M_DIR_DAILY_CAP_PCT',    0.10),
-        'crypto_long':       capital * getattr(cfg, 'LONG_HORIZON_DAILY_CAP_PCT',      0.10),
-        'econ_cpi':          capital * getattr(cfg, 'ECON_CPI_DAILY_CAP_PCT',          0.04),
-        'econ_unemployment': capital * getattr(cfg, 'ECON_UNEMPLOYMENT_DAILY_CAP_PCT', 0.04),
-        'econ_fed_rate':     capital * getattr(cfg, 'ECON_FED_RATE_DAILY_CAP_PCT',     0.03),
-        'econ_recession':    capital * getattr(cfg, 'ECON_RECESSION_DAILY_CAP_PCT',    0.04),
-        'geo':               capital * getattr(cfg, 'GEO_DAILY_CAP_PCT',               0.04),
+    # Daily per-module caps were removed on 2026-03-31 (replaced by window cap
+    # + circuit breaker).  Only build caps dict from constants that still exist
+    # in config — if the constant is missing, the cap is disabled.
+    _cap_map = {
+        'weather_band':      'WEATHER_BAND_DAILY_CAP_PCT',
+        'weather_threshold': 'WEATHER_THRESHOLD_DAILY_CAP_PCT',
+        'crypto_1h_band':    'CRYPTO_1H_BAND_DAILY_CAP_PCT',
+        'crypto_1h_dir':     'CRYPTO_1H_DIR_DAILY_CAP_PCT',
+        'crypto_15m_dir':    'CRYPTO_15M_DIR_DAILY_CAP_PCT',
+        'crypto_long':       'LONG_HORIZON_DAILY_CAP_PCT',
+        'econ_cpi':          'ECON_CPI_DAILY_CAP_PCT',
+        'econ_unemployment': 'ECON_UNEMPLOYMENT_DAILY_CAP_PCT',
+        'econ_fed_rate':     'ECON_FED_RATE_DAILY_CAP_PCT',
+        'econ_recession':    'ECON_RECESSION_DAILY_CAP_PCT',
+        'geo':               'GEO_DAILY_CAP_PCT',
     }
+    caps = {}
+    for module, attr in _cap_map.items():
+        if hasattr(cfg, attr):
+            caps[module] = capital * getattr(cfg, attr)
+
+    if not caps:
+        return []  # All daily caps removed — nothing to audit
 
     by_module = {}
     for t in trades_today:

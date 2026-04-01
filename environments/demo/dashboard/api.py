@@ -309,7 +309,7 @@ def get_account():
         if not ticker:
             continue
         action = t.get('action', '')
-        if action in ('exit', 'settle'):
+        if action in ('exit', 'settle', 'exit_correction'):
             entries.pop(ticker, None)  # position closed; reset accumulator
         else:
             if ticker not in entries:
@@ -328,14 +328,20 @@ def get_account():
     # Bot = weather + crypto (fully autonomous, Ruppert decides)
     # Manual = economics + geo (David approves)
     # Gaming removed entirely
-    AUTO_SOURCES   = ('bot', 'weather', 'crypto')
-    MANUAL_SOURCES = ('economics', 'geo', 'manual')
+    AUTO_PREFIXES  = ('bot', 'weather', 'crypto', 'ws_')
+    MANUAL_PREFIXES = ('economics', 'geo', 'manual')
+
+    def _is_auto(source):
+        return any(source == p or source.startswith(p + '_') or source.startswith(p) for p in AUTO_PREFIXES)
+
+    def _is_manual(source):
+        return any(source == p or source.startswith(p + '_') or source.startswith(p) for p in MANUAL_PREFIXES)
 
     # Only count OPEN (not-yet-settled) positions in deployed capital
     # A position is "open" only if it has no settle/exit record
     open_trades  = trades  # Already filtered to exclude closed positions above
-    bot_cost     = sum(t.get('size_dollars',0) for t in open_trades if t.get('source','bot') in AUTO_SOURCES)
-    manual_cost  = sum(t.get('size_dollars',0) for t in open_trades if t.get('source','bot') in MANUAL_SOURCES)
+    bot_cost     = sum(t.get('size_dollars',0) for t in open_trades if _is_auto(t.get('source','bot')))
+    manual_cost  = sum(t.get('size_dollars',0) for t in open_trades if _is_manual(t.get('source','bot')))
     total_deployed = bot_cost + manual_cost
 
     # Capital source: single source of truth via capital.py
