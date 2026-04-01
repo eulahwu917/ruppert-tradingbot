@@ -457,52 +457,109 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       </div>
     </div>
 
-    <!-- ₿ Crypto (full-width, tabbed by sub-module) -->
+    <!-- ₿ Crypto (full-width, 4-column layout) -->
     <div class="card" style="border-left:3px solid #a78bfa;grid-column:1/-1;">
-      <div class="tabs" id="crypto-sub-tabs">
-        <button class="tab on" onclick="switchCryptoSub('crypto_15m_dir',this)">15m Dir</button>
-        <button class="tab" onclick="switchCryptoSub('crypto_1h_dir',this)">1H Dir</button>
-        <button class="tab" onclick="switchCryptoSub('crypto_1h_band',this)">1H Band</button>
-        <button class="tab" onclick="switchCryptoSub('crypto_1d',this)">1D</button>
+      <div class="card-head">
+        <div class="sec"><div class="dot dot-b"></div> Crypto</div>
+        <select id="crypto-sub-period" onchange="setCryptoSubPeriod(this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
+          <option value="day">Today</option>
+          <option value="week">This Week</option>
+          <option value="month" selected>This Month</option>
+          <option value="year">This Year</option>
+          <option value="all">All Time</option>
+        </select>
       </div>
-      <div style="padding:16px;" id="crypto-sub-body">
-        <!-- Row 1: Open P&L | Closed P&L (period selector) | Win Rate -->
-        <div style="display:flex;margin-bottom:14px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
+      <div style="display:flex;gap:0;padding:16px;" id="crypto-4col">
+        <div style="flex:1;padding:0 12px;border-right:1px solid #222;" id="col-crypto_15m_dir">
+          <div style="font-size:11px;font-weight:700;color:#a78bfa;text-align:center;margin-bottom:10px;">15m Dir</div>
+          <div style="text-align:center;margin-bottom:8px;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
-            <div class="pnl-neu" id="crypto-sub-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+            <div class="pnl-neu" id="csub-crypto_15m_dir-open-pnl" style="font-size:18px;font-weight:700;">--</div>
           </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
-              Closed P&amp;L
-              <select id="crypto-sub-period" onchange="setCryptoSubPeriod(this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
-                <option value="day">Today</option>
-                <option value="week">This Week</option>
-                <option value="month" selected>This Month</option>
-                <option value="year">This Year</option>
-                <option value="all">All Time</option>
-              </select>
-            </div>
-            <div class="pnl-neu" id="crypto-sub-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Closed P&amp;L</div>
+            <div class="pnl-neu" id="csub-crypto_15m_dir-pnl" style="font-size:18px;font-weight:700;">--</div>
           </div>
-          <div style="flex:1;padding-left:12px;text-align:center;">
+          <div style="text-align:center;margin-bottom:8px;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
-            <div style="font-size:22px;font-weight:700;color:#888;" id="crypto-sub-winrate">--</div>
+            <div style="font-size:18px;font-weight:700;color:#888;" id="csub-crypto_15m_dir-winrate">--</div>
+          </div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Dep</div>
+            <div style="font-size:13px;font-weight:700;color:#888;" id="csub-crypto_15m_dir-open-dep">--</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Trades</div>
+            <div style="font-size:13px;font-weight:700;color:#888;" id="csub-crypto_15m_dir-total-trades">--</div>
           </div>
         </div>
-        <!-- Row 2: Open Deployed | Open Trades | Total Trades -->
-        <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-sub-open-dep">--</div>
+        <div style="flex:1;padding:0 12px;border-right:1px solid #222;" id="col-crypto_1h_dir">
+          <div style="font-size:11px;font-weight:700;color:#a78bfa;text-align:center;margin-bottom:10px;">1H Dir</div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
+            <div class="pnl-neu" id="csub-crypto_1h_dir-open-pnl" style="font-size:18px;font-weight:700;">--</div>
           </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-sub-open-cnt">--</div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Closed P&amp;L</div>
+            <div class="pnl-neu" id="csub-crypto_1h_dir-pnl" style="font-size:18px;font-weight:700;">--</div>
           </div>
-          <div style="flex:1;padding-left:12px;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-sub-total-trades">--</div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
+            <div style="font-size:18px;font-weight:700;color:#888;" id="csub-crypto_1h_dir-winrate">--</div>
+          </div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Dep</div>
+            <div style="font-size:13px;font-weight:700;color:#888;" id="csub-crypto_1h_dir-open-dep">--</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Trades</div>
+            <div style="font-size:13px;font-weight:700;color:#888;" id="csub-crypto_1h_dir-total-trades">--</div>
+          </div>
+        </div>
+        <div style="flex:1;padding:0 12px;border-right:1px solid #222;" id="col-crypto_1h_band">
+          <div style="font-size:11px;font-weight:700;color:#a78bfa;text-align:center;margin-bottom:10px;">1H Band</div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
+            <div class="pnl-neu" id="csub-crypto_1h_band-open-pnl" style="font-size:18px;font-weight:700;">--</div>
+          </div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Closed P&amp;L</div>
+            <div class="pnl-neu" id="csub-crypto_1h_band-pnl" style="font-size:18px;font-weight:700;">--</div>
+          </div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
+            <div style="font-size:18px;font-weight:700;color:#888;" id="csub-crypto_1h_band-winrate">--</div>
+          </div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Dep</div>
+            <div style="font-size:13px;font-weight:700;color:#888;" id="csub-crypto_1h_band-open-dep">--</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Trades</div>
+            <div style="font-size:13px;font-weight:700;color:#888;" id="csub-crypto_1h_band-total-trades">--</div>
+          </div>
+        </div>
+        <div style="flex:1;padding:0 12px;" id="col-crypto_1d">
+          <div style="font-size:11px;font-weight:700;color:#a78bfa;text-align:center;margin-bottom:10px;">1D</div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
+            <div class="pnl-neu" id="csub-crypto_1d-open-pnl" style="font-size:18px;font-weight:700;">--</div>
+          </div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Closed P&amp;L</div>
+            <div class="pnl-neu" id="csub-crypto_1d-pnl" style="font-size:18px;font-weight:700;">--</div>
+          </div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
+            <div style="font-size:18px;font-weight:700;color:#888;" id="csub-crypto_1d-winrate">--</div>
+          </div>
+          <div style="text-align:center;margin-bottom:8px;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Dep</div>
+            <div style="font-size:13px;font-weight:700;color:#888;" id="csub-crypto_1d-open-dep">--</div>
+          </div>
+          <div style="text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Trades</div>
+            <div style="font-size:13px;font-weight:700;color:#888;" id="csub-crypto_1d-total-trades">--</div>
           </div>
         </div>
       </div>
@@ -574,8 +631,7 @@ const MODULE_ID = { weather: 'weather', fed: 'fed', geo: 'geo', sports: 'sports'
 window._moduleData   = {};
 window._modulePeriod = { weather: 'month', fed: 'month', geo: 'month', sports: 'month' };
 
-// Crypto sub-module tab state
-window._activeCryptoSub = 'crypto_15m_dir';
+// Crypto sub-module state
 window._cryptoSubPeriod = 'month';
 window._cryptoSubData = {};
 
@@ -637,59 +693,46 @@ function renderModuleCard(mod) {
   if (totalTrEl) totalTrEl.textContent = (d.trade_count || 0) + (d.open_trades || 0);
 }
 
-// ── Crypto Sub-Module Tabs ───────────────────────────────────────────────────
-function switchCryptoSub(subKey, btn) {
-  window._activeCryptoSub = subKey;
-  document.querySelectorAll('#crypto-sub-tabs .tab').forEach(t => t.classList.remove('on'));
-  btn.classList.add('on');
-  renderCryptoSubCard();
-}
+// ── Crypto Sub-Module 4-Column ───────────────────────────────────────────────
+const CRYPTO_SUBS = ['crypto_15m_dir','crypto_1h_dir','crypto_1h_band','crypto_1d'];
 
 function setCryptoSubPeriod(period) {
   window._cryptoSubPeriod = period;
-  renderCryptoSubCard();
+  renderCrypto4Col();
 }
 
-function renderCryptoSubCard() {
-  const sub = window._activeCryptoSub;
-  const d = window._cryptoSubData[sub];
-  if (!d || !Object.keys(d).length) {
-    ['crypto-sub-open-pnl','crypto-sub-pnl','crypto-sub-winrate',
-     'crypto-sub-open-dep','crypto-sub-open-cnt','crypto-sub-total-trades'
-    ].forEach(id => { const el = $(id); if(el) el.textContent = '--'; });
-    return;
-  }
+function renderCrypto4Col() {
   const period = window._cryptoSubPeriod || 'month';
-  const pnl = period === 'day'   ? (d.closed_pnl_day   ?? 0)
-            : period === 'week'  ? (d.closed_pnl_week  ?? 0)
-            : period === 'month' ? (d.closed_pnl_month ?? 0)
-            : period === 'year'  ? (d.closed_pnl_year  ?? 0)
-            : d.closed_pnl;
+  CRYPTO_SUBS.forEach(sub => {
+    const d = window._cryptoSubData[sub];
+    const el = id => $('csub-' + sub + '-' + id);
+    if (!d || !Object.keys(d).length) {
+      ['open-pnl','pnl','winrate','open-dep','total-trades'].forEach(k => {
+        const e = el(k); if(e) e.textContent = '--';
+      });
+      return;
+    }
+    const pnl = period === 'day'   ? (d.closed_pnl_day   ?? 0)
+              : period === 'week'  ? (d.closed_pnl_week  ?? 0)
+              : period === 'month' ? (d.closed_pnl_month ?? 0)
+              : period === 'year'  ? (d.closed_pnl_year  ?? 0)
+              : d.closed_pnl;
 
-  const opnlEl = $('crypto-sub-open-pnl');
-  if (opnlEl) {
-    const opnl = d.open_pnl != null ? d.open_pnl : 0;
-    opnlEl.className = pcls(opnl);
-    opnlEl.style.cssText = 'font-size:22px;font-weight:700;letter-spacing:-0.5px;';
-    opnlEl.textContent = (opnl >= 0 ? '+' : '') + dollar(opnl);
-  }
-  const pnlEl = $('crypto-sub-pnl');
-  if (pnlEl) {
-    pnlEl.className = pcls(pnl);
-    pnlEl.style.cssText = 'font-size:22px;font-weight:700;letter-spacing:-0.5px;';
-    pnlEl.textContent = (pnl >= 0 ? '+' : '') + dollar(pnl);
-  }
-  const wrEl = $('crypto-sub-winrate');
-  if (wrEl) {
-    if (d.win_rate != null) { wrEl.textContent = d.win_rate.toFixed(0) + '%'; wrEl.style.color = '#4ade80'; }
-    else { wrEl.textContent = '--'; wrEl.style.color = '#888'; }
-  }
-  const depEl = $('crypto-sub-open-dep');
-  if (depEl) depEl.textContent = dollar(d.open_deployed || 0);
-  const cntEl = $('crypto-sub-open-cnt');
-  if (cntEl) cntEl.textContent = d.open_trades != null ? d.open_trades : '--';
-  const ttEl = $('crypto-sub-total-trades');
-  if (ttEl) ttEl.textContent = (d.trade_count || 0) + (d.open_trades || 0);
+    const opnlEl = el('open-pnl');
+    if (opnlEl) { const v = d.open_pnl || 0; opnlEl.className = pcls(v); opnlEl.style.cssText='font-size:18px;font-weight:700;'; opnlEl.textContent = (v>=0?'+':'') + dollar(v); }
+
+    const pnlEl = el('pnl');
+    if (pnlEl) { pnlEl.className = pcls(pnl); pnlEl.style.cssText='font-size:18px;font-weight:700;'; pnlEl.textContent = (pnl>=0?'+':'') + dollar(pnl); }
+
+    const wrEl = el('winrate');
+    if (wrEl) { if(d.win_rate!=null){ wrEl.textContent=d.win_rate.toFixed(0)+'%'; wrEl.style.color='#4ade80'; } else { wrEl.textContent='--'; wrEl.style.color='#888'; } }
+
+    const depEl = el('open-dep');
+    if (depEl) depEl.textContent = dollar(d.open_deployed || 0);
+
+    const ttEl = el('total-trades');
+    if (ttEl) ttEl.textContent = (d.trade_count || 0) + (d.open_trades || 0);
+  });
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────────────
@@ -1285,7 +1328,7 @@ function renderState(state) {
     crypto_1h_band:  modules.crypto_1h_band  || {},
     crypto_1d:       modules.crypto_1d       || {},
   };
-  renderCryptoSubCard();
+  renderCrypto4Col();
 
   // ── Positions table ─────────────────────────────────────────────────────────
   const tb = $('pos-b');
@@ -1409,7 +1452,7 @@ async function loadClosedPnl() {
           crypto_1h_band:  pnl.modules.crypto_1h_band  || {},
           crypto_1d:       pnl.modules.crypto_1d       || {},
         };
-        renderCryptoSubCard();
+        renderCrypto4Col();
       }
     }
 
