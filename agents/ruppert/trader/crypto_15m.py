@@ -1294,6 +1294,7 @@ def evaluate_crypto_15m_entry(
             ticker, fill_contracts_pt, direction, fill_price_pt,
             module='crypto_15m_dir',
             title=f'{asset} 15m direction',
+            entry_raw_score=raw_score,
         )
     except Exception as _pt_err:
         logger.warning(f'[15m] position_tracker.add_position failed: {_pt_err}')

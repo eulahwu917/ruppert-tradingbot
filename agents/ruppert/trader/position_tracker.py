@@ -133,7 +133,8 @@ def _build_thresholds(side: str, entry_price: float, holding_type: str = '') -> 
 
 
 def add_position(ticker: str, quantity: int, side: str, entry_price: float,
-                 module: str = '', title: str = '', holding_type: str = ''):
+                 module: str = '', title: str = '', holding_type: str = '',
+                 entry_raw_score: float | None = None):
     """
     Call after every trade execution.
     entry_price: in cents (e.g. 45 = 45c).
@@ -176,6 +177,7 @@ def add_position(ticker: str, quantity: int, side: str, entry_price: float,
             'title': title,
             'added_at': time.time(),
             'exit_thresholds': thresholds,
+            'entry_raw_score': entry_raw_score,
         }
         logger.info('[PositionTracker] Tracking %s %s @ %dc (%d contracts)', ticker, side, entry_price, quantity)
     _persist()
@@ -312,6 +314,13 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
                 key[0], key[1], time.time() - _recently_exited[key]
             )
             continue
+
+        # Terminal signal logger — shadow log for crypto_15m_dir positions near close
+        try:
+            from terminal_signal_logger import maybe_log_terminal
+            maybe_log_terminal(ticker, pos, yes_bid, close_time=close_time)
+        except Exception as _tsl_err:
+            logger.debug('[PositionTracker] terminal_signal_logger: %s', _tsl_err)
 
         thresholds = pos.get('exit_thresholds')
         if thresholds is None:
