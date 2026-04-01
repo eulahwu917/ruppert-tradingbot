@@ -38,3 +38,28 @@ _Owned by: Data Analyst agent. Updated after data source changes, feed issues, o
 ## Lessons Learned
 - Always validate WS URL against prod API docs — demo URL was silently wrong for weeks
 - REST fallback field names must match actual API response schema, not assumed names
+
+---
+
+## 2026-03-31 Session Update
+
+### New Data Source: Polymarket
+- `agents/ruppert/data_analyst/polymarket_client.py` — shared signal client
+- Functions: `get_crypto_consensus()`, `get_geo_signals()`, `get_wallet_positions()`, `get_smart_money_signal()`, `get_markets_by_keyword()`
+- **Status: Shadow mode only — NOT wired into any live module**
+- Goal: 7-day shadow collection → 200+ trades → correlation analysis → potential YES-side gate filter
+
+### Sports Odds Collector Fixed
+- Kalshi `series_ticker` query fixed; `bird` full path corrected
+- Now collecting **11 NBA + 33 MLB** games daily
+- `/api/sports` endpoint + UI dashboard card showing Vegas vs Kalshi gap live
+
+### TheNewsAPI
+- Key saved to `secrets/thenewsapi_config.json`
+- Endpoint: `https://api.thenewsapi.com/v1/news/all` — use `found` field for article volume/spike detection
+
+### Tools
+- `python scripts/data_toolkit.py` — fast agent analysis CLI (<3s). Use instead of reading raw log files.
+- `bird` CLI for X searches (not `xurl` — xurl removed)
+
+### Capital at EOD: ~$13,146

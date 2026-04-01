@@ -32,3 +32,33 @@ _Owned by: Data Scientist agent. Updated after synthesis issues, data health fin
 - Old win-rate data by confidence tier is invalid (confidence field wasn't logged before 2026-03-26)
 - Bot P&L without Mar 13 bug: ~+$81 (consistent with Opus figure of +$84.52)
 - Always verify settle records are included when computing P&L — easy to miss
+
+---
+
+## 2026-03-31 Session Update
+
+### P&L Architecture Overhaul — CRITICAL
+- **`pnl_cache.json` deleted permanently.** Do not recreate. It was the source of stale/wrong P&L.
+- Single canonical path: raw logs → `compute_closed_pnl_from_logs()` → `get_capital()`
+- mtime-based in-process cache added for performance
+- Update all references: `Truth Files I Own` section below is now stale — remove `pnl_cache.json`
+
+### Truth Files I Own (UPDATED)
+- `environments/demo/logs/truth/pending_alerts.json` — alerts queue
+- `environments/demo/logs/cycle_log.jsonl` — cycle history
+- ~~`pnl_cache.json`~~ — **DELETED. P&L now computed live from raw logs.**
+
+### New Logging Infrastructure
+- `logs/terminal_signals/YYYY-MM-DD.jsonl` — terminal signal shadow logs (T-90s before close). 36 records collected tonight.
+- `logs/price_series/{ticker}.jsonl` — intra-window yes_bid/ask every 60s per open position. For backtest price series.
+
+### New Analysis Tool
+- `python scripts/data_toolkit.py winrate --module crypto_15m_dir --days 7 --by asset,hour,side`
+- Returns in <3s. All DS analysis should use this CLI instead of reading raw files.
+
+### NO-side P&L Bug Fix
+- Formula was wrong for NO-side P&L calculation
+- ws_feed restarted to load corrected formula
+- 3 correction records applied to affected historical entries
+
+### Capital at EOD: ~$13,146
