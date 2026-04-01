@@ -27,14 +27,13 @@ logger = logging.getLogger(__name__)
 _env_paths = _get_paths()
 _LOGS_DIR = _env_paths['logs']
 _DEPOSITS_FILE = _LOGS_DIR / "demo_deposits.jsonl"
-_PNL_CACHE_FILE = _env_paths['truth'] / "pnl_cache.json"  # authoritative file owned by Data Scientist synthesizer
 _DEFAULT_CAPITAL = 10000.0  # Fresh start 2026-03-26
 
 
 def get_capital() -> float:
     """
     Return total available capital.
-    DEMO: sum of demo_deposits.jsonl + realized P&L from pnl_cache.json
+    DEMO: sum of demo_deposits.jsonl + realized P&L from compute_closed_pnl_from_logs()
     LIVE: Kalshi API balance (falls back to deposits if API unavailable)
     """
     try:
@@ -109,23 +108,14 @@ def get_daily_exposure() -> float:
 def get_pnl() -> dict:
     """
     Return P&L summary: {'closed': float, 'open': float, 'total': float}
-    Reads from pnl_cache.json (written by synthesizer.py via Data Scientist). Dashboard is read-only.
+    Closed P&L computed live from trade logs via compute_closed_pnl_from_logs().
+    No disk cache — single source of truth.
     """
     result = {'closed': 0.0, 'open': 0.0, 'total': 0.0}
     try:
-        if _PNL_CACHE_FILE.exists():
-            data = json.loads(_PNL_CACHE_FILE.read_text(encoding='utf-8'))
-            # P3-2 fix: wrap individual float() casts in try/except to handle
-            # corrupted or non-numeric values in pnl_cache.json gracefully.
-            try:
-                result['closed'] = round(float(data.get('closed_pnl', 0.0)), 2)
-            except (TypeError, ValueError) as _e:
-                logger.warning(f"[Capital] get_pnl(): invalid closed_pnl value — {_e}")
-            try:
-                result['open'] = round(float(data.get('open_pnl', 0.0)), 2)
-            except (TypeError, ValueError) as _e:
-                logger.warning(f"[Capital] get_pnl(): invalid open_pnl value — {_e}")
-            result['total'] = round(result['closed'] + result['open'], 2)
+        from agents.ruppert.data_scientist.logger import compute_closed_pnl_from_logs
+        result['closed'] = compute_closed_pnl_from_logs()
+        result['total'] = result['closed'] + result['open']
     except Exception as e:
         logger.warning(f"[Capital] get_pnl() failed: {e}")
     return result

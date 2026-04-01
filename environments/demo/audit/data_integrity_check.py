@@ -75,16 +75,8 @@ def check_unscored_predictions():
 
 
 def check_pnl_cache():
-    """Verify pnl_cache.json is fresh."""
-    pnl_cache = LOGS_DIR / "pnl_cache.json"
-    if not pnl_cache.exists():
-        warnings.append("pnl_cache.json missing — dashboard P&L may be stale")
-        return
-    age_h = (datetime.now(timezone.utc).timestamp() - pnl_cache.stat().st_mtime) / 3600
-    if age_h > 24:
-        warnings.append(f"pnl_cache.json is {age_h:.1f}h old — dashboard P&L may be stale")
-    else:
-        print(f"  pnl_cache.json: {age_h:.1f}h old — OK")
+    """No-op — pnl_cache.json removed. P&L computed live from logs."""
+    print("  pnl_cache.json removed — P&L computed live from logs — OK")
 
 
 def check_shadow_log():

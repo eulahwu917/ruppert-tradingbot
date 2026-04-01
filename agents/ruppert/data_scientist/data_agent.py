@@ -44,7 +44,7 @@ TRADES_DIR.mkdir(parents=True, exist_ok=True)
 TRUTH_DIR.mkdir(parents=True, exist_ok=True)
 
 STATE_FILE = LOGS_DIR / 'data_audit_state.json'
-PNL_CACHE_FILE = TRUTH_DIR / 'pnl_cache.json'   # truth dir — same file capital.py reads
+# pnl_cache.json removed — P&L computed live by compute_closed_pnl_from_logs()
 TRACKER_FILE = LOGS_DIR / 'tracked_positions.json'
 
 REQUIRED_FIELDS = ['ticker', 'side', 'size_dollars', 'module', 'ts_or_timestamp']
@@ -361,17 +361,11 @@ def compute_pnl_from_logs() -> float:
 
 
 def check_pnl_consistency() -> tuple:
-    """Returns (is_mismatch, cached_pnl, computed_pnl)."""
-    cached = 0.0
-    if PNL_CACHE_FILE.exists():
-        try:
-            data = json.loads(PNL_CACHE_FILE.read_text(encoding='utf-8'))
-            cached = float(data.get('closed_pnl', 0))
-        except Exception:
-            pass
+    """Returns (is_mismatch, cached_pnl, computed_pnl).
+    pnl_cache.json removed — always consistent now (no-op).
+    """
     computed = compute_pnl_from_logs()
-    delta = abs(cached - computed)
-    return delta > 0.10, cached, computed
+    return False, computed, computed
 
 
 def _parse_ticker_expiry(ticker: str) -> date | None:
@@ -1024,19 +1018,8 @@ def _remove_tracker_orphans(orphan_tickers: list, open_positions: list = None):
 
 
 def _regenerate_pnl_cache():
-    """Regenerate pnl_cache.json from trade logs.
-
-    Writes closed_pnl only. open_pnl is not persisted here — the
-    synthesizer computes it from live prices on the next synthesis run.
-    (The open_pnl preservation block was dead code: synthesize_pnl_cache()
-    always overwrites pnl_cache.json immediately after this function runs.)
-    """
-    computed = compute_pnl_from_logs()
-    cache_data = {'closed_pnl': computed}
-    tmp = PNL_CACHE_FILE.with_suffix('.tmp')
-    tmp.write_text(json.dumps(cache_data), encoding='utf-8')
-    tmp.replace(PNL_CACHE_FILE)
-    return computed
+    """No-op — pnl_cache.json removed. P&L computed live from logs."""
+    return compute_pnl_from_logs()
 
 
 # ─────────────────────────────── Alert formatting ─────────────────────────────

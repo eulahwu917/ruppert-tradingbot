@@ -200,7 +200,7 @@ def synthesize_pnl_cache(events: list = None) -> dict:
         'closed_pnl': round(closed_pnl, 2),
         'open_pnl':   round(open_pnl, 2),
     }
-    _write_truth('pnl_cache.json', cache)
+    # pnl_cache.json deleted — P&L is computed live by compute_closed_pnl_from_logs()
     return cache
 
 
