@@ -172,6 +172,7 @@ def add_position(ticker: str, quantity: int, side: str, entry_price: float,
         _tracked[key] = {
             'quantity': quantity,
             'side': side,
+            'entry_direction': side.lower(),
             'entry_price': entry_price,
             'module': module,
             'title': title,

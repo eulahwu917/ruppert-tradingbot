@@ -34,6 +34,7 @@ sys.stderr.reconfigure(encoding='utf-8')
 from agents.ruppert.env_config import get_paths as _get_paths, is_live_enabled as _is_live_enabled
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from scripts.event_logger import log_event
+from terminal_signal_logger import backfill_outcome
 
 _PDT = ZoneInfo('America/Los_Angeles')
 _paths = _get_paths()
@@ -274,6 +275,12 @@ def check_settlements():
         win_loss = 'WIN' if pnl > 0 else 'LOSS'
         print(f"  [SETTLE] {ticker} {side.upper()} → {result.upper()} {win_loss} | P&L=${pnl:+.2f}")
         settled_count += 1
+
+        # Backfill terminal signal logger with outcome
+        try:
+            backfill_outcome(ticker, side, win_loss)
+        except Exception as _bf_err:
+            print(f"  [WARN] terminal signal backfill failed for {ticker}: {_bf_err}")
 
         # Rate limit: be kind to Kalshi API
         time.sleep(0.1)
