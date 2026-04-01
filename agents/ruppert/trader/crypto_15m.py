@@ -67,6 +67,7 @@ W_OI   = getattr(config, 'CRYPTO_15M_DIR_W_OI',   0.18)
 
 from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.strategist.strategy import should_enter
+from agents.ruppert.data_analyst.polymarket_client import get_crypto_consensus
 LOGS_DIR = _get_paths()['logs']
 LOGS_DIR.mkdir(exist_ok=True)
 DECISION_LOG = LOGS_DIR / 'decisions_15m.jsonl'
@@ -526,8 +527,11 @@ def get_polymarket_yes_prob(asset: str) -> float | None:
     Check if Polymarket has a corresponding 15-min crypto market.
     Returns YES probability or None if unavailable.
     """
-    # Polymarket doesn't have 15-min direction markets yet — placeholder
-    return None
+    from agents.ruppert.data_analyst.polymarket_client import get_crypto_consensus
+    result = get_crypto_consensus(asset)
+    if result is None:
+        return None
+    return result['yes_price']
 
 
 # ─────────────────────────────── Risk Filters ────────────────────────────────
@@ -977,16 +981,19 @@ def evaluate_crypto_15m_entry(
 
     P_biased = P_directional * funding_mult
 
-    # Polymarket divergence nudge
+    # Polymarket divergence nudge — SHADOW LOG ONLY (do not influence trades)
     poly_nudge = 0.0
     poly_yes = get_polymarket_yes_prob(asset)
     kalshi_yes = yes_ask / 100.0
-    _poly_div_threshold = getattr(config, 'CRYPTO_15M_POLY_DIVERGENCE_THRESHOLD', 0.03)
-    _poly_nudge_weight   = getattr(config, 'CRYPTO_15M_POLY_NUDGE_WEIGHT', 0.3)
     if poly_yes is not None:
+        _poly_div_threshold = getattr(config, 'CRYPTO_15M_POLY_DIVERGENCE_THRESHOLD', 0.03)
+        _poly_nudge_weight  = getattr(config, 'CRYPTO_15M_POLY_NUDGE_WEIGHT', 0.3)
         divergence = poly_yes - kalshi_yes
-        if abs(divergence) > _poly_div_threshold:
-            poly_nudge = _poly_nudge_weight * divergence
+        would_nudge = _poly_nudge_weight * divergence if abs(divergence) > _poly_div_threshold else 0.0
+        nudge_dir = "YES" if would_nudge > 0 else ("NO" if would_nudge < 0 else "FLAT")
+        logger.info("[Poly-Shadow] %s consensus=%.3f, kalshi=%.3f, div=%.3f, would nudge %s by %.4f",
+                    asset, poly_yes, kalshi_yes, divergence, nudge_dir, abs(would_nudge))
+        # poly_nudge stays 0.0 — shadow only, no trade influence
 
     P_final = max(0.05, min(0.95, P_biased + poly_nudge))
 

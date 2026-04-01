@@ -1,29 +1,31 @@
 """
-Geopolitical Data Client — GDELT event feed + Kalshi market matcher.
+Geopolitical Data Client — TheNewsAPI + Polymarket + Kalshi market matcher.
 Data-only module: no LLM calls. Returns structured event-market pairs.
 
 Data sources:
-  - GDELT v2 DOC API (free, ~15 min refresh): recent geopolitical news articles
+  - TheNewsAPI (curated news feed, low latency)
+  - Polymarket geo signals (market-implied probabilities)
   - Kalshi market search: finds geo-related prediction markets
 
-Output: list of dicts, each pairing a GDELT event with a Kalshi market.
+Blending: TheNewsAPI 60% + Polymarket 40% (with fallback to sole source at 100%).
+
+Output: list of dicts, each pairing a news event with a Kalshi market.
 """
 import requests
 import json
 import os
-import time
 from datetime import datetime, date, timezone
 from agents.ruppert.data_scientist.logger import log_activity
 from kalshi_market_search import find_series_by_keywords, get_markets_by_tickers
 
-# ── Search terms for GDELT + Kalshi discovery ────────────────────────────────
+# ── Search terms for news + Kalshi discovery ─────────────────────────────────
 GEO_SEARCH_TERMS = [
     'ukraine', 'russia ceasefire', 'israel', 'iran nuclear', 'taiwan',
     'nato', 'china military', 'north korea', 'middle east',
     'sanctions', 'military', 'troops withdrawal', 'peace deal', 'war ends',
 ]
 
-# Keywords that map GDELT articles to Kalshi market titles
+# Keywords that map news articles to Kalshi market titles
 MATCH_KEYWORDS = {
     'ukraine':    ['ukraine', 'kyiv', 'zelensky'],
     'russia':     ['russia', 'putin', 'moscow', 'kremlin'],
@@ -40,122 +42,156 @@ MATCH_KEYWORDS = {
 
 GEO_LOG = os.path.join(os.path.dirname(__file__), 'logs', 'geo_client.jsonl')
 
-# ── Rate-limiting / resilience constants ─────────────────────────────────────
-_GDELT_TIMEOUT = 8            # seconds per request (was 15)
-_MAX_RETRIES = 3              # retries per query on 429
-_CIRCUIT_BREAKER_LIMIT = 3    # consecutive failures before tripping
-_TIME_BUDGET_SECONDS = 180    # 3-minute total budget for geo scan
+# ── TheNewsAPI config ────────────────────────────────────────────────────────
+_THENEWSAPI_KEY = 'RGPtfv3i6ni4bucrlfpUrMuDUMmRuvi9fGubxwmt'
+_THENEWSAPI_BASE = 'https://api.thenewsapi.com/v1/news/all'
+_THENEWSAPI_TIMEOUT = 10
+
+# ── Blending weights ────────────────────────────────────────────────────────
+W_NEWS = 0.60
+W_POLY = 0.40
 
 
-def get_gdelt_events(query='geopolitical conflict', timespan='24h', max_records=25):
+def get_thenewsapi_events(query: str, limit: int = 25) -> list[dict]:
     """
-    Fetch recent geopolitical articles from GDELT v2 DOC API.
-    Retries with exponential backoff on 429 responses.
-
-    Returns list of dicts: [{title, url, source, seendate, domain, event_type, country, severity}]
-    Raises _GdeltRequestFailed on non-retryable failure (for circuit breaker tracking).
+    Fetch recent news articles from TheNewsAPI for a geo keyword.
+    Returns list of dicts: [{title, url, source, published_at, snippet, found_count}]
+    Raises on non-retryable failure.
     """
-    last_err = None
-    for attempt in range(_MAX_RETRIES):
-        try:
-            resp = requests.get(
-                'https://api.gdeltproject.org/api/v2/doc/doc',
-                params={
-                    'query': query,
-                    'mode': 'artlist',
-                    'maxrecords': max_records,
-                    'timespan': timespan,
-                    'format': 'json',
-                    'sourcelang': 'english',
-                },
-                timeout=_GDELT_TIMEOUT
-            )
-            if resp.status_code == 429:
-                wait = 2 ** (attempt + 1)  # 2s, 4s, 8s
-                log_activity(f"[GeoClient] GDELT 429 on '{query}', backoff {wait}s (attempt {attempt+1}/{_MAX_RETRIES})")
-                time.sleep(wait)
-                continue
+    try:
+        resp = requests.get(
+            _THENEWSAPI_BASE,
+            params={
+                'api_token': _THENEWSAPI_KEY,
+                'search': query,
+                'language': 'en',
+                'limit': limit,
+            },
+            timeout=_THENEWSAPI_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        found_count = data.get('meta', {}).get('found', 0)
 
-            if resp.status_code != 200:
-                log_activity(f"[GeoClient] GDELT returned {resp.status_code} for '{query}'")
-                raise _GdeltRequestFailed(f"HTTP {resp.status_code}")
-
-            data = resp.json()
-            articles = data.get('articles', [])
-
-            events = []
-            for art in articles:
-                title = art.get('title', '')
-                parsed = _parse_event(title)
-                events.append({
-                    'title': title,
-                    'url': art.get('url', ''),
-                    'source': art.get('domain', ''),
-                    'seendate': art.get('seendate', ''),
-                    'event_type': parsed['event_type'],
-                    'country': parsed['country'],
-                    'severity': parsed['severity'],
-                })
-
-            return events
-
-        except _GdeltRequestFailed:
-            raise
-        except requests.exceptions.Timeout:
-            log_activity(f"[GeoClient] GDELT timeout on '{query}' (attempt {attempt+1}/{_MAX_RETRIES})")
-            last_err = "timeout"
-            continue
-        except Exception as e:
-            log_activity(f"[GeoClient] GDELT fetch error on '{query}': {e}")
-            raise _GdeltRequestFailed(str(e))
-
-    # Exhausted retries (429s or timeouts)
-    log_activity(f"[GeoClient] GDELT exhausted {_MAX_RETRIES} retries for '{query}' (last: {last_err})")
-    raise _GdeltRequestFailed(f"exhausted retries for '{query}'")
+        articles = []
+        for art in data.get('data', []):
+            title = art.get('title', '')
+            parsed = _parse_event(title)
+            articles.append({
+                'title': title,
+                'url': art.get('url', ''),
+                'source': art.get('source', ''),
+                'published_at': art.get('published_at', ''),
+                'snippet': art.get('snippet', ''),
+                'event_type': parsed['event_type'],
+                'country': parsed['country'],
+                'severity': parsed['severity'],
+                'found_count': found_count,
+            })
+        return articles
+    except Exception as e:
+        log_activity(f"[GeoClient] TheNewsAPI fetch error on '{query}': {e}")
+        raise
 
 
-class _GdeltRequestFailed(Exception):
-    """Internal signal for circuit breaker tracking."""
-    pass
-
-
-def get_all_gdelt_events(timespan='24h'):
+def get_all_news_events() -> list[dict]:
     """
-    Fetch GDELT events across multiple geo search terms.
-    Deduplicates by title. Includes circuit breaker and time budget.
+    Fetch TheNewsAPI events across multiple geo search terms.
+    Deduplicates by title. Returns [] on total failure.
     """
     seen_titles = set()
     all_events = []
-    consecutive_failures = 0
-    start_time = time.monotonic()
 
     for term in GEO_SEARCH_TERMS:
-        # Time budget check
-        elapsed = time.monotonic() - start_time
-        if elapsed > _TIME_BUDGET_SECONDS:
-            log_activity("[GeoClient] Time budget exceeded — aborting geo scan")
-            break
-
-        # Circuit breaker check
-        if consecutive_failures >= _CIRCUIT_BREAKER_LIMIT:
-            log_activity("[GeoClient] GDELT circuit breaker triggered — skipping remaining queries this cycle")
-            break
-
         try:
-            events = get_gdelt_events(query=term, timespan=timespan, max_records=10)
-            consecutive_failures = 0  # reset on success
+            events = get_thenewsapi_events(query=term, limit=10)
             for ev in events:
                 title_key = ev['title'].lower().strip()
                 if title_key not in seen_titles:
                     seen_titles.add(title_key)
                     all_events.append(ev)
-        except _GdeltRequestFailed as e:
-            log_activity(f"[GeoClient] Query '{term}' failed: {e}")
-            consecutive_failures += 1
+        except Exception as e:
+            log_activity(f"[GeoClient] TheNewsAPI query '{term}' failed: {e}")
 
-    # Sort by severity descending
     all_events.sort(key=lambda x: x['severity'], reverse=True)
     return all_events
+
+
+def _news_volume_score(events: list[dict]) -> float:
+    """
+    Compute a 0-1 volume score from TheNewsAPI found counts.
+    Higher found_count → more articles → higher geo activity signal.
+    """
+    if not events:
+        return 0.0
+    total_found = sum(ev.get('found_count', 0) for ev in events)
+    # Normalize: 100+ articles across terms → 1.0
+    return min(1.0, total_found / 100.0)
+
+
+def _polymarket_severity_score(poly_signals: list[dict]) -> float:
+    """
+    Compute a 0-1 severity score from Polymarket geo signals.
+    Uses average yes_price weighted by volume_24h.
+    """
+    if not poly_signals:
+        return 0.0
+    total_vol = sum(s.get('volume_24h', 0) for s in poly_signals)
+    if total_vol <= 0:
+        # Equal-weight average
+        prices = [s.get('yes_price', 0) for s in poly_signals if s.get('yes_price') is not None]
+        return sum(prices) / len(prices) if prices else 0.0
+    weighted_sum = sum(
+        (s.get('yes_price', 0) or 0) * s.get('volume_24h', 0)
+        for s in poly_signals
+    )
+    return min(1.0, weighted_sum / total_vol)
+
+
+def get_blended_severity() -> tuple[float, str]:
+    """
+    Compute blended severity from TheNewsAPI + Polymarket.
+    Returns (severity_score, source_description).
+    Fallback: if one source fails, use the other at 100%.
+    If both fail, returns (0.0, 'no_signal').
+    """
+    news_score = None
+    poly_score = None
+
+    # TheNewsAPI
+    try:
+        news_events = get_all_news_events()
+        if news_events:
+            news_score = _news_volume_score(news_events)
+    except Exception as e:
+        log_activity(f"[GeoClient] TheNewsAPI total failure: {e}")
+
+    # Polymarket
+    try:
+        from agents.ruppert.data_analyst.polymarket_client import get_geo_signals
+        poly_signals = get_geo_signals()
+        if poly_signals:
+            poly_score = _polymarket_severity_score(poly_signals)
+    except Exception as e:
+        log_activity(f"[GeoClient] Polymarket geo signals failed: {e}")
+
+    # Blend with fallback
+    if news_score is not None and poly_score is not None:
+        blended = W_NEWS * news_score + W_POLY * poly_score
+        source = f'thenewsapi({news_score:.2f})x{W_NEWS}+polymarket({poly_score:.2f})x{W_POLY}'
+    elif news_score is not None:
+        blended = news_score
+        source = f'thenewsapi_only({news_score:.2f})'
+        log_activity("[GeoClient] Polymarket unavailable — using TheNewsAPI at 100%")
+    elif poly_score is not None:
+        blended = poly_score
+        source = f'polymarket_only({poly_score:.2f})'
+        log_activity("[GeoClient] TheNewsAPI unavailable — using Polymarket at 100%")
+    else:
+        log_activity("[GeoClient] Both sources failed — no geo signal")
+        return 0.0, 'no_signal'
+
+    return round(blended, 4), source
 
 
 def _parse_event(title):
@@ -229,7 +265,7 @@ def get_geo_markets():
 
 def _match_event_to_market(event, market):
     """
-    Check if a GDELT event is relevant to a Kalshi market by title keyword matching.
+    Check if a news event is relevant to a Kalshi market by title keyword matching.
     Returns a relevance score (0 = no match, higher = stronger match).
     """
     ev_title = event.get('title', '').lower()
@@ -260,8 +296,8 @@ def _days_to_expiry(market):
 
 def get_events(timespan='24h'):
     """
-    Main entry point: fetch GDELT events, find matching Kalshi markets,
-    return structured list of event-market pairs.
+    Main entry point: fetch news events via TheNewsAPI + Polymarket,
+    find matching Kalshi markets, return structured list of event-market pairs.
 
     Returns: [{
         event: {title, url, source, event_type, country, severity},
@@ -270,22 +306,28 @@ def get_events(timespan='24h'):
         current_price: int (yes_ask in cents),
         days_to_expiry: float,
         match_score: int,
+        blended_severity: float,
+        severity_source: str,
     }]
 
     NEVER raises — returns [] on any failure so the cycle continues.
     """
     try:
-        return _get_events_inner(timespan=timespan)
+        return _get_events_inner()
     except Exception as e:
         log_activity(f"[GeoClient] Unhandled error in get_events — returning empty: {e}")
         return []
 
 
-def _get_events_inner(timespan='24h'):
+def _get_events_inner():
     """Inner implementation of get_events (may raise)."""
-    events = get_all_gdelt_events(timespan=timespan)
+    # Fetch blended severity score
+    blended_sev, sev_source = get_blended_severity()
+
+    # Fetch news events for market matching
+    events = get_all_news_events()
     if not events:
-        log_activity("[GeoClient] No GDELT events found")
+        log_activity("[GeoClient] No news events found")
         return []
 
     markets = get_geo_markets()
@@ -323,6 +365,8 @@ def _get_events_inner(timespan='24h'):
                 'match_score': score,
                 'no_ask': market.get('no_ask', 0) or 0,
                 'yes_bid': market.get('yes_bid', 0) or 0,
+                'blended_severity': blended_sev,
+                'severity_source': sev_source,
             })
 
     # Sort by match score * event severity (best pairs first)
@@ -343,7 +387,7 @@ def _get_events_inner(timespan='24h'):
         for item in deduped:
             f.write(json.dumps({'date': str(date.today()), **item}) + '\n')
 
-    log_activity(f"[GeoClient] {len(events)} events, {len(markets)} markets, {len(deduped)} pairs matched")
+    log_activity(f"[GeoClient] {len(events)} events, {len(markets)} markets, {len(deduped)} pairs | severity={blended_sev:.3f} ({sev_source})")
     return deduped
 
 
@@ -351,11 +395,15 @@ if __name__ == '__main__':
     import sys, io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-    print("=== GDELT Event Fetch ===")
-    events = get_all_gdelt_events(timespan='24h')
+    print("=== TheNewsAPI Event Fetch ===")
+    events = get_all_news_events()
     print(f"Found {len(events)} events")
     for ev in events[:5]:
         print(f"  [{ev['severity']}] {ev['event_type']:12} {ev['country']:12} {ev['title'][:70]}")
+
+    print("\n=== Blended Severity ===")
+    sev, src = get_blended_severity()
+    print(f"  Score: {sev:.3f} ({src})")
 
     print("\n=== Kalshi Geo Markets ===")
     markets = get_geo_markets()

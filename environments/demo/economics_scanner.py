@@ -48,6 +48,46 @@ def fetch_open_markets(series_ticker: str, limit: int = 50) -> list:
         return []
 
 
+def _get_polymarket_macro_edge(title: str, market_prob: float) -> float | None:
+    """
+    Find a matching Polymarket macro signal for an economics market title.
+    Returns edge (poly_prob - market_prob) or None if no match.
+    """
+    try:
+        from agents.ruppert.data_analyst.polymarket_client import get_macro_signals
+        signals = get_macro_signals()
+        if not signals:
+            return None
+
+        title_lower = title.lower()
+        # Find best matching Polymarket signal by keyword overlap
+        best_match = None
+        best_overlap = 0
+        for sig in signals:
+            q_lower = (sig.get('question') or '').lower()
+            if sig.get('yes_price') is None:
+                continue
+            # Count shared keyword tokens
+            title_words = set(title_lower.split())
+            q_words = set(q_lower.split())
+            overlap = len(title_words & q_words)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_match = sig
+
+        if best_match is None or best_overlap < 2:
+            return None
+
+        poly_prob = best_match['yes_price']
+        edge = poly_prob - market_prob
+        print(f'[EconScanner] Polymarket match: "{best_match["question"][:60]}" '
+              f'yes={poly_prob:.2f} vs market={market_prob:.2f} → poly_edge={edge:+.3f}')
+        return edge
+    except Exception as e:
+        print(f'[EconScanner] Polymarket macro edge failed: {e}')
+        return None
+
+
 def analyze_market(market: dict, econ_data: dict) -> dict | None:
     """
     Analyze a single market and return an opportunity dict if edge exists.
@@ -98,6 +138,14 @@ def analyze_market(market: dict, econ_data: dict) -> dict | None:
 
     edge = signal['edge']
     confidence = signal.get('confidence', 'low')
+
+    # Polymarket macro ensemble — blend at 25% weight
+    poly_edge = _get_polymarket_macro_edge(title, market_prob)
+    if poly_edge is not None:
+        edge = 0.75 * edge + 0.25 * poly_edge
+        signal['edge'] = edge
+        signal['poly_edge'] = poly_edge
+        signal['signal_source'] = signal.get('signal_source', 'BLS/FRED') + '+polymarket'
 
     # Filter on edge threshold and confidence
     if abs(edge) < MIN_EDGE:

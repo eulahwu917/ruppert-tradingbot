@@ -1113,6 +1113,19 @@ def get_crypto_edge(market: dict, all_event_markets: list | None = None) -> dict
         if confidence == 'medium':
             confidence = 'high'
 
+    # ── Polymarket consensus — SHADOW LOG ONLY (do not influence trades)
+    try:
+        from agents.ruppert.data_analyst.polymarket_client import get_crypto_consensus
+        _poly = get_crypto_consensus(asset)
+        if _poly is not None:
+            _poly_yes = _poly['yes_price']
+            _poly_div = _poly_yes - market_prob
+            _poly_dir = "YES" if _poly_div > 0 else ("NO" if _poly_div < 0 else "FLAT")
+            logger.info("[Poly-Shadow] %s consensus=%.3f, market=%.3f, div=%.3f, would nudge %s",
+                        asset, _poly_yes, market_prob, _poly_div, _poly_dir)
+    except Exception as _poly_err:
+        logger.debug("[Poly-Shadow] %s unavailable: %s", asset, _poly_err)
+
     # ── Trade direction
     trade_direction = 'YES' if edge > 0 else 'NO'
 

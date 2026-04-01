@@ -416,3 +416,59 @@ def get_geo_signals(keywords: list[str] = None) -> list[dict]:
     except Exception as exc:
         logger.warning("polymarket get_geo_signals failed: %s", exc)
         return []
+
+
+# ─── Macro / Economics signals ───────────────────────────────────────────────
+
+_MACRO_KEYWORDS: list[str] = [
+    "fed rate", "interest rate", "inflation", "CPI",
+    "recession", "unemployment", "GDP", "tariff",
+]
+
+
+def _fetch_macro_signals() -> list[dict]:
+    """Raw fetch for get_macro_signals."""
+    seen_questions: set[str] = set()
+    results = []
+
+    for kw in _MACRO_KEYWORDS:
+        markets = get_markets_by_keyword(kw, limit=15)
+        for m in markets:
+            q = m.get("question", "")
+            if q in seen_questions:
+                continue
+            seen_questions.add(q)
+            results.append({
+                "question":   q,
+                "yes_price":  m.get("yes_price"),
+                "volume_24h": m.get("volume_24h", 0.0),
+                "end_date":   m.get("end_date"),
+                "category":   "macro",
+            })
+
+    return results
+
+
+def get_macro_signals() -> list[dict]:
+    """
+    Get active macro/economics Polymarket markets.
+
+    Searches: fed rate, interest rate, inflation, CPI, recession,
+              unemployment, GDP, tariff.
+
+    Returns list of dicts:
+        question, yes_price, volume_24h, end_date, category='macro'
+
+    Cache: 10 minutes.
+    Returns [] on any error.
+    """
+    cache_key = "macro_signals"
+    try:
+        return _cached(
+            cache_key,
+            _fetch_macro_signals,
+            ttl_seconds=600,
+        )
+    except Exception as exc:
+        logger.warning("polymarket get_macro_signals failed: %s", exc)
+        return []

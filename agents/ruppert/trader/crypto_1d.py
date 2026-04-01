@@ -472,11 +472,40 @@ def compute_s4_oi_regime(asset: str, current_oi: float, s1_regime: str = 'neutra
     }
 
 
+# ─────────────────────────── S5: Polymarket ───────────────────────────────────
+
+def compute_s5_polymarket(asset: str) -> dict:
+    """
+    Signal 5 — Polymarket consensus directional probability.
+    Returns {'yes_price', 'raw_score', 'available'}.
+    """
+    try:
+        from agents.ruppert.data_analyst.polymarket_client import get_crypto_consensus
+        result = get_crypto_consensus(asset)
+        if result is None:
+            return {'yes_price': None, 'raw_score': 0.0, 'available': False}
+
+        yes_price = result['yes_price']  # 0–1 probability of UP
+        # Map [0, 1] to [-1, 1]: 0.5 → 0.0 (neutral), 0.7 → 0.4, 0.3 → -0.4
+        raw_score = (yes_price - 0.5) * 2.0
+        return {
+            'yes_price': round(yes_price, 4),
+            'raw_score': round(raw_score, 4),
+            'available': True,
+            'market_title': result.get('market_title', ''),
+            'volume_24h': result.get('volume_24h', 0.0),
+        }
+    except Exception as e:
+        logger.warning('compute_s5_polymarket(%s) failed: %s', asset, e)
+        return {'yes_price': None, 'raw_score': 0.0, 'available': False}
+
+
 # ─────────────────────────── Composite Score ──────────────────────────────────
 
-def compute_composite_score(s1: dict, s2: dict, s3: dict, s4: dict) -> dict:
+def compute_composite_score(s1: dict, s2: dict, s3: dict, s4: dict, s5: dict = None) -> dict:
     """
-    Combine 4 signals into composite directional score.
+    Combine signals into composite directional score.
+    S5 (Polymarket) blended at 20% weight when available; existing weights scale down proportionally.
     Returns {'raw_composite', 'P_above', 'direction', 'confidence', 'skip_reason'}.
     """
     # Extreme funding risk filter
@@ -489,26 +518,39 @@ def compute_composite_score(s1: dict, s2: dict, s3: dict, s4: dict) -> dict:
             'skip_reason': 'extreme_funding',
         }
 
-    # Base weights
-    w4 = s4.get('weight_override', 0.20)
-    remaining = 1.0 - w4
-    if w4 == 0.0:
-        # Redistribute proportionally to S1:S2:S3 = 0.30:0.25:0.25 ratio
-        total_123 = 0.30 + 0.25 + 0.25  # = 0.80
-        w1 = 0.30 / total_123
-        w2 = 0.25 / total_123
-        w3 = 0.25 / total_123
+    # S5 Polymarket weight: 20% when available, 0% otherwise
+    s5_available = s5 is not None and s5.get('available', False)
+    w5 = 0.20 if s5_available else 0.0
+    scale = 1.0 - w5  # 0.80 when S5 active, 1.0 otherwise
+
+    # Base weights (scaled down to make room for S5)
+    w4 = s4.get('weight_override', 0.20) * scale
+    if s4.get('weight_override', 0.20) == 0.0:
+        total_123 = 0.30 + 0.25 + 0.25
+        w1 = (0.30 / total_123) * scale
+        w2 = (0.25 / total_123) * scale
+        w3 = (0.25 / total_123) * scale
+        w4 = 0.0
     else:
-        w1 = 0.30
-        w2 = 0.25
-        w3 = 0.25
+        w1 = 0.30 * scale
+        w2 = 0.25 * scale
+        w3 = 0.25 * scale
 
     raw_composite = (
         w1 * s1.get('raw_score', 0.0) +
         w2 * s2.get('raw_score', 0.0) +
         w3 * s3.get('raw_score', 0.0) +
-        w4 * s4.get('raw_score', 0.0)
+        w4 * s4.get('raw_score', 0.0) +
+        w5 * (s5.get('raw_score', 0.0) if s5 else 0.0)
     )
+
+    # Polymarket divergence warning
+    if s5_available and s5.get('yes_price') is not None:
+        model_direction = 1.0 if raw_composite > 0 else -1.0
+        poly_direction = 1.0 if s5['yes_price'] > 0.5 else -1.0
+        if abs(s5['yes_price'] - 0.5 - (raw_composite / 2.0)) > 0.10:
+            logger.warning('[Crypto1D] Polymarket divergence: poly_yes=%.3f vs model_composite=%.4f',
+                           s5['yes_price'], raw_composite)
 
     # P_above via sigmoid
     P_above = 1.0 / (1.0 + math.exp(-raw_composite * 3.0))
@@ -537,6 +579,7 @@ def compute_composite_score(s1: dict, s2: dict, s3: dict, s4: dict) -> dict:
         'direction': direction,
         'confidence': round(confidence, 4),
         'skip_reason': skip_reason,
+        'poly_yes': s5.get('yes_price') if s5_available else None,
     }
 
 
@@ -908,7 +951,9 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
     current_oi = fetch_okx_oi(okx_symbol)
     s4 = compute_s4_oi_regime(asset, current_oi, s1_regime=s1.get('regime', 'neutral'))
 
-    signals_dict = {'S1': s1, 'S2': s2, 'S3': s3, 'S4': s4}
+    s5 = compute_s5_polymarket(asset)
+
+    signals_dict = {'S1': s1, 'S2': s2, 'S3': s3, 'S4': s4, 'S5': s5}
 
     # 5. Risk filters
     if s2.get('filter_skip'):
@@ -920,7 +965,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         return _skip(asset, window, f'R1_extreme_vol (ATR_pct={atr_pct:.3f})', signals_dict)
 
     # 6. Composite score
-    composite = compute_composite_score(s1, s2, s3, s4)
+    composite = compute_composite_score(s1, s2, s3, s4, s5)
     if composite['direction'] == 'no_trade':
         return _skip(asset, window, composite.get('skip_reason', 'no_trade'), signals_dict)
 
