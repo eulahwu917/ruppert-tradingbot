@@ -143,13 +143,16 @@ def _cache_set(key: str, data):
 
 # ─────────────────────────────── Funding Rates ───────────────────────────────
 
-# Binance Futures perpetual symbols for funding rate data
-# Note: public market data endpoint — no auth required, US accessible
+# OKX perpetual swap instIds for funding rate data
+# Replaced Binance (fapi.binance.com) — returns HTTP 451 from US IPs (geo-blocked)
+# OKX public endpoints are accessible from US without auth
+OKX_FUNDING_URL = 'https://www.okx.com/api/v5/public/funding-rate-history'
 FUNDING_SYMBOLS = {
-    'BTC':  'BTCUSDT',
-    'ETH':  'ETHUSDT',
-    'XRP':  'XRPUSDT',
-    'DOGE': 'DOGEUSDT',
+    'BTC':  'BTC-USD-SWAP',
+    'ETH':  'ETH-USD-SWAP',
+    'XRP':  'XRP-USD-SWAP',
+    'DOGE': 'DOGE-USD-SWAP',
+    'SOL':  'SOL-USD-SWAP',
 }
 
 # Limit = 96 × 8h intervals ≈ 32 days ≈ rolling 30-day window
@@ -162,10 +165,10 @@ FUNDING_Z_BULLISH = -2.0   # z < -2.0 → shorts crowded → bullish signal
 
 def get_funding_rates(symbol: str, limit: int = FUNDING_RATE_LIMIT) -> list | None:
     """
-    Fetch recent funding rates for a Binance perpetual futures symbol.
+    Fetch recent funding rates from OKX perpetual swap.
 
     Args:
-        symbol: Binance futures symbol (e.g. "BTCUSDT")
+        symbol: OKX instId (e.g. "BTC-USD-SWAP")
         limit:  number of funding rate records (8h each; 96 ≈ 32 days)
 
     Returns:
@@ -177,23 +180,25 @@ def get_funding_rates(symbol: str, limit: int = FUNDING_RATE_LIMIT) -> list | No
 
     try:
         r = requests.get(
-            f'{BINANCE_FUTURES}/fundingRate',
-            params={'symbol': symbol, 'limit': limit},
+            OKX_FUNDING_URL,
+            params={'instId': symbol, 'limit': limit},
             timeout=12,
         )
         r.raise_for_status()
-        data = r.json()
-        if not isinstance(data, list) or not data:
-            logger.warning('Binance funding rate empty response for %s', symbol)
+        body = r.json()
+        if body.get('code') != '0' or not body.get('data'):
+            logger.warning('OKX funding rate empty/error response for %s: %s', symbol, body.get('code'))
             return None
 
-        rates = [float(item['fundingRate']) for item in data if 'fundingRate' in item]
+        rates = [float(item['fundingRate']) for item in body['data'] if 'fundingRate' in item]
+        # OKX returns most-recent-first; reverse to match expected most-recent-last order
+        rates.reverse()
         _cache_set(f'funding_{symbol}', rates)
-        logger.debug('Binance funding %s: %d records, latest=%.6f', symbol, len(rates), rates[-1])
+        logger.debug('OKX funding %s: %d records, latest=%.6f', symbol, len(rates), rates[-1])
         return rates
 
     except Exception as e:
-        logger.warning('Binance funding rate fetch failed for %s: %s', symbol, e)
+        logger.warning('OKX funding rate fetch failed for %s: %s', symbol, e)
         return None
 
 
@@ -207,8 +212,8 @@ def _compute_funding_z_scores(symbol: str = None, return_cumulative: bool = Fals
       z < -2.0 → shorts crowded → bullish signal
 
     Args:
-        symbol: If provided, compute z-score only for this specific Binance symbol
-                (e.g. 'BTCUSDT') and return cumulative if return_cumulative=True.
+        symbol: If provided, compute z-score only for this specific OKX instId
+                (e.g. 'BTC-USD-SWAP') and return cumulative if return_cumulative=True.
                 If None, computes for all assets in FUNDING_SYMBOLS (legacy behavior).
         return_cumulative: If True, also return funding_24h_cumulative and
                            funding_24h_z (sum of last 3×8h rates vs 30-day baseline).
