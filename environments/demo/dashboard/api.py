@@ -896,8 +896,8 @@ def get_pnl_history():
     bot_cost_basis = 0.0
     manual_cost_basis = 0.0
 
-    # Per-module stats (bot trades only — weather, crypto, fed, other)
-    module_keys = ['weather', 'crypto', 'fed', 'other']
+    # Per-module stats (bot trades only)
+    module_keys = ['weather', 'crypto', 'fed', 'geo', 'sports', 'other']
     module_stats = {m: {
         'closed_pnl': 0.0,
         'closed_pnl_day': 0.0,
@@ -1088,6 +1088,8 @@ def get_pnl_history():
             continue
         mod = classify_module(src, ticker)
         parent_mod = get_parent_module(mod)
+        if parent_mod not in module_open_stats:
+            parent_mod = 'other'
         module_open_stats[parent_mod]['open_deployed'] += t.get('size_dollars', 0)
         module_open_stats[parent_mod]['open_trades'] += 1
 
@@ -1311,7 +1313,7 @@ def _build_state():
             }
 
     # ── Build positions list (reuses prices fetched above) ────────────────────
-    module_keys = ['weather', 'crypto', 'fed', 'geo', 'other']
+    module_keys = ['weather', 'crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'fed', 'geo', 'sports', 'other']
     module_open: dict = {m: {'open_deployed': 0.0, 'open_trades': 0, 'open_pnl': 0.0} for m in module_keys}
 
     positions = []
@@ -1358,6 +1360,12 @@ def _build_state():
         module_open[parent_mod]['open_trades']   += 1
         if pnl is not None:
             module_open[parent_mod]['open_pnl'] += pnl
+        # Also accumulate into sub-module if it's a crypto sub
+        if mod in module_open and mod != parent_mod:
+            module_open[mod]['open_deployed'] += cost
+            module_open[mod]['open_trades']   += 1
+            if pnl is not None:
+                module_open[mod]['open_pnl'] += pnl
 
         edge_val = t.get('edge')
         _raw_title = (t.get('title') or ticker).replace('**', '')
@@ -1395,6 +1403,7 @@ def _build_state():
     closed_wins      = 0
     closed_count     = 0
 
+    module_closed_keys = ['weather', 'crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'fed', 'geo', 'sports', 'other']
     module_closed: dict = {m: {
         'closed_pnl': 0.0,
         'closed_pnl_day': 0.0,
@@ -1403,7 +1412,7 @@ def _build_state():
         'closed_pnl_year': 0.0,
         'trade_count': 0,
         'wins': 0,
-    } for m in module_keys}
+    } for m in module_closed_keys}
 
     # Build close records index for _build_state: (ticker, side) -> record
     # SUM fix: accumulate pnl for duplicate (ticker, side) settle records
@@ -1456,6 +1465,12 @@ def _build_state():
                 module_closed[parent_mod_c]['trade_count'] += 1
                 if pnl_val > 0:
                     module_closed[parent_mod_c]['wins'] += 1
+                # Also accumulate into sub-module if it's a crypto sub
+                if mod_c in module_closed and mod_c != parent_mod_c:
+                    module_closed[mod_c]['closed_pnl']  += pnl_val
+                    module_closed[mod_c]['trade_count'] += 1
+                    if pnl_val > 0:
+                        module_closed[mod_c]['wins'] += 1
 
             # Period bucketing
             cr_ts2 = cr.get('timestamp') if cr else None
@@ -1480,12 +1495,16 @@ def _build_state():
                         parent_mod_cd = get_parent_module(mod_cd)
                         if parent_mod_cd not in module_closed: parent_mod_cd = 'other'
                         module_closed[parent_mod_cd]['closed_pnl_day'] += pnl_val
+                        if mod_cd in module_closed and mod_cd != parent_mod_cd:
+                            module_closed[mod_cd]['closed_pnl_day'] += pnl_val
                 if sdate >= _week_start2:
                     if not is_manual:
                         mod_cwk = classify_module(src, ticker)
                         parent_mod_cwk = get_parent_module(mod_cwk)
                         if parent_mod_cwk not in module_closed: parent_mod_cwk = 'other'
                         module_closed[parent_mod_cwk]['closed_pnl_week'] += pnl_val
+                        if mod_cwk in module_closed and mod_cwk != parent_mod_cwk:
+                            module_closed[mod_cwk]['closed_pnl_week'] += pnl_val
                 if sdate.year == _today.year and sdate.month == _today.month:
                     closed_pnl_month += pnl_val
                     if not is_manual:
@@ -1493,6 +1512,8 @@ def _build_state():
                         parent_mod_cm = get_parent_module(mod_cm)
                         if parent_mod_cm not in module_closed: parent_mod_cm = 'other'
                         module_closed[parent_mod_cm]['closed_pnl_month'] += pnl_val
+                        if mod_cm in module_closed and mod_cm != parent_mod_cm:
+                            module_closed[mod_cm]['closed_pnl_month'] += pnl_val
                 if sdate.year == _today.year:
                     closed_pnl_year += pnl_val
                     if not is_manual:
@@ -1500,6 +1521,8 @@ def _build_state():
                         parent_mod_cy = get_parent_module(mod_cy)
                         if parent_mod_cy not in module_closed: parent_mod_cy = 'other'
                         module_closed[parent_mod_cy]['closed_pnl_year'] += pnl_val
+                        if mod_cy in module_closed and mod_cy != parent_mod_cy:
+                            module_closed[mod_cy]['closed_pnl_year'] += pnl_val
         except Exception:
             pass
 
@@ -1565,7 +1588,7 @@ def _build_state():
 
     # ── Finalize module stats ─────────────────────────────────────────────────
     modules_out: dict = {}
-    for mod in ['weather', 'crypto', 'fed', 'geo']:
+    for mod in ['weather', 'crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'fed', 'geo', 'sports']:
         oc = module_open.get(mod, {})
         cc = module_closed.get(mod, {})
         tc = cc.get('trade_count', 0)
@@ -1583,12 +1606,16 @@ def _build_state():
             'trade_count':       tc,
         }
 
+    # Alias: frontend uses 'crypto_1d' tab key for the 1D sub-module
+    modules_out['crypto_1d'] = modules_out.get('crypto_1h_dir', modules_out.get('other', {}))
+
     # ── Account ───────────────────────────────────────────────────────────────
     deployed     = round(sum(p['cost'] for p in positions), 2)
     buying_power = round(max(STARTING_CAPITAL - deployed, 0), 2)
 
-    total_bot_trades = sum(m['trade_count'] for m in module_closed.values())
-    total_bot_wins   = sum(m['wins'] for m in module_closed.values())
+    _parent_mods = ['weather', 'crypto', 'fed', 'geo', 'sports', 'other']
+    total_bot_trades = sum(module_closed[m]['trade_count'] for m in _parent_mods if m in module_closed)
+    total_bot_wins   = sum(module_closed[m]['wins'] for m in _parent_mods if m in module_closed)
     win_rate = round(total_bot_wins / total_bot_trades * 100, 1) if total_bot_trades > 0 else None
 
     # ── Smart money (from cache) ──────────────────────────────────────────────

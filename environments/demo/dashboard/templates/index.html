@@ -118,14 +118,6 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 .conf-lbl { font-size: 10px; color: #4ade80; font-weight: 700; }
 .bb-rationale { font-size: 11px; color: #666; line-height: 1.5; }
 
-/* Sports table */
-.sports-table { width:100%;border-collapse:collapse;font-size:12px; }
-.sports-table th { padding:7px 12px;color:#2a2a2a;font-size:10px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #1a1a1a;text-align:left; }
-.sports-table td { padding:9px 12px;border-bottom:1px solid #141414;vertical-align:middle; }
-.sports-table tr:last-child td { border-bottom:none; }
-.sports-table tr:hover td { background:#141414; }
-.sports-table .highlight { color:#fbbf24;font-weight:700; }
-
 /* Weather table */
 .wt th { text-align: left; }
 .wt td { text-align: left; }
@@ -274,7 +266,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 
 
 
-  <!-- Module Performance Cards: Weather / Crypto / Geo / Fed -->
+  <!-- Module Performance Cards: Weather / Sports Odds / Geo / Fed / Crypto -->
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px;" id="module-cards-row">
 
     <!-- 🌤 Weather -->
@@ -325,51 +317,48 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       </div>
     </div>
 
-    <!-- ₿ Crypto -->
-    <div class="card" style="border-left:3px solid #a78bfa;">
+    <!-- ⚽ Sports Odds -->
+    <div class="card" style="border-left:3px solid #f59e0b;">
       <div style="padding:16px;">
-        <!-- Top bar: icon + name -->
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
-          <span style="font-size:18px;">₿</span>
-          <span style="font-size:13px;font-weight:700;color:#fff;">Crypto</span>
+          <span style="font-size:18px;">⚽</span>
+          <span style="font-size:13px;font-weight:700;color:#fff;">Sports Odds</span>
         </div>
         <!-- Row 1: Open P&L | Closed P&L | Win Rate -->
         <div style="display:flex;margin-bottom:14px;">
           <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
-            <div class="pnl-neu" id="crypto-module-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+            <div class="pnl-neu" id="sports-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
           </div>
           <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
-              <select id="crypto-module-period" onchange="setModulePeriod('crypto',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
-                <option value="day">Today</option>
-                <option value="week">This Week</option>
+              <select id="sports-period" onchange="setModulePeriod('sports',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
                 <option value="month" selected>This Month</option>
                 <option value="year">This Year</option>
                 <option value="all">All Time</option>
               </select>
             </div>
-            <div class="pnl-neu" id="crypto-module-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+            <div class="pnl-neu" id="sports-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
           </div>
           <div style="flex:1;padding-left:12px;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
-            <div style="font-size:22px;font-weight:700;color:#4ade80;" id="crypto-module-winrate">--</div>
+            <div style="font-size:22px;font-weight:700;color:#4ade80;" id="sports-winrate">--</div>
           </div>
         </div>
         <!-- Row 2: Open Deployed | Open Trades | Total Trades -->
         <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
           <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-open-dep">--</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="sports-open-dep">--</div>
           </div>
           <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-open-cnt">--</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="sports-open-cnt">--</div>
           </div>
           <div style="flex:1;padding-left:12px;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-module-total-trades">--</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="sports-total-trades">--</div>
           </div>
         </div>
       </div>
@@ -468,15 +457,53 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       </div>
     </div>
 
-    <!-- ⚽ Sports Odds -->
-    <div class="card" style="border-left:3px solid #f59e0b;grid-column:1/-1;">
-      <div class="card-head">
-        <span class="sec"><span class="dot dot-y"></span> Sports Odds</span>
-        <span class="ref" id="sports-ts">--</span>
+    <!-- ₿ Crypto (full-width, tabbed by sub-module) -->
+    <div class="card" style="border-left:3px solid #a78bfa;grid-column:1/-1;">
+      <div class="tabs" id="crypto-sub-tabs">
+        <button class="tab on" onclick="switchCryptoSub('crypto_15m_dir',this)">15m Dir</button>
+        <button class="tab" onclick="switchCryptoSub('crypto_1h_dir',this)">1H Dir</button>
+        <button class="tab" onclick="switchCryptoSub('crypto_1h_band',this)">1H Band</button>
+        <button class="tab" onclick="switchCryptoSub('crypto_1d',this)">1D</button>
       </div>
-      <div class="card-body">
-        <div id="sports-body">
-          <div class="loading">Loading...</div>
+      <div style="padding:16px;" id="crypto-sub-body">
+        <!-- Row 1: Open P&L | Closed P&L (period selector) | Win Rate -->
+        <div style="display:flex;margin-bottom:14px;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
+            <div class="pnl-neu" id="crypto-sub-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+          </div>
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
+              Closed P&amp;L
+              <select id="crypto-sub-period" onchange="setCryptoSubPeriod(this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
+                <option value="day">Today</option>
+                <option value="week">This Week</option>
+                <option value="month" selected>This Month</option>
+                <option value="year">This Year</option>
+                <option value="all">All Time</option>
+              </select>
+            </div>
+            <div class="pnl-neu" id="crypto-sub-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
+          </div>
+          <div style="flex:1;padding-left:12px;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
+            <div style="font-size:22px;font-weight:700;color:#888;" id="crypto-sub-winrate">--</div>
+          </div>
+        </div>
+        <!-- Row 2: Open Deployed | Open Trades | Total Trades -->
+        <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
+          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-sub-open-dep">--</div>
+          </div>
+          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-sub-open-cnt">--</div>
+          </div>
+          <div style="flex:1;padding-left:12px;text-align:center;">
+            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
+            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto-sub-total-trades">--</div>
+          </div>
         </div>
       </div>
     </div>
@@ -542,10 +569,15 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 
 // ── Module Cards ──────────────────────────────────────────────────────────────
 // id prefix map: 'weather' → 'weather', 'crypto' → 'crypto-module', 'fed' → 'fed'
-const MODULE_ID = { weather: 'weather', crypto: 'crypto-module', fed: 'fed', geo: 'geo' };
+const MODULE_ID = { weather: 'weather', fed: 'fed', geo: 'geo', sports: 'sports' };
 
 window._moduleData   = {};
-window._modulePeriod = { weather: 'month', crypto: 'month', fed: 'month', geo: 'month' };
+window._modulePeriod = { weather: 'month', fed: 'month', geo: 'month', sports: 'month' };
+
+// Crypto sub-module tab state
+window._activeCryptoSub = 'crypto_15m_dir';
+window._cryptoSubPeriod = 'month';
+window._cryptoSubData = {};
 
 function setModulePeriod(mod, period) {
   window._modulePeriod[mod] = period;
@@ -603,6 +635,61 @@ function renderModuleCard(mod) {
   // Total Trades (all-time closed + currently open)
   const totalTrEl = document.getElementById(pfx + '-total-trades');
   if (totalTrEl) totalTrEl.textContent = (d.trade_count || 0) + (d.open_trades || 0);
+}
+
+// ── Crypto Sub-Module Tabs ───────────────────────────────────────────────────
+function switchCryptoSub(subKey, btn) {
+  window._activeCryptoSub = subKey;
+  document.querySelectorAll('#crypto-sub-tabs .tab').forEach(t => t.classList.remove('on'));
+  btn.classList.add('on');
+  renderCryptoSubCard();
+}
+
+function setCryptoSubPeriod(period) {
+  window._cryptoSubPeriod = period;
+  renderCryptoSubCard();
+}
+
+function renderCryptoSubCard() {
+  const sub = window._activeCryptoSub;
+  const d = window._cryptoSubData[sub];
+  if (!d || !Object.keys(d).length) {
+    ['crypto-sub-open-pnl','crypto-sub-pnl','crypto-sub-winrate',
+     'crypto-sub-open-dep','crypto-sub-open-cnt','crypto-sub-total-trades'
+    ].forEach(id => { const el = $(id); if(el) el.textContent = '--'; });
+    return;
+  }
+  const period = window._cryptoSubPeriod || 'month';
+  const pnl = period === 'day'   ? (d.closed_pnl_day   ?? 0)
+            : period === 'week'  ? (d.closed_pnl_week  ?? 0)
+            : period === 'month' ? (d.closed_pnl_month ?? 0)
+            : period === 'year'  ? (d.closed_pnl_year  ?? 0)
+            : d.closed_pnl;
+
+  const opnlEl = $('crypto-sub-open-pnl');
+  if (opnlEl) {
+    const opnl = d.open_pnl != null ? d.open_pnl : 0;
+    opnlEl.className = pcls(opnl);
+    opnlEl.style.cssText = 'font-size:22px;font-weight:700;letter-spacing:-0.5px;';
+    opnlEl.textContent = (opnl >= 0 ? '+' : '') + dollar(opnl);
+  }
+  const pnlEl = $('crypto-sub-pnl');
+  if (pnlEl) {
+    pnlEl.className = pcls(pnl);
+    pnlEl.style.cssText = 'font-size:22px;font-weight:700;letter-spacing:-0.5px;';
+    pnlEl.textContent = (pnl >= 0 ? '+' : '') + dollar(pnl);
+  }
+  const wrEl = $('crypto-sub-winrate');
+  if (wrEl) {
+    if (d.win_rate != null) { wrEl.textContent = d.win_rate.toFixed(0) + '%'; wrEl.style.color = '#4ade80'; }
+    else { wrEl.textContent = '--'; wrEl.style.color = '#888'; }
+  }
+  const depEl = $('crypto-sub-open-dep');
+  if (depEl) depEl.textContent = dollar(d.open_deployed || 0);
+  const cntEl = $('crypto-sub-open-cnt');
+  if (cntEl) cntEl.textContent = d.open_trades != null ? d.open_trades : '--';
+  const ttEl = $('crypto-sub-total-trades');
+  if (ttEl) ttEl.textContent = (d.trade_count || 0) + (d.open_trades || 0);
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────────────
@@ -1187,9 +1274,18 @@ function renderState(state) {
 
   // ── Module cards ────────────────────────────────────────────────────────────
   window._moduleData = modules;
-  ['weather', 'crypto', 'fed', 'geo'].forEach(m => {
+  // Parent-level module cards (no longer includes 'crypto' — it's tabbed now)
+  ['weather', 'fed', 'geo', 'sports'].forEach(m => {
     if (modules[m]) renderModuleCard(m);
   });
+  // Crypto sub-module tabs
+  window._cryptoSubData = {
+    crypto_15m_dir:  modules.crypto_15m_dir  || {},
+    crypto_1h_dir:   modules.crypto_1h_dir   || {},
+    crypto_1h_band:  modules.crypto_1h_band  || {},
+    crypto_1d:       modules.crypto_1d       || {},
+  };
+  renderCryptoSubCard();
 
   // ── Positions table ─────────────────────────────────────────────────────────
   const tb = $('pos-b');
@@ -1299,12 +1395,22 @@ async function loadClosedPnl() {
       wrEl.style.color = pnl.closed_win_rate >= 50 ? '#4ade80' : '#f87171';
     }
 
-    // Module cards - all four modules
+    // Module cards
     if (pnl.modules) {
       window._moduleData = pnl.modules;
-      ['weather', 'crypto', 'fed', 'geo'].forEach(m => {
+      ['weather', 'fed', 'geo', 'sports'].forEach(m => {
         if (window._moduleData[m]) renderModuleCard(m);
       });
+      // Crypto sub-module tabs (if available from /api/pnl)
+      if (pnl.modules.crypto_15m_dir || pnl.modules.crypto_1h_dir || pnl.modules.crypto_1h_band || pnl.modules.crypto_1d) {
+        window._cryptoSubData = {
+          crypto_15m_dir:  pnl.modules.crypto_15m_dir  || {},
+          crypto_1h_dir:   pnl.modules.crypto_1h_dir   || {},
+          crypto_1h_band:  pnl.modules.crypto_1h_band  || {},
+          crypto_1d:       pnl.modules.crypto_1d       || {},
+        };
+        renderCryptoSubCard();
+      }
     }
 
     // Note: updateAccountValue() is intentionally NOT called here.
@@ -1341,31 +1447,10 @@ async function loadCryptoSignal() {
 async function loadScouts(){
   await Promise.all([loadCryptoSignal()]);
 }
-async function refreshSports(){
-  const data = await api('/api/sports');
-  const wrap = $('sports-body');
-  const ts = $('sports-ts');
-  ts.textContent = new Date().toLocaleTimeString();
-  if(!data || data.length===0){
-    wrap.innerHTML='<div style="color:#333;text-align:center;padding:24px;font-size:12px;">No games in window today</div>';
-    return;
-  }
-  let html='<table class="sports-table"><thead><tr><th>Matchup</th><th>Vegas</th><th>Kalshi</th><th>Gap</th></tr></thead><tbody>';
-  data.forEach(r=>{
-    const gap=r.gap||0;
-    const hl=gap>5?'highlight':'';
-    const vegas=r.vegas_prob!=null?r.vegas_prob.toFixed(1)+'%':'--';
-    const kalshi=r.kalshi_yes_price!=null?(r.kalshi_yes_price*100).toFixed(1)+'%':'--';
-    const gapTxt=gap.toFixed(1)+'%';
-    html+=`<tr class="${hl}"><td>${r.matchup||'--'}</td><td>${vegas}</td><td>${kalshi}</td><td>${gapTxt}</td></tr>`;
-  });
-  html+='</tbody></table>';
-  wrap.innerHTML=html;
-}
 async function loadAll(){
   const state = await api('/api/state');
   if (state) renderState(state);
-  await Promise.all([loadTrades(), loadScouts(), refreshSports()]);
+  await Promise.all([loadTrades(), loadScouts()]);
 }
 loadMode();
 loadAll();

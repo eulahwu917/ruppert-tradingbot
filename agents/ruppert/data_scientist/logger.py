@@ -441,6 +441,7 @@ def get_parent_module(module_name: str) -> str:
         econ_cpi, econ_unemployment,
           econ_fed_rate, econ_recession          → 'econ'
         geo                                      → 'geo'
+        sports_odds                              → 'sports'
         manual, other                            → 'other'
     """
     m = (module_name or '').lower()
@@ -452,6 +453,8 @@ def get_parent_module(module_name: str) -> str:
         return 'econ'
     if m == 'geo':
         return 'geo'
+    if m.startswith('sports'):
+        return 'sports'
     return 'other'
 
 
@@ -519,6 +522,12 @@ def classify_module(src: str, ticker: str) -> str:
     )):
         return 'geo'
 
+    # ── Sports ─────────────────────────────────────────────────────────────
+    if src == 'sports' or any(
+        t.startswith(p) for p in ('KXSPORT', 'KXML', 'KXNBA', 'KXNFL')
+    ):
+        return 'sports_odds'
+
     if src == 'manual':
         return 'manual'
 
@@ -548,21 +557,34 @@ def send_telegram(message: str) -> bool:
         return False
 
 
+# In-process mtime cache for compute_closed_pnl_from_logs().
+# Never written to disk. Recomputes the instant any log file changes.
+_pnl_mtime_cache = {'mtime': None, 'value': None}
+
+
 def compute_closed_pnl_from_logs() -> float:
     """Compute closed P&L by scanning all trade log files live.
-    Sums the pnl field from all action=exit and action=settle records.
-    This is the same logic used by the dashboard — eliminates pnl_cache staleness.
+
+    THIS IS THE SINGLE SOURCE OF TRUTH for closed P&L.
+    Sums all three record types:
+      1. action='exit'            — pnl field
+      2. action='settle'          — pnl field
+      3. action='exit_correction' — pnl_correction field
+    Do NOT remove any of these — all three are required for correct P&L.
+
+    Uses an in-memory mtime cache: recomputes only when any log file changes.
     """
-    from agents.ruppert.env_config import get_paths as _get_paths
     import json
     from pathlib import Path
-    from datetime import date
 
     try:
+        from agents.ruppert.env_config import get_paths as _get_paths
         _paths = _get_paths()
         trades_dir = _paths['trades']
-        total_pnl = 0.0
+
+        # Gather all log files and compute max mtime for cache invalidation
         since = '2026-03-26'
+        log_files = []
         for p in sorted(trades_dir.glob('trades_*.jsonl')):
             try:
                 file_date = p.stem.replace('trades_', '')
@@ -570,19 +592,37 @@ def compute_closed_pnl_from_logs() -> float:
                     continue
             except Exception:
                 continue
+            log_files.append(p)
+
+        if not log_files:
+            return 0.0
+
+        import os
+        current_mtime = max(os.path.getmtime(str(f)) for f in log_files)
+        if _pnl_mtime_cache['mtime'] == current_mtime:
+            return _pnl_mtime_cache['value']
+
+        # Recompute from scratch
+        total_pnl = 0.0
+        for p in log_files:
             for line in p.read_text(encoding='utf-8').splitlines():
                 line = line.strip()
                 if not line:
                     continue
                 try:
                     t = json.loads(line)
+                    # All 3 record types: exit, settle, exit_correction
                     if t.get('action') in ('exit', 'settle') and t.get('pnl') is not None:
                         total_pnl += float(t['pnl'])
                     elif t.get('action') == 'exit_correction' and t.get('pnl_correction') is not None:
                         total_pnl += float(t['pnl_correction'])
                 except Exception:
                     pass
-        return round(total_pnl, 2)
+
+        result = round(total_pnl, 2)
+        _pnl_mtime_cache['mtime'] = current_mtime
+        _pnl_mtime_cache['value'] = result
+        return result
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning(f'[Logger] compute_closed_pnl_from_logs() failed: {e}')
