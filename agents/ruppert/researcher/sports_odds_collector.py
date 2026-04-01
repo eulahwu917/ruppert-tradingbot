@@ -18,10 +18,17 @@ Config (env vars or edit CONFIG below):
 """
 
 import os
+import sys
 import json
 import subprocess
 import requests
+
+# Ensure UTF-8 output on Windows (Task Scheduler uses cp1252 by default)
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 from datetime import datetime, timezone, timedelta
+from collections import defaultdict
 from pathlib import Path
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
@@ -118,6 +125,33 @@ def american_to_prob(american_odds: int) -> float:
 
 # ─── KALSHI DATA ─────────────────────────────────────────────────────────────
 
+def _parse_matchup_title(title: str) -> tuple[str, str]:
+    """Parse 'Away at Home Winner?' title format. Returns (away, home) or ('','')."""
+    import re
+    m = re.match(r'^(.+?)\s+at\s+(.+?)\s+Winner\??$', title, re.IGNORECASE)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return "", ""
+
+def _parse_game_date_from_ticker(event_ticker: str) -> datetime | None:
+    """Extract game date from event_ticker like KXNBAGAME-26APR02MINDET -> 2026-04-02 UTC."""
+    import re
+    m = re.search(r'-(\d{2})([A-Z]{3})(\d{2})', event_ticker)
+    if not m:
+        return None
+    year = 2000 + int(m.group(1))
+    month_str = m.group(2)
+    day = int(m.group(3))
+    months = {"JAN":1,"FEB":2,"MAR":3,"APR":4,"MAY":5,"JUN":6,
+              "JUL":7,"AUG":8,"SEP":9,"OCT":10,"NOV":11,"DEC":12}
+    month = months.get(month_str)
+    if not month:
+        return None
+    try:
+        return datetime(year, month, day, tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
 def fetch_kalshi_games(series_ticker: str, sport: str) -> list[dict]:
     """
     Fetch open Kalshi markets for a series, filter to games 12–24h from now.
@@ -127,7 +161,7 @@ def fetch_kalshi_games(series_ticker: str, sport: str) -> list[dict]:
     params = {
         "series_ticker": series_ticker,
         "status": "open",
-        "limit": 100,
+        "limit": 200,
     }
     try:
         resp = requests.get(url, params=params, timeout=10)
@@ -140,65 +174,113 @@ def fetch_kalshi_games(series_ticker: str, sport: str) -> list[dict]:
     now = now_utc()
     window_min = CONFIG["entry_window_min_hours"]
     window_max = CONFIG["entry_window_max_hours"]
-    results = []
+
+    # Group markets by event_ticker (2 markets per game, one per team)
+    event_groups = defaultdict(list)
+    # Track which event_tickers are in window (check once per event, not per market)
+    event_in_window = {}
 
     for m in markets:
-        # Parse commence time (expiration_time or close_time as proxy)
-        # Kalshi market titles typically include team names
-        close_time_str = m.get("close_time") or m.get("expiration_time")
-        if not close_time_str:
-            continue
-        try:
-            close_time = datetime.fromisoformat(close_time_str.replace("Z", "+00:00"))
-        except Exception:
-            continue
-
-        hours_until = (close_time - now).total_seconds() / 3600
-        if not (window_min <= hours_until <= window_max):
-            continue
-
-        yes_ask = m.get("yes_ask")  # in cents (0–100)
-        yes_bid = m.get("yes_bid")
-        no_ask = m.get("no_ask")
-        ticker = m.get("ticker", "")
-        title = m.get("title", "")
         event_ticker = m.get("event_ticker", "")
 
+        # Check time window using game date parsed from event_ticker
+        # We only know the date, not the exact game time, so include any game
+        # whose date falls within 0–48h. Precise 12–24h filtering is applied
+        # when matching against OddsAPI commence_time.
+        if event_ticker not in event_in_window:
+            game_date = _parse_game_date_from_ticker(event_ticker)
+            if game_date is None:
+                event_in_window[event_ticker] = (False, 0)
+            else:
+                hours_to_start_of_day = (game_date - now).total_seconds() / 3600
+                hours_to_end_of_day = hours_to_start_of_day + 24
+                in_range = hours_to_end_of_day >= 0 and hours_to_start_of_day <= 48
+                event_in_window[event_ticker] = (in_range, max(hours_to_start_of_day, 0))
+
+        in_window, hours_until = event_in_window[event_ticker]
+        if not in_window:
+            continue
+
+        close_time_str = m.get("close_time") or m.get("expiration_time") or ""
+
+        yes_ask = m.get("yes_ask_dollars")
         if yes_ask is None:
             continue
 
-        results.append({
-            "sport": sport,
-            "ticker": ticker,
+        event_ticker = m.get("event_ticker", "")
+        # Extract team name from ticker suffix (e.g. KXNBAGAME-26APR02MINDET-MIN -> MIN)
+        ticker_str = m.get("ticker", "")
+        team_abbr = ticker_str.rsplit("-", 1)[-1] if ticker_str else ""
+        event_groups[event_ticker].append({
+            "ticker": ticker_str,
             "event_ticker": event_ticker,
-            "title": title,
+            "title": m.get("title", ""),
+            "subtitle": m.get("yes_sub_title", ""),
+            "team_abbr": team_abbr,
             "close_time": close_time_str,
             "hours_until_close": round(hours_until, 2),
-            "kalshi_yes_ask_cents": yes_ask,
-            "kalshi_yes_ask": yes_ask / 100,
-            "kalshi_yes_bid": (yes_bid or 0) / 100,
-            "kalshi_no_ask": (no_ask or 0) / 100,
-            "kalshi_open_interest": m.get("open_interest"),
-            "kalshi_volume": m.get("volume"),
+            "yes_ask": float(yes_ask),
+            "yes_bid": float(m.get("yes_bid_dollars") or 0),
+            "volume": m.get("volume_fp"),
+            "open_interest": m.get("open_interest_fp"),
+        })
+
+    # Build paired matchup results
+    results = []
+    for event_ticker, pair in event_groups.items():
+        # Extract team names from title (format: "Away at Home Winner?")
+        title = pair[0]["title"]
+        away_name, home_name = _parse_matchup_title(title)
+
+        if len(pair) < 2:
+            mk = pair[0]
+            team_name = mk["subtitle"] or away_name or mk["team_abbr"]
+            results.append({
+                "sport": sport,
+                "event_ticker": event_ticker,
+                "team_a": team_name,
+                "team_b": "",
+                "kalshi_a_yes_ask": mk["yes_ask"],
+                "kalshi_b_yes_ask": None,
+                "ticker_a": mk["ticker"],
+                "ticker_b": "",
+                "close_time": mk["close_time"],
+                "hours_until_close": mk["hours_until_close"],
+                "kalshi_volume_a": mk["volume"],
+                "kalshi_volume_b": None,
+                "kalshi_oi_a": mk["open_interest"],
+                "kalshi_oi_b": None,
+            })
+            continue
+
+        # Two markets per game — pair them, use subtitle/abbr to identify each side
+        a, b = pair[0], pair[1]
+        team_a = a["subtitle"] or a["team_abbr"]
+        team_b = b["subtitle"] or b["team_abbr"]
+
+        # If we parsed title, use full names and map by abbreviation
+        if away_name and home_name:
+            team_a = away_name if away_name.upper().startswith(a["team_abbr"][:3].upper()) else home_name
+            team_b = home_name if team_a == away_name else away_name
+
+        results.append({
+            "sport": sport,
+            "event_ticker": event_ticker,
+            "team_a": team_a,
+            "team_b": team_b,
+            "kalshi_a_yes_ask": a["yes_ask"],
+            "kalshi_b_yes_ask": b["yes_ask"],
+            "ticker_a": a["ticker"],
+            "ticker_b": b["ticker"],
+            "close_time": a["close_time"],
+            "hours_until_close": a["hours_until_close"],
+            "kalshi_volume_a": a["volume"],
+            "kalshi_volume_b": b["volume"],
+            "kalshi_oi_a": a["open_interest"],
+            "kalshi_oi_b": b["open_interest"],
         })
 
     return results
-
-
-def get_kalshi_teams_from_title(title: str) -> tuple[str, str]:
-    """
-    Attempt to extract team names from Kalshi market title.
-    Example title: "Will the Boston Celtics beat the Miami Heat?"
-    Returns (team_a, team_b) or ("", "")
-    """
-    # Simple heuristic: look for ' beat ' pattern
-    if " beat " in title.lower():
-        parts = title.split(" beat ")
-        if len(parts) == 2:
-            team_a = parts[0].replace("Will the ", "").replace("Will ", "").strip()
-            team_b = parts[1].replace("?", "").replace("the ", "").strip()
-            return team_a, team_b
-    return "", ""
 
 # ─── ODDS API DATA ────────────────────────────────────────────────────────────
 
@@ -314,12 +396,16 @@ def search_x_injuries(teams: list[str]) -> list[dict]:
 
     all_queries = team_queries + generic_queries
 
+    bird_cli = r'C:\Users\David Wu\AppData\Roaming\npm\node_modules\@steipete\bird\dist\cli.js'
+
     for query in all_queries:
         try:
             result = subprocess.run(
-                ['bird', 'search', query, '-n', str(CONFIG["x_search_results"]), '--json'],
+                ['node', bird_cli, 'search', query, '-n', str(CONFIG["x_search_results"]), '--json'],
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=15
             )
             if result.returncode != 0:
@@ -382,56 +468,78 @@ def run_collection():
 
     # ── 3. Compute deltas and log ──
     for kg in kalshi_games:
-        team_a, team_b = get_kalshi_teams_from_title(kg["title"])
-        matchup_key = f"{team_a} @ {team_b}" if team_a and team_b else kg["title"]
+        team_a = kg["team_a"]
+        team_b = kg["team_b"]
+        matchup_key = f"{team_a} vs {team_b}" if team_a and team_b else kg["event_ticker"]
 
-        # Try to match against OddsAPI game
+        # Collect team names for X search
+        if team_a:
+            all_teams_today.add(team_a)
+        if team_b:
+            all_teams_today.add(team_b)
+
+        # Try to match against OddsAPI game by team name
         vegas_game = None
+        matched_team_a_is_home = None
         for key, og in odds_games.items():
-            # Fuzzy match: check if either team name appears
-            if (team_a and (team_a in key or any(t in key for t in team_a.split()[-1:]))
-                    or team_b and (team_b in key or any(t in key for t in team_b.split()[-1:]))):
+            home = og["home_team"].lower()
+            away = og["away_team"].lower()
+            ta_last = team_a.split()[-1].lower() if team_a else ""
+            tb_last = team_b.split()[-1].lower() if team_b else ""
+            if ta_last and (ta_last in home or ta_last in away):
                 vegas_game = og
+                matched_team_a_is_home = ta_last in home
+                break
+            if tb_last and (tb_last in home or tb_last in away):
+                vegas_game = og
+                matched_team_a_is_home = not (tb_last in home)
                 break
 
         if vegas_game:
-            # Kalshi yes_ask is for team_a (home team in Kalshi framing — usually favorite)
-            # Vegas home_devig maps to home team
-            kalshi_fav_prob = kg["kalshi_yes_ask"]
+            # Map Kalshi team_a to the correct Vegas side
+            if matched_team_a_is_home:
+                vegas_a_prob = vegas_game["vegas_home_devig"]
+                vegas_b_prob = vegas_game["vegas_away_devig"]
+            else:
+                vegas_a_prob = vegas_game["vegas_away_devig"]
+                vegas_b_prob = vegas_game["vegas_home_devig"]
 
-            # Use Vegas home team prob as reference
-            vegas_fav_prob = vegas_game["vegas_home_devig"]
-
-            delta = round(vegas_fav_prob - kalshi_fav_prob, 4)
+            delta_a = round(vegas_a_prob - kg["kalshi_a_yes_ask"], 4)
+            delta_b = round(vegas_b_prob - kg["kalshi_b_yes_ask"], 4) if kg["kalshi_b_yes_ask"] is not None else None
 
             entry = {
                 "event_type": "odds_snapshot",
                 "sport": kg["sport"],
                 "matchup": matchup_key,
-                "kalshi_ticker": kg["ticker"],
+                "event_ticker": kg["event_ticker"],
+                "kalshi_ticker_a": kg["ticker_a"],
+                "kalshi_ticker_b": kg["ticker_b"],
                 "hours_until_game": kg["hours_until_close"],
-                "kalshi_yes_ask": kalshi_fav_prob,
-                "kalshi_yes_bid": kg["kalshi_yes_bid"],
-                "vegas_devig_home": vegas_fav_prob,
-                "vegas_devig_away": vegas_game["vegas_away_devig"],
-                "delta_vegas_minus_kalshi": delta,
+                "kalshi_a_yes_ask": kg["kalshi_a_yes_ask"],
+                "kalshi_b_yes_ask": kg["kalshi_b_yes_ask"],
+                "vegas_a_devig": vegas_a_prob,
+                "vegas_b_devig": vegas_b_prob,
+                "delta_a_vegas_minus_kalshi": delta_a,
+                "delta_b_vegas_minus_kalshi": delta_b,
                 "books_count": vegas_game["books_count"],
-                "kalshi_volume": kg["kalshi_volume"],
-                "kalshi_open_interest": kg["kalshi_open_interest"],
-                "tradeable": abs(delta) >= 0.03,  # flag if >= 3pp gap
+                "kalshi_volume_a": kg["kalshi_volume_a"],
+                "kalshi_volume_b": kg["kalshi_volume_b"],
+                "kalshi_oi_a": kg["kalshi_oi_a"],
+                "kalshi_oi_b": kg["kalshi_oi_b"],
+                "tradeable": abs(delta_a) >= 0.03,  # flag if >= 3pp gap
                 "vegas_home_team": vegas_game["home_team"],
                 "vegas_away_team": vegas_game["away_team"],
             }
         else:
-            # Log Kalshi-only (Vegas not yet posted)
             entry = {
                 "event_type": "kalshi_only_snapshot",
                 "sport": kg["sport"],
                 "matchup": matchup_key,
-                "kalshi_ticker": kg["ticker"],
+                "event_ticker": kg["event_ticker"],
+                "kalshi_ticker_a": kg["ticker_a"],
                 "hours_until_game": kg["hours_until_close"],
-                "kalshi_yes_ask": kg["kalshi_yes_ask"],
-                "kalshi_yes_bid": kg["kalshi_yes_bid"],
+                "kalshi_a_yes_ask": kg["kalshi_a_yes_ask"],
+                "kalshi_b_yes_ask": kg["kalshi_b_yes_ask"],
                 "delta_vegas_minus_kalshi": None,
                 "tradeable": False,
                 "note": "Vegas line not yet posted",
