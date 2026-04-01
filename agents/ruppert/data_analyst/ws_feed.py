@@ -666,6 +666,7 @@ async def run_ws_feed():
 
                 last_purge = time.time()
                 last_persist = time.time()
+                last_expiry_check = time.time()
                 msg_count = 0
 
                 # START fallback task for this connection cycle
@@ -701,6 +702,14 @@ async def run_ws_feed():
                             market_cache.persist()
                             _write_heartbeat()
                             last_persist = now
+
+                        # Periodic expiry check every 60s
+                        if now - last_expiry_check >= 60:
+                            try:
+                                await position_tracker.check_expired_positions()
+                            except Exception as _exp_err:
+                                logger.warning('[WS Feed] check_expired_positions error: %s', _exp_err)
+                            last_expiry_check = now
 
                         # Periodic purge every 5 min
                         if now - last_purge > 300:

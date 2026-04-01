@@ -573,16 +573,24 @@ def check_decision_log_orphans() -> list[dict]:
             decisions.extend(_read_trades_file(decision_path))
     if not decisions:
         return []
+    # Check both today's and yesterday's trade logs to handle midnight boundary:
+    # decisions made just before midnight reference markets whose trades land in
+    # yesterday's log, and early-morning decisions may not have executed yet.
     today_trades = _read_trades_file(_today_trades_path())
-    trade_tickers = {t.get('ticker') for t in today_trades}
+    yesterday = date.today() - timedelta(days=1)
+    yesterday_path = TRADES_DIR / f'trades_{yesterday.isoformat()}.jsonl'
+    yesterday_trades = _read_trades_file(yesterday_path)
+    trade_tickers = {t.get('ticker') for t in today_trades} | {t.get('ticker') for t in yesterday_trades}
 
     orphans = []
+    today_str = date.today().isoformat()
+    yesterday_str = yesterday.isoformat()
     for d in decisions:
         if d.get('decision', '').upper() in ('SKIP',):
             continue
         ticker = d.get('market_id', d.get('ticker', ''))
         d_date = str(d.get('ts', ''))[:10]
-        if d_date == date.today().isoformat() and ticker not in trade_tickers:
+        if d_date in (today_str, yesterday_str) and ticker not in trade_tickers:
             orphans.append(d)
     return orphans
 

@@ -11,7 +11,7 @@ import logging
 import sys
 import time
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 # Resolve workspace root and add to path for env_config
@@ -330,6 +330,28 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
         except Exception as _iwl_err:
             logger.debug('[PositionTracker] intra_window_logger: %s', _iwl_err)
 
+        # ── Time-gated stop-loss for crypto_15m_dir positions ─────────────
+        # Prevents losing positions from riding to 0c at expiry.
+        # Runs alongside threshold exits — whichever triggers first wins.
+        if pos.get('module') == 'crypto_15m_dir' and pos.get('added_at'):
+            elapsed_min = (now - pos['added_at']) / 60.0
+            entry_price = pos['entry_price']
+            stop_triggered = False
+            if 5 <= elapsed_min < 10 and yes_bid < entry_price * 0.30:
+                stop_triggered = True
+            elif 10 <= elapsed_min < 13 and yes_bid < entry_price * 0.40:
+                stop_triggered = True
+            # 0-5 min: no stop (too early, noise)
+            # 13-15 min: no stop (spread too wide near expiry, let it settle)
+            if stop_triggered:
+                rule = f'stop_loss_{elapsed_min:.0f}m'
+                log_activity(
+                    f'[WS Exit] {ticker} hit {rule} (bid={yes_bid}c, entry={entry_price}c) — exiting'
+                )
+                await execute_exit(key, pos, yes_bid, rule)
+                continue  # position exited, skip threshold checks
+        # ── End time-gated stop-loss ──────────────────────────────────────
+
         thresholds = pos.get('exit_thresholds')
         if thresholds is None:
             logger.warning('[PositionTracker] %s missing exit_thresholds — skipping exit check', ticker)
@@ -570,6 +592,121 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
         _recently_exited[(ticker, side)] = time.time()  # cooldown: prevent re-fire for TTL window
     finally:
         _exits_in_flight.discard(key)
+
+
+async def check_expired_positions():
+    """Check for positions whose close_time has passed and log settlement outcome.
+
+    Runs periodically (every 60s from ws_feed). For 15m positions that expire
+    without hitting exit thresholds, REST-verifies settlement and logs the result.
+    """
+    if not _tracked:
+        return
+
+    now_utc = datetime.now(tz=timezone.utc)
+    keys_to_remove = []
+
+    for key in list(_tracked.keys()):
+        ticker, side = key
+        pos = _tracked.get(key)
+        if not pos:
+            continue
+
+        # Parse close_time from ticker: format KXBTC15M-26APR011315-15
+        # The window close = window open + 15 minutes
+        close_dt = None
+        try:
+            import re
+            parts = ticker.split('-')
+            if len(parts) >= 2:
+                date_part = parts[1]
+                m = re.match(r'(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})', date_part)
+                if m:
+                    MONTH_MAP = {
+                        'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                        'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12,
+                    }
+                    yr = 2000 + int(m.group(1))
+                    mon = MONTH_MAP.get(m.group(2))
+                    dd = int(m.group(3))
+                    hh = int(m.group(4))
+                    mm = int(m.group(5))
+                    if mon:
+                        from datetime import timedelta
+                        open_dt = datetime(yr, mon, dd, hh, mm, tzinfo=timezone.utc)
+                        close_dt = open_dt + timedelta(minutes=15)
+        except Exception:
+            pass
+
+        if close_dt is None or now_utc < close_dt:
+            continue  # not expired yet (or can't parse)
+
+        # Position has expired — REST-verify settlement
+        try:
+            from agents.ruppert.data_analyst.kalshi_client import KalshiClient
+            client = KalshiClient()
+            market = client.get_market(ticker)
+            if not market:
+                continue
+            result = market.get('result')
+            if result is None:
+                continue  # not yet settled, retry next cycle
+        except Exception as e:
+            logger.warning('[PositionTracker] check_expired: REST failed for %s: %s', ticker, e)
+            continue
+
+        # Calculate realized P&L from settlement
+        entry_price = pos['entry_price']
+        quantity = pos['quantity']
+        module = pos.get('module', '')
+
+        # Settlement price: YES=100c if result='yes', YES=0c if result='no'
+        if side == 'yes':
+            settlement_price = 100 if result == 'yes' else 0
+            pnl = (settlement_price - entry_price) * quantity / 100
+        else:
+            # NO side: settlement_price_no = 100 if result='no', 0 if result='yes'
+            settlement_price = 100 if result == 'no' else 0
+            pnl = (settlement_price - entry_price) * quantity / 100
+
+        # Log settlement trade
+        log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
+        settle_record = {
+            'trade_id': str(uuid.uuid4()),
+            'timestamp': datetime.now().isoformat(),
+            'date': str(date.today()),
+            'ticker': ticker,
+            'title': pos.get('title', ''),
+            'side': side,
+            'action': 'settle',
+            'action_detail': f'EXPIRY result={result} settlement={settlement_price}c',
+            'source': 'ws_position_tracker',
+            'module': module,
+            'entry_price': entry_price,
+            'exit_price': settlement_price,
+            'contracts': quantity,
+            'pnl': round(pnl, 2),
+        }
+        try:
+            with open(log_path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(settle_record) + '\n')
+        except Exception as e:
+            logger.error('[PositionTracker] check_expired: log write failed for %s: %s', ticker, e)
+
+        log_activity(
+            f'[SETTLE] {ticker} {side.upper()} expired | result={result} | P&L=${pnl:+.2f}'
+        )
+        logger.info(
+            '[PositionTracker] Expired %s %s: result=%s, P&L=$%.2f',
+            ticker, side, result, pnl
+        )
+        keys_to_remove.append(key)
+
+    for key in keys_to_remove:
+        _tracked.pop(key, None)
+        _recently_exited[key] = time.time()
+    if keys_to_remove:
+        _persist()
 
 
 async def recovery_poll_positions():
