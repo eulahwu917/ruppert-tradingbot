@@ -650,6 +650,13 @@ def check_loss_circuit_breaker(capital: float) -> dict:
 
     Threshold: config.LOSS_CIRCUIT_BREAKER_PCT (default 0.05 = 5% of capital)
     """
+    if capital <= 0:
+        return {
+            'tripped': True,
+            'reason': f'Capital is negative ({capital}) — trading halted until P&L is reconciled',
+            'loss_today': 0.0
+        }
+
     threshold_pct = getattr(_cfg, 'LOSS_CIRCUIT_BREAKER_PCT', 0.05)
     threshold_dollars = capital * threshold_pct
     loss_today = 0.0
@@ -667,7 +674,7 @@ def check_loss_circuit_breaker(capital: float) -> dict:
             rec = json.loads(line)
             if rec.get('action') != 'exit':
                 continue
-            pnl = rec.get('realized_pnl')
+            pnl = rec.get('pnl')
             if pnl is not None and pnl < 0:
                 loss_today += abs(pnl)
     except Exception as e:
