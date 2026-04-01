@@ -849,21 +849,16 @@ def get_pnl_history():
             exit_records[t.get('ticker', '')] = t
 
     # Build close records index for pnl: (ticker, side) -> settle/exit record
-    # SUM fix: accumulate pnl across multiple settle records for the same (ticker, side)
-    # e.g. two ETH settle legs with same ticker+side — last-write-wins dropped one.
+    # Deduplicate: keep only the LATEST close record per (ticker, side).
+    # Prior accumulation logic double/triple-counted pnl when the same ticker
+    # appeared in multiple log files.
     close_records_pnl = {}
     for t in all_trades:
         if t.get('action') in ('exit', 'settle'):
             tk = t.get('ticker', '')
             sd = t.get('side', '')
             if tk:
-                if (tk, sd) in close_records_pnl:
-                    # Accumulate pnl into the existing record rather than overwrite
-                    existing = close_records_pnl[(tk, sd)]
-                    if t.get('pnl') is not None and existing.get('pnl') is not None:
-                        existing['pnl'] = float(existing['pnl']) + float(t['pnl'])
-                else:
-                    close_records_pnl[(tk, sd)] = dict(t)  # copy to avoid mutating source
+                close_records_pnl[(tk, sd)] = t  # last-write-wins (latest record)
 
     # A position is "closed" ONLY if it has a settle/exit record.
     # Expired tickers without a settle record are still "open" (pending settlement).
@@ -1606,8 +1601,32 @@ def _build_state():
             'trade_count':       tc,
         }
 
-    # Alias: frontend uses 'crypto_1d' tab key for the 1D sub-module
-    modules_out['crypto_1d'] = modules_out.get('crypto_1h_dir', modules_out.get('other', {}))
+    # crypto_1d: only populate from actual 1D trades (not aliased to 1h_dir).
+    # If no crypto_1d trades exist yet, return a zeroed dict so the card shows '--'.
+    c1d = module_closed.get('crypto_1d', {})
+    c1d_tc = c1d.get('trade_count', 0)
+    c1d_oc = module_open.get('crypto_1d', {})
+    if c1d_tc > 0 or c1d_oc.get('open_trades', 0) > 0:
+        c1d_wr = round(c1d['wins'] / c1d_tc * 100, 1) if c1d_tc > 0 else None
+        modules_out['crypto_1d'] = {
+            'open_trades':       c1d_oc.get('open_trades', 0),
+            'open_deployed':     round(c1d_oc.get('open_deployed', 0.0), 2),
+            'open_pnl':          round(c1d_oc.get('open_pnl', 0.0), 2),
+            'closed_pnl':        round(c1d.get('closed_pnl', 0.0), 2),
+            'closed_pnl_day':    round(c1d.get('closed_pnl_day', 0.0), 2),
+            'closed_pnl_week':   round(c1d.get('closed_pnl_week', 0.0), 2),
+            'closed_pnl_month':  round(c1d.get('closed_pnl_month', 0.0), 2),
+            'closed_pnl_year':   round(c1d.get('closed_pnl_year', 0.0), 2),
+            'win_rate':          c1d_wr,
+            'trade_count':       c1d_tc,
+        }
+    else:
+        modules_out['crypto_1d'] = {
+            'open_trades': 0, 'open_deployed': 0, 'open_pnl': 0,
+            'closed_pnl': 0, 'closed_pnl_day': 0, 'closed_pnl_week': 0,
+            'closed_pnl_month': 0, 'closed_pnl_year': 0,
+            'win_rate': None, 'trade_count': 0,
+        }
 
     # ── Account ───────────────────────────────────────────────────────────────
     deployed     = round(sum(p['cost'] for p in positions), 2)
