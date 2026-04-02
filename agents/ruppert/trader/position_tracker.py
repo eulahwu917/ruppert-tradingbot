@@ -773,6 +773,7 @@ async def check_expired_positions():
             'action_detail': f'EXPIRY result={result} settlement={settlement_price}c',
             'source': 'ws_position_tracker',
             'module': module,
+            'settlement_result': result,
             'entry_price': entry_price,
             'exit_price': settlement_price,
             'contracts': quantity,
