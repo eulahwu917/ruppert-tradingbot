@@ -343,6 +343,22 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     else:
         return
 
+    # Derive module from series + strike_type
+    _WS_MODULE_MAP = {
+        ('BTC', 'between'): 'crypto_band_daily_btc',
+        ('ETH', 'between'): 'crypto_band_daily_eth',
+        ('XRP', 'between'): 'crypto_band_daily_xrp',
+        ('DOGE', 'between'): 'crypto_band_daily_doge',
+        ('SOL', 'between'): 'crypto_band_daily_sol',
+        ('BTC', 'greater'): 'crypto_threshold_daily_btc',
+        ('BTC', 'less'):    'crypto_threshold_daily_btc',
+        ('ETH', 'greater'): 'crypto_threshold_daily_eth',
+        ('ETH', 'less'):    'crypto_threshold_daily_eth',
+        ('SOL', 'greater'): 'crypto_threshold_daily_sol',
+        ('SOL', 'less'):    'crypto_threshold_daily_sol',
+    }
+    _ws_module = _WS_MODULE_MAP.get((asset, strike_type), f'crypto_band_daily_{asset.lower()}')
+
     # Get vol and compute sigma
     cfg = ASSET_CONFIG[asset]
     realized_vol = signal.get('realized_hourly_vol') or (cfg['hourly_vol_pct'] / 100)
@@ -411,7 +427,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
         'market_prob': market_prob,
         'model_prob': model_prob,
         'source': 'crypto',
-        'module': 'crypto',
+        'module': _ws_module,
         'yes_ask': yes_ask,
         'yes_bid': yes_bid,
         'current_price': current_price,
@@ -427,9 +443,9 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     # Check entry via strategy
     from agents.ruppert.strategist.strategy import should_enter, calculate_position_size
     deployed_today = get_daily_exposure()
-    _module_deployed = get_daily_exposure('crypto')
+    _module_deployed = get_daily_exposure(_ws_module)
     module_deployed_pct = _module_deployed / capital if capital > 0 else 0.0
-    decision = should_enter(opp, capital, deployed_today, module='crypto', module_deployed_pct=module_deployed_pct, traded_tickers=None)
+    decision = should_enter(opp, capital, deployed_today, module=_ws_module, module_deployed_pct=module_deployed_pct, traded_tickers=None)
     if not decision['enter']:
         reason = decision['reason']
         logger.debug(f"[WS Crypto] {ticker}: entry blocked — {reason}")
@@ -496,7 +512,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
             fill_price = int(order_result.get('price', order_result.get('yes_price', bet_price)) or bet_price)
             fill_contracts = int(order_result.get('contracts', order_result.get('count', contracts)) or contracts)
         position_tracker.add_position(ticker, fill_contracts, side, fill_price,
-                                      module='crypto', title=opp.get('title', ''))
+                                      module=opp.get('module', 'crypto'), title=opp.get('title', ''))
     except Exception as _pt_err:
         logger.warning('[WS-CRYPTO] position_tracker.add_position failed: %s', _pt_err)
 

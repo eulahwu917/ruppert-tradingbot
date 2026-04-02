@@ -701,7 +701,7 @@ async def check_expired_positions():
             parts = ticker.split('-')
             if len(parts) >= 2:
                 date_part = parts[1]
-                m = re.match(r'(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})', date_part)
+                m = re.match(r'(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})?', date_part)
                 if m:
                     MONTH_MAP = {
                         'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
@@ -711,7 +711,7 @@ async def check_expired_positions():
                     mon = MONTH_MAP.get(m.group(2))
                     dd = int(m.group(3))
                     hh = int(m.group(4))
-                    mm = int(m.group(5))
+                    mm = int(m.group(5)) if m.group(5) else 0
                     if mon:
                         from pytz import timezone as _tz
                         _est = _tz('America/New_York')
