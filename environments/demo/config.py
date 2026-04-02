@@ -210,6 +210,28 @@ CRYPTO_15M_CIRCUIT_BREAKER_N        = 3      # consecutive complete-loss windows
 CRYPTO_15M_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop — halt all crypto_15m entries for rest of trading day
 CRYPTO_15M_STOP_LOSS_SECS = 210  # stop-loss fires when < this many seconds remain AND bid < 40% of entry
 
+# ── Design D: Entry-Aware Layered Stop-Loss (P0 — 2026-04-02) ────────────────
+# Entry time brackets (seconds from window open)
+STOP_BRACKET_EARLY   = 180   # < 3 min → use EARLY guard
+STOP_BRACKET_MID     = 300   # 3–5 min → use MID guard
+STOP_BRACKET_LATE    = 480   # 5–8 min → use LATE guard
+# >= BRACKET_LATE → use SECONDARY guard
+
+# Entry-aware guard thresholds (seconds elapsed since entry before stop is eligible)
+STOP_GUARD_EARLY_PRIMARY   = 480   # entry < 3 min into window (current default)
+STOP_GUARD_MID_PRIMARY     = 300   # entry 3–5 min into window
+STOP_GUARD_LATE_PRIMARY    = 180   # entry 5–8 min into window
+STOP_GUARD_SECONDARY       = 90    # entry 8+ min into window
+
+# Price thresholds (as fraction of entry price)
+STOP_PRICE_CATASTROPHIC  = 0.20   # Tier 1: bid below 20% of entry
+STOP_PRICE_SEVERE        = 0.30   # Tier 2: bid below 30% of entry
+STOP_PRICE_TERMINAL      = 0.40   # Tier 3: bid below 40% of entry (current threshold)
+
+# Time-remaining thresholds
+STOP_TIME_SEVERE         = 300    # 5 min left on contract
+STOP_TIME_TERMINAL       = 210    # 3.5 min left on contract (current)
+
 # ── crypto_dir_15m_* Signal Weights ─────────────────────────────────────────
 CRYPTO_15M_DIR_W_TFI  = 0.50   # Taker Flow Imbalance weight (Phase 2: increased from 0.42)
 CRYPTO_15M_DIR_W_OBI  = 0.25   # Orderbook Imbalance weight (unchanged)

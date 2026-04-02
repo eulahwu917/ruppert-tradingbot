@@ -1323,12 +1323,17 @@ def evaluate_crypto_15m_entry(
             fill_contracts = int(order_result.get('contracts', order_result.get('count', contracts)) or contracts)
         fill_price_pt = fill_price if fill_price else entry_price
         fill_contracts_pt = fill_contracts if fill_contracts else contracts
+        # entry_secs_in_window: elapsed_secs is seconds since window open (computed above)
+        # contract_remaining_at_entry: seconds left on contract at entry time
+        _contract_remaining = (close_dt - now).total_seconds() if close_dt is not None else None
         position_tracker.add_position(
             ticker, fill_contracts_pt, direction, fill_price_pt,
             module=_module_name,
             title=f'{asset} 15m direction',
             entry_raw_score=raw_score,
             size_dollars=round(position_usd, 2),
+            entry_secs_in_window=elapsed_secs if elapsed_secs > 0 else None,
+            contract_remaining_at_entry=_contract_remaining,
         )
     except Exception as _pt_err:
         logger.warning(f'[15m] position_tracker.add_position failed: {_pt_err}')

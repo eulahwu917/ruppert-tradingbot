@@ -169,6 +169,8 @@ def build_trade_entry(opportunity, size, contracts, order_result):
         'okx_volume_pct':        opportunity.get('okx_volume_pct'),
         'kalshi_book_depth_usd': opportunity.get('kalshi_book_depth_usd'),
         'kalshi_spread_cents':   opportunity.get('kalshi_spread_cents'),
+        # ── Model probability (crypto_15m; None for other modules) ────────
+        'model_prob':            opportunity.get('model_prob'),
     }
 
 

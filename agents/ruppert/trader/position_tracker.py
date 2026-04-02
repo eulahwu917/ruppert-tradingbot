@@ -136,7 +136,9 @@ def _build_thresholds(side: str, entry_price: float, holding_type: str = '') -> 
 def add_position(ticker: str, quantity: int, side: str, entry_price: float,
                  module: str = '', title: str = '', holding_type: str = '',
                  entry_raw_score: float | None = None,
-                 size_dollars: float | None = None):
+                 size_dollars: float | None = None,
+                 entry_secs_in_window: float | None = None,
+                 contract_remaining_at_entry: float | None = None):
     """
     Call after every trade execution.
     entry_price: in cents (e.g. 45 = 45c).
@@ -191,6 +193,8 @@ def add_position(ticker: str, quantity: int, side: str, entry_price: float,
             'exit_thresholds': thresholds,
             'entry_raw_score': entry_raw_score,
             'size_dollars': size_dollars,
+            'entry_secs_in_window': entry_secs_in_window,
+            'contract_remaining_at_entry': contract_remaining_at_entry,
         }
         logger.info('[PositionTracker] Tracking %s %s @ %dc (%d contracts)', ticker, side, entry_price, quantity)
     _persist()
@@ -342,10 +346,9 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
         except Exception as _iwl_err:
             logger.debug('[PositionTracker] intra_window_logger: %s', _iwl_err)
 
-        # ── Time-to-expiry stop-loss for crypto_15m_dir positions ─────────
-        # Prevents losing positions from riding to 0c at expiry.
-        # Fires when <2 min remain on the contract AND bid < 40% of entry.
-        # Runs alongside threshold exits — whichever triggers first wins.
+        # ── Design D: Entry-aware layered stop-loss for crypto_dir_15m_ positions ──
+        # Three tiers: Catastrophic (20%, no time check), Severe (30%, 5min left),
+        # Terminal (40%, 3.5min left). Guard threshold is adaptive to entry timing.
         if pos.get('module', '').startswith('crypto_dir_15m_') and pos.get('added_at'):
             # Skip if this position already has a pending exit order
             if key in _exits_in_flight:
@@ -353,10 +356,29 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
             else:
                 entry_price = pos['entry_price']
                 elapsed_secs = now - pos['added_at']
-                # 0-8 min guard: don't stop out positions we just entered
-                if elapsed_secs >= 480:
+
+                # Step 1: Compute entry-aware guard threshold
+                # entry_secs_in_window: seconds from window open to entry
+                # Default 120 (2 min) for legacy positions — preserves current behavior
+                entry_secs = pos.get('entry_secs_in_window', 120)
+
+                _STOP_BRACKET_LATE  = getattr(config, 'STOP_BRACKET_LATE',  480)
+                _STOP_BRACKET_MID   = getattr(config, 'STOP_BRACKET_MID',   300)
+                _STOP_BRACKET_EARLY = getattr(config, 'STOP_BRACKET_EARLY', 180)
+
+                if entry_secs >= _STOP_BRACKET_LATE:          # entry at 8+ min
+                    min_elapsed = getattr(config, 'STOP_GUARD_SECONDARY',    90)
+                elif entry_secs >= _STOP_BRACKET_MID:         # entry at 5-8 min
+                    min_elapsed = getattr(config, 'STOP_GUARD_LATE_PRIMARY', 180)
+                elif entry_secs >= _STOP_BRACKET_EARLY:       # entry at 3-5 min
+                    min_elapsed = getattr(config, 'STOP_GUARD_MID_PRIMARY',  300)
+                else:                                          # entry before 3 min (most common)
+                    min_elapsed = getattr(config, 'STOP_GUARD_EARLY_PRIMARY', 480)
+
+                # Step 2: Guard check — only evaluate stops once guard has elapsed
+                if elapsed_secs >= min_elapsed:
                     # Parse contract close time from ticker
-                    # e.g. KXBTC15M-26APR011315-15 → opens 13:15, closes 13:30
+                    # e.g. KXBTC15M-26APR011315-15 -> opens 13:15 EST, closes 13:30 EST
                     _close_dt = None
                     try:
                         _MONTH_MAP = {
@@ -383,15 +405,45 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
 
                     if _close_dt is not None:
                         _now_utc = datetime.now(tz=timezone.utc)
-                        _time_remaining = (_close_dt - _now_utc).total_seconds()
-                        if _time_remaining < config.CRYPTO_15M_STOP_LOSS_SECS and yes_bid < entry_price * 0.40:
-                            rule = f'stop_loss_expiry_{_time_remaining:.0f}s_left'
+                        time_remaining = (_close_dt - _now_utc).total_seconds()
+
+                        _STOP_PRICE_CATASTROPHIC = getattr(config, 'STOP_PRICE_CATASTROPHIC', 0.20)
+                        _STOP_PRICE_SEVERE       = getattr(config, 'STOP_PRICE_SEVERE',       0.30)
+                        _STOP_PRICE_TERMINAL     = getattr(config, 'STOP_PRICE_TERMINAL',     0.40)
+                        _STOP_TIME_SEVERE        = getattr(config, 'STOP_TIME_SEVERE',        300)
+                        _STOP_TIME_TERMINAL      = getattr(config, 'STOP_TIME_TERMINAL',      210)
+
+                        # --- TIER 1: Catastrophic Stop ---
+                        # Fire immediately on near-zero price, no time check needed.
+                        # At 20% of entry price, 80% of capital is gone — no recovery expected.
+                        if yes_bid < entry_price * _STOP_PRICE_CATASTROPHIC:
+                            rule = f'stop_loss_catastrophic_{elapsed_secs:.0f}s'
                             log_activity(
                                 f'[WS Exit] {ticker} hit {rule} (bid={yes_bid}c, entry={entry_price}c) — exiting'
                             )
                             await execute_exit(key, pos, yes_bid, rule)
                             continue  # position exited, skip threshold checks
-        # ── End time-to-expiry stop-loss ──────────────────────────────────
+
+                        # --- TIER 2: Severe Stop ---
+                        # Fire if below 30% of entry and 5 min or less remaining.
+                        if yes_bid < entry_price * _STOP_PRICE_SEVERE and time_remaining < _STOP_TIME_SEVERE:
+                            rule = f'stop_loss_severe_{elapsed_secs:.0f}s'
+                            log_activity(
+                                f'[WS Exit] {ticker} hit {rule} (bid={yes_bid}c, entry={entry_price}c) — exiting'
+                            )
+                            await execute_exit(key, pos, yes_bid, rule)
+                            continue  # position exited, skip threshold checks
+
+                        # --- TIER 3: Terminal Stop (current behavior, preserved) ---
+                        # Fire if below 40% of entry and 3.5 min or less remaining.
+                        if yes_bid < entry_price * _STOP_PRICE_TERMINAL and time_remaining < _STOP_TIME_TERMINAL:
+                            rule = f'stop_loss_terminal_{elapsed_secs:.0f}s'
+                            log_activity(
+                                f'[WS Exit] {ticker} hit {rule} (bid={yes_bid}c, entry={entry_price}c) — exiting'
+                            )
+                            await execute_exit(key, pos, yes_bid, rule)
+                            continue  # position exited, skip threshold checks
+        # ── End Design D stop-loss ────────────────────────────────────────────────────
 
         # ── Time-decay stop-loss for crypto_1d positions ─────────────────
         # Daily crypto contracts (1H Dir KXBTCD, 1H Band KXBTC-*-B*)
