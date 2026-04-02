@@ -435,14 +435,14 @@ def get_parent_module(module_name: str) -> str:
     never needs its own classification logic.
 
     Mapping:
-        weather_band, weather_threshold          → 'weather'
-        crypto_15m_dir, crypto_1h_dir,
-          crypto_1h_band                         → 'crypto'
+        weather_band, weather_threshold              → 'weather'
+        crypto_dir_15m_*, crypto_threshold_daily_*,
+          crypto_band_daily_*                        → 'crypto'
         econ_cpi, econ_unemployment,
-          econ_fed_rate, econ_recession          → 'econ'
-        geo                                      → 'geo'
-        sports_odds                              → 'sports'
-        manual, other                            → 'other'
+          econ_fed_rate, econ_recession              → 'econ'
+        geo                                          → 'geo'
+        sports_odds                                  → 'sports'
+        manual, other                                → 'other'
     """
     m = (module_name or '').lower()
     if m.startswith('weather'):
@@ -463,17 +463,27 @@ def classify_module(src: str, ticker: str) -> str:
 
     Single source of truth - imported by dashboard/api.py to stay in sync.
 
-    Module taxonomy (2026-03-30):
-      weather_band        KXHIGH*-B*  (ticker contains '-B')
-      weather_threshold   KXHIGH*-T*  (ticker contains '-T')
-      crypto_15m_dir      KXBTC15M, KXETH15M, KXXRP15M, KXDOGE15M, KXSOL15M
-      crypto_1h_dir       KXBTCD, KXETHD, KXSOLD  (source=crypto_1d)
-      crypto_1h_band      KXBTC, KXETH, KXDOGE, KXXRP (band, no D/15M suffix)
-      econ_cpi            KXCPI*
-      econ_unemployment   KXJOBLESSCLAIMS, KXECONSTATU3, KXUE
-      econ_fed_rate       KXFED, KXFOMC  (was: fed)
-      econ_recession      KXWRECSS
-      geo                 geopolitical series (unchanged)
+    Module taxonomy (2026-04-01 — Phase A rename):
+      weather_band              KXHIGH*-B*  (ticker contains '-B')
+      weather_threshold         KXHIGH*-T*  (ticker contains '-T')
+      crypto_dir_15m_btc        KXBTC15M
+      crypto_dir_15m_eth        KXETH15M
+      crypto_dir_15m_sol        KXSOL15M
+      crypto_dir_15m_xrp        KXXRP15M
+      crypto_dir_15m_doge       KXDOGE15M
+      crypto_threshold_daily_btc  KXBTCD*
+      crypto_threshold_daily_eth  KXETHD*
+      crypto_threshold_daily_sol  KXSOLD*  (future)
+      crypto_band_daily_btc     KXBTC (band, no D/15M suffix)
+      crypto_band_daily_eth     KXETH (band, no D/15M suffix)
+      crypto_band_daily_xrp     KXXRP
+      crypto_band_daily_doge    KXDOGE
+      crypto_band_daily_sol     KXSOL
+      econ_cpi                  KXCPI*
+      econ_unemployment         KXJOBLESSCLAIMS, KXECONSTATU3, KXUE
+      econ_fed_rate             KXFED, KXFOMC
+      econ_recession            KXWRECSS
+      geo                       geopolitical series (unchanged)
     """
     t = (ticker or '').upper()
 
@@ -485,23 +495,45 @@ def classify_module(src: str, ticker: str) -> str:
 
     # ── Crypto 15-min direction ───────────────────────────────────────────
     # NOTE: 15M prefixes (KXBTC15M) must be checked BEFORE base prefixes (KXBTC)
-    if src == 'crypto_15m' or any(
-        t.startswith(p) for p in ('KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M')
-    ):
-        return 'crypto_15m_dir'
+    if t.startswith('KXBTC15M') or src == 'crypto_15m' and t.startswith('KXBTC'):
+        return 'crypto_dir_15m_btc'
+    if t.startswith('KXETH15M'):
+        return 'crypto_dir_15m_eth'
+    if t.startswith('KXSOL15M'):
+        return 'crypto_dir_15m_sol'
+    if t.startswith('KXXRP15M'):
+        return 'crypto_dir_15m_xrp'
+    if t.startswith('KXDOGE15M'):
+        return 'crypto_dir_15m_doge'
+    # Fallback for src='crypto_15m' with unrecognised asset
+    if src == 'crypto_15m':
+        return 'crypto_dir_15m_btc'
 
-    # ── Crypto 1h direction (above/below binary) ──────────────────────────
+    # ── Crypto threshold daily (above/below binary) ───────────────────────
     # NOTE: D-suffix series (KXBTCD) must be checked BEFORE base prefixes (KXBTC)
-    if src == 'crypto_1d' or any(
-        t.startswith(p) for p in ('KXBTCD', 'KXETHD', 'KXSOLD')
-    ):
-        return 'crypto_1h_dir'
+    if t.startswith('KXBTCD') or (src == 'crypto_1d' and t.startswith('KXBTC')):
+        return 'crypto_threshold_daily_btc'
+    if t.startswith('KXETHD') or (src == 'crypto_1d' and t.startswith('KXETH')):
+        return 'crypto_threshold_daily_eth'
+    if t.startswith('KXSOLD') or (src == 'crypto_1d' and t.startswith('KXSOL')):
+        return 'crypto_threshold_daily_sol'
+    # Fallback for src='crypto_1d' with unrecognised asset
+    if src == 'crypto_1d':
+        return 'crypto_threshold_daily_btc'
 
-    # ── Crypto 1h band (range prediction) ────────────────────────────────
-    if src == 'crypto' or any(
-        t.startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE', 'KXSOL')
-    ):
-        return 'crypto_1h_band'
+    # ── Crypto band daily (range prediction) ─────────────────────────────
+    if t.startswith('KXBTC'):
+        return 'crypto_band_daily_btc'
+    if t.startswith('KXETH'):
+        return 'crypto_band_daily_eth'
+    if t.startswith('KXXRP'):
+        return 'crypto_band_daily_xrp'
+    if t.startswith('KXDOGE'):
+        return 'crypto_band_daily_doge'
+    if t.startswith('KXSOL'):
+        return 'crypto_band_daily_sol'
+    if src == 'crypto':
+        return 'crypto_band_daily_btc'
 
     # ── Econ subcategories ────────────────────────────────────────────────
     if t.startswith('KXCPI'):

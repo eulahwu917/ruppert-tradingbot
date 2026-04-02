@@ -67,18 +67,20 @@ TICKER_MODULE_MAP = {
 
     # ── Crypto 15m direction ─────────────────────────────────────────────────
     # Must appear BEFORE base prefixes (KXBTC, KXETH, etc.)
-    'KXBTC15M':  'crypto_15m_dir', 'KXETH15M':  'crypto_15m_dir',
-    'KXXRP15M':  'crypto_15m_dir', 'KXDOGE15M': 'crypto_15m_dir',
-    'KXSOL15M':  'crypto_15m_dir',   # was missing
+    'KXBTC15M':  'crypto_dir_15m_btc',  'KXETH15M':  'crypto_dir_15m_eth',
+    'KXXRP15M':  'crypto_dir_15m_xrp',  'KXDOGE15M': 'crypto_dir_15m_doge',
+    'KXSOL15M':  'crypto_dir_15m_sol',
 
-    # ── Crypto 1h direction (above/below daily) ───────────────────────────────
-    'KXBTCD':    'crypto_1h_dir',  'KXETHD':    'crypto_1h_dir',
-    'KXSOLD':    'crypto_1h_dir',
+    # ── Crypto threshold daily (above/below daily) ────────────────────────────
+    # Must appear BEFORE base prefixes (KXBTC, KXETH, etc.)
+    'KXBTCD':    'crypto_threshold_daily_btc',
+    'KXETHD':    'crypto_threshold_daily_eth',
+    'KXSOLD':    'crypto_threshold_daily_sol',
 
-    # ── Crypto 1h band (range prediction) ────────────────────────────────────
-    'KXBTC':     'crypto_1h_band', 'KXETH':     'crypto_1h_band',
-    'KXXRP':     'crypto_1h_band', 'KXDOGE':    'crypto_1h_band',
-    'KXSOL':     'crypto_1h_band',
+    # ── Crypto band daily (range prediction) ─────────────────────────────────
+    'KXBTC':     'crypto_band_daily_btc',  'KXETH':  'crypto_band_daily_eth',
+    'KXXRP':     'crypto_band_daily_xrp',  'KXDOGE': 'crypto_band_daily_doge',
+    'KXSOL':     'crypto_band_daily_sol',
 
     # ── Econ subcategories ────────────────────────────────────────────────────
     'KXCPI':     'econ_cpi',          # CPI
@@ -322,17 +324,27 @@ def check_daily_cap_violations(trades_today: list[dict]) -> list[dict]:
     # + circuit breaker).  Only build caps dict from constants that still exist
     # in config — if the constant is missing, the cap is disabled.
     _cap_map = {
-        'weather_band':      'WEATHER_BAND_DAILY_CAP_PCT',
-        'weather_threshold': 'WEATHER_THRESHOLD_DAILY_CAP_PCT',
-        'crypto_1h_band':    'CRYPTO_1H_BAND_DAILY_CAP_PCT',
-        'crypto_1h_dir':     'CRYPTO_1H_DIR_DAILY_CAP_PCT',
-        'crypto_15m_dir':    'CRYPTO_15M_DIR_DAILY_CAP_PCT',
-        'crypto_long':       'LONG_HORIZON_DAILY_CAP_PCT',
-        'econ_cpi':          'ECON_CPI_DAILY_CAP_PCT',
-        'econ_unemployment': 'ECON_UNEMPLOYMENT_DAILY_CAP_PCT',
-        'econ_fed_rate':     'ECON_FED_RATE_DAILY_CAP_PCT',
-        'econ_recession':    'ECON_RECESSION_DAILY_CAP_PCT',
-        'geo':               'GEO_DAILY_CAP_PCT',
+        'weather_band':               'WEATHER_BAND_DAILY_CAP_PCT',
+        'weather_threshold':          'WEATHER_THRESHOLD_DAILY_CAP_PCT',
+        'crypto_band_daily_btc':      'CRYPTO_1H_BAND_DAILY_CAP_PCT',
+        'crypto_band_daily_eth':      'CRYPTO_1H_BAND_DAILY_CAP_PCT',
+        'crypto_band_daily_xrp':      'CRYPTO_1H_BAND_DAILY_CAP_PCT',
+        'crypto_band_daily_doge':     'CRYPTO_1H_BAND_DAILY_CAP_PCT',
+        'crypto_band_daily_sol':      'CRYPTO_1H_BAND_DAILY_CAP_PCT',
+        'crypto_threshold_daily_btc': 'CRYPTO_1H_DIR_DAILY_CAP_PCT',
+        'crypto_threshold_daily_eth': 'CRYPTO_1H_DIR_DAILY_CAP_PCT',
+        'crypto_threshold_daily_sol': 'CRYPTO_1H_DIR_DAILY_CAP_PCT',
+        'crypto_dir_15m_btc':         'CRYPTO_15M_DIR_DAILY_CAP_PCT',
+        'crypto_dir_15m_eth':         'CRYPTO_15M_DIR_DAILY_CAP_PCT',
+        'crypto_dir_15m_sol':         'CRYPTO_15M_DIR_DAILY_CAP_PCT',
+        'crypto_dir_15m_xrp':         'CRYPTO_15M_DIR_DAILY_CAP_PCT',
+        'crypto_dir_15m_doge':        'CRYPTO_15M_DIR_DAILY_CAP_PCT',
+        'crypto_long':                'LONG_HORIZON_DAILY_CAP_PCT',
+        'econ_cpi':                   'ECON_CPI_DAILY_CAP_PCT',
+        'econ_unemployment':          'ECON_UNEMPLOYMENT_DAILY_CAP_PCT',
+        'econ_fed_rate':              'ECON_FED_RATE_DAILY_CAP_PCT',
+        'econ_recession':             'ECON_RECESSION_DAILY_CAP_PCT',
+        'geo':                        'GEO_DAILY_CAP_PCT',
     }
     caps = {}
     for module, attr in _cap_map.items():

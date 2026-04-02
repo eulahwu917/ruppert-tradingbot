@@ -128,25 +128,39 @@ MIN_HOURS_TO_CLOSE = 4.0
 
 # Minimum hours to settlement before allowing entry — per module
 # Default (hourly/daily markets): 0.5h (30 min)
-# crypto_15m_dir: 0.04h (≈2.4 min) — 15m window is only 0.25h total; timing gate is the binding constraint
+# crypto_dir_15m_*: 0.04h (≈2.4 min) — 15m window is only 0.25h total; timing gate is the binding constraint
 MIN_HOURS_ENTRY = {
-    'default':        0.5,
-    'crypto_15m_dir': 0.04,   # ≈2.4 min remaining — allows all primary + secondary window entries
-    'crypto_1h_dir':  2.0,    # hard cutoff at 15:00 ET = 2h before 17:00 settlement
+    'default':                    0.5,
+    'crypto_dir_15m_btc':         0.04,   # ≈2.4 min remaining — allows all primary + secondary window entries
+    'crypto_dir_15m_eth':         0.04,
+    'crypto_dir_15m_sol':         0.04,
+    'crypto_dir_15m_xrp':         0.04,
+    'crypto_dir_15m_doge':        0.04,
+    'crypto_threshold_daily_btc': 2.0,    # hard cutoff at 15:00 ET = 2h before 17:00 settlement
+    'crypto_threshold_daily_eth': 2.0,
 }
 
 # Minimum confidence thresholds per module
 MIN_CONFIDENCE = {
-    'weather_band':      0.25,
-    'weather_threshold': 0.25,
-    'crypto_1h_band':    0.50,
-    'crypto_1h_dir':     0.50,
-    'crypto_15m_dir':    0.40,   # Phase 2: lowered from 0.50
-    'econ_cpi':          0.55,
-    'econ_unemployment': 0.55,
-    'econ_fed_rate':     0.55,
-    'econ_recession':    0.55,
-    'geo':               0.50,
+    'weather_band':               0.25,
+    'weather_threshold':          0.25,
+    'crypto_band_daily_btc':      0.50,
+    'crypto_band_daily_eth':      0.50,
+    'crypto_band_daily_xrp':      0.50,
+    'crypto_band_daily_doge':     0.50,
+    'crypto_band_daily_sol':      0.50,
+    'crypto_threshold_daily_btc': 0.50,
+    'crypto_threshold_daily_eth': 0.50,
+    'crypto_dir_15m_btc':         0.40,   # Phase 2: lowered from 0.50
+    'crypto_dir_15m_eth':         0.40,
+    'crypto_dir_15m_sol':         0.40,
+    'crypto_dir_15m_xrp':         0.40,
+    'crypto_dir_15m_doge':        0.40,
+    'econ_cpi':                   0.55,
+    'econ_unemployment':          0.55,
+    'econ_fed_rate':              0.55,
+    'econ_recession':             0.55,
+    'geo':                        0.50,
 }
 
 # ── Volume-Tier Edge Discounting ──────────────────────────────────────────────
@@ -194,7 +208,7 @@ CRYPTO_15M_CIRCUIT_BREAKER_N        = 3      # consecutive complete-loss windows
 CRYPTO_15M_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop — halt all crypto_15m entries for rest of trading day
 CRYPTO_15M_STOP_LOSS_SECS = 210  # stop-loss fires when < this many seconds remain AND bid < 40% of entry
 
-# ── crypto_15m_dir Signal Weights ────────────────────────────────────────────
+# ── crypto_dir_15m_* Signal Weights ─────────────────────────────────────────
 CRYPTO_15M_DIR_W_TFI  = 0.50   # Taker Flow Imbalance weight (Phase 2: increased from 0.42)
 CRYPTO_15M_DIR_W_OBI  = 0.25   # Orderbook Imbalance weight (unchanged)
 CRYPTO_15M_DIR_W_MACD = 0.15   # MACD Histogram weight (unchanged)
@@ -374,16 +388,16 @@ SETTLEMENT_GUARD_WINDOW_SECS = 90   # seconds before/after close_time to guard
 # ── Minimum Edge per Module (strategy gate) ───────────────────────────────────
 # These are the STRATEGY GATE minimums — a secondary check in should_enter().
 # Individual modules may also have local edge gates (e.g. CRYPTO_15M_MIN_EDGE).
-MIN_EDGE_WEATHER_BAND      = 0.12
-MIN_EDGE_WEATHER_THRESHOLD = 0.12
-MIN_EDGE_CRYPTO_1H_BAND    = 0.12
-MIN_EDGE_CRYPTO_15M_DIR    = 0.12   # strategy gate; local gate = CRYPTO_15M_MIN_EDGE (0.02)
-MIN_EDGE_CRYPTO_1H_DIR     = 0.08
-MIN_EDGE_GEO               = 0.15
-MIN_EDGE_ECON_CPI          = 0.12
-MIN_EDGE_ECON_UNEMPLOYMENT = 0.12
-MIN_EDGE_ECON_FED_RATE     = 0.12
-MIN_EDGE_ECON_RECESSION    = 0.12
+MIN_EDGE_WEATHER_BAND               = 0.12
+MIN_EDGE_WEATHER_THRESHOLD          = 0.12
+MIN_EDGE_CRYPTO_BAND_DAILY          = 0.12   # applies to crypto_band_daily_* modules
+MIN_EDGE_CRYPTO_DIR_15M             = 0.12   # strategy gate; local gate = CRYPTO_15M_MIN_EDGE (0.02)
+MIN_EDGE_CRYPTO_THRESHOLD_DAILY     = 0.08   # applies to crypto_threshold_daily_* modules
+MIN_EDGE_GEO                        = 0.15
+MIN_EDGE_ECON_CPI                   = 0.12
+MIN_EDGE_ECON_UNEMPLOYMENT          = 0.12
+MIN_EDGE_ECON_FED_RATE              = 0.12
+MIN_EDGE_ECON_RECESSION             = 0.12
 
 # ── Strategy Gate Scalars ─────────────────────────────────────────────────────
 STRATEGY_MIN_CONFIDENCE_FLOOR = 0.25   # universal fallback when module not in MIN_CONFIDENCE dict
