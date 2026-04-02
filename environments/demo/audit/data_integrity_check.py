@@ -20,9 +20,14 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 ROOT      = Path(__file__).parent
-LOGS_DIR  = ROOT / "logs"
+DEMO_DIR  = ROOT.parent          # audit/ -> demo/
+LOGS_DIR  = DEMO_DIR / "logs"   # brier_tracker.py lives in demo root
 issues    = []
 warnings  = []
+
+# Make demo root importable (brier_tracker.py lives there)
+if str(DEMO_DIR) not in sys.path:
+    sys.path.insert(0, str(DEMO_DIR))
 
 
 def check_cycle_log():
