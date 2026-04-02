@@ -942,7 +942,7 @@ def get_pnl_history():
     manual_cost_basis = 0.0
 
     # Per-module stats (bot trades only)
-    module_keys = ['crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'other']
+    module_keys = ['crypto', 'crypto_dir_15m', 'crypto_threshold_daily', 'crypto_band_daily', 'other']
     module_stats = {m: {
         'closed_pnl': 0.0,
         'closed_pnl_day': 0.0,
@@ -1358,7 +1358,7 @@ def _build_state():
             }
 
     # ── Build positions list (reuses prices fetched above) ────────────────────
-    module_keys = ['crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'other']
+    module_keys = ['crypto', 'crypto_dir_15m', 'crypto_threshold_daily', 'crypto_band_daily', 'other']
     module_open: dict = {m: {'open_deployed': 0.0, 'open_trades': 0, 'open_pnl': 0.0} for m in module_keys}
 
     positions = []
@@ -1451,7 +1451,7 @@ def _build_state():
     closed_wins      = 0
     closed_count     = 0
 
-    module_closed_keys = ['crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'other']
+    module_closed_keys = ['crypto', 'crypto_dir_15m', 'crypto_threshold_daily', 'crypto_band_daily', 'other']
     module_closed: dict = {m: {
         'closed_pnl': 0.0,
         'closed_pnl_day': 0.0,
@@ -1636,7 +1636,7 @@ def _build_state():
 
     # ── Finalize module stats ─────────────────────────────────────────────────
     modules_out: dict = {}
-    for mod in ['crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band']:
+    for mod in ['crypto', 'crypto_dir_15m', 'crypto_threshold_daily', 'crypto_band_daily']:
         oc = module_open.get(mod, {})
         cc = module_closed.get(mod, {})
         tc = cc.get('trade_count', 0)

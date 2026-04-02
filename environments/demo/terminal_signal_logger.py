@@ -1,5 +1,5 @@
 """
-terminal_signal_logger.py — Logs the 'terminal signal' for crypto_15m_dir positions
+terminal_signal_logger.py — Logs the 'terminal signal' for crypto_dir_15m positions
 approaching their close window.
 
 Shadow-only: no trading decisions are changed. Captures one record per position per
@@ -74,7 +74,7 @@ def _get_seconds_to_close(ticker: str) -> float | None:
 
 def maybe_log_terminal(ticker: str, position: dict, current_signal: float,
                        close_time: str | None = None):
-    """Log the terminal signal for a crypto_15m_dir position approaching close.
+    """Log the terminal signal for a crypto_dir_15m position approaching close.
 
     Args:
         ticker:         Market ticker string
@@ -83,7 +83,7 @@ def maybe_log_terminal(ticker: str, position: dict, current_signal: float,
         close_time:     Unused (kept for call-site compat); close time is parsed from ticker
     """
     # 5.1 — Module filter (FIRST LINE)
-    if position.get('module') != 'crypto_15m_dir':
+    if position.get('module') != 'crypto_dir_15m':
         return
 
     # 5.2 — Time gate (parse close time from ticker using pytz)
@@ -108,7 +108,7 @@ def maybe_log_terminal(ticker: str, position: dict, current_signal: float,
         import config
         threshold = getattr(config, 'CRYPTO_SIGNAL_THRESHOLD', 0.55)
         if isinstance(getattr(config, 'MIN_CONFIDENCE', None), dict):
-            threshold = config.MIN_CONFIDENCE.get('crypto_15m_dir', threshold)
+            threshold = config.MIN_CONFIDENCE.get('crypto_dir_15m', threshold)
     except ImportError:
         threshold = 0.55
 
@@ -125,7 +125,7 @@ def maybe_log_terminal(ticker: str, position: dict, current_signal: float,
         'timestamp': datetime.now(tz=timezone.utc).isoformat(),
         'ticker': ticker,
         'side': side,
-        'module': 'crypto_15m_dir',
+        'module': 'crypto_dir_15m',
         'entry_price': entry_price,
         'entry_raw_score': entry_raw_score,
         'terminal_signal': current_signal,

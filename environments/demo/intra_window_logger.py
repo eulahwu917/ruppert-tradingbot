@@ -1,5 +1,5 @@
 """
-intra_window_logger.py — Records yes_bid/yes_ask every 60s for open crypto_15m_dir positions.
+intra_window_logger.py — Records yes_bid/yes_ask every 60s for open crypto_dir_15m positions.
 
 Shadow-only: no trading actions. Produces a price path for backtesting.
 Log file: logs/price_series/{safe_ticker}.jsonl  (one file per ticker, appended)
@@ -75,7 +75,7 @@ def maybe_log_price(ticker: str, position: dict, yes_bid: int | None, yes_ask: i
         yes_ask:  Current yes_ask in cents (int, may be None)
     """
     # Module filter (FIRST LINE)
-    if position.get('module') != 'crypto_15m_dir':
+    if position.get('module') != 'crypto_dir_15m':
         return
 
     if yes_bid is None:
