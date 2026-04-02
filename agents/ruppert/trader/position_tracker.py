@@ -348,9 +348,7 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
             elapsed_min = (now - pos['added_at']) / 60.0
             entry_price = pos['entry_price']
             stop_triggered = False
-            if 5 <= elapsed_min < 10 and yes_bid < entry_price * 0.30:
-                stop_triggered = True
-            elif 10 <= elapsed_min < 13 and yes_bid < entry_price * 0.40:
+            if 5 <= elapsed_min < 13 and yes_bid < entry_price * 0.40:
                 stop_triggered = True
             # 0-5 min: no stop (too early, noise)
             # 13-15 min: no stop (spread too wide near expiry, let it settle)

@@ -17,8 +17,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 
 # Config
-CHECK_INTERVAL_SECONDS = 300   # 5 minutes
-HEARTBEAT_STALE_SECONDS = 600  # 10 minutes — if no heartbeat, assume hung
+CHECK_INTERVAL_SECONDS = 60    # 1 minute
+HEARTBEAT_STALE_SECONDS = 180  # 3 minutes — if no heartbeat, assume hung
 
 # Environment
 WORKSPACE_ROOT = Path(os.environ.get(
