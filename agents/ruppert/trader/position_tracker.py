@@ -373,8 +373,11 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
                                 _hh = int(_m.group(4))
                                 _mm = int(_m.group(5))
                                 if _mon:
-                                    _open_dt = datetime(_yr, _mon, _dd, _hh, _mm, tzinfo=timezone.utc)
-                                    _close_dt = _open_dt + timedelta(minutes=15)
+                                    from pytz import timezone as _tz
+                                    _est = _tz('America/New_York')
+                                    _close_naive = datetime(_yr, _mon, _dd, _hh, _mm)
+                                    _close_est = _est.localize(_close_naive)
+                                    _close_dt = _close_est.astimezone(timezone.utc)
                     except Exception:
                         pass
 
@@ -670,8 +673,11 @@ async def check_expired_positions():
                     hh = int(m.group(4))
                     mm = int(m.group(5))
                     if mon:
-                        open_dt = datetime(yr, mon, dd, hh, mm, tzinfo=timezone.utc)
-                        close_dt = open_dt + timedelta(minutes=15)
+                        from pytz import timezone as _tz
+                        _est = _tz('America/New_York')
+                        _close_naive = datetime(yr, mon, dd, hh, mm)
+                        _close_est = _est.localize(_close_naive)
+                        close_dt = _close_est.astimezone(timezone.utc)
         except Exception:
             pass
 
@@ -686,8 +692,8 @@ async def check_expired_positions():
             if not market:
                 continue
             result = market.get('result')
-            if result is None:
-                continue  # not yet settled, retry next cycle
+            if not result:  # catches None, empty string '', and other falsy values
+                continue  # not yet settled — skip, retry next cycle
         except Exception as e:
             logger.warning('[PositionTracker] check_expired: REST failed for %s: %s', ticker, e)
             continue
