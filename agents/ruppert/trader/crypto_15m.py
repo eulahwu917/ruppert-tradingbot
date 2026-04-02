@@ -531,17 +531,7 @@ def get_funding_z(asset: str) -> float | None:
 
 
 # ─────────────────────────────── Bias: Polymarket ────────────────────────────
-
-def get_polymarket_yes_prob(asset: str) -> float | None:
-    """
-    Check if Polymarket has a corresponding 15-min crypto market.
-    Returns YES probability or None if unavailable.
-    """
-    from agents.ruppert.data_analyst.polymarket_client import get_crypto_consensus
-    result = get_crypto_consensus(asset)
-    if result is None:
-        return None
-    return result['yes_price']
+# get_polymarket_yes_prob stub removed — get_crypto_consensus imported at module level
 
 
 # ─────────────────────────────── Risk Filters ────────────────────────────────
@@ -796,6 +786,8 @@ def _log_decision(
     edge: float | None,
     entry_price: int | None,
     position_usd: float | None,
+    polymarket_yes_price: float | None = None,
+    polymarket_fetched_at: str | None = None,
 ):
     """Append decision record to decisions_15m.jsonl."""
     record = {
@@ -811,6 +803,8 @@ def _log_decision(
         'edge': round(edge, 4) if edge is not None else None,
         'entry_price': entry_price,
         'position_usd': round(position_usd, 2) if position_usd is not None else None,
+        'polymarket_yes_price': polymarket_yes_price,
+        'polymarket_fetched_at': polymarket_fetched_at,
     }
     try:
         with open(DECISION_LOG, 'a', encoding='utf-8') as f:
@@ -974,6 +968,25 @@ def evaluate_crypto_15m_entry(
     macd_z = macd['macd_z']
     oi_z = oi['oi_z']
 
+    # ── Shadow: Polymarket consensus price (logging only, no weight change) ──
+    import time as _time
+    _poly_result  = None
+    _poly_fetched = None
+    try:
+        _poly_result  = get_crypto_consensus(asset)
+        _poly_fetched = _time.time()
+    except Exception:
+        pass
+
+    _STALE_SECS = 600
+    if _poly_result and _poly_fetched and (_time.time() - _poly_fetched) <= _STALE_SECS:
+        polymarket_yes_price  = _poly_result.get("yes_price")
+        polymarket_fetched_at = datetime.fromtimestamp(_poly_fetched, tz=timezone.utc).isoformat()
+    else:
+        polymarket_yes_price  = None
+        polymarket_fetched_at = None
+    # ── End Polymarket shadow ──
+
     # ── Composite Score → Probability ──
     raw_score = W_TFI * tfi_z + W_OBI * obi_z + W_MACD * macd_z + W_OI * oi_z
     scale = getattr(config, 'CRYPTO_15M_SIGMOID_SCALE', 1.0)
@@ -993,19 +1006,18 @@ def evaluate_crypto_15m_entry(
 
     P_biased = P_directional * funding_mult
 
-    # Polymarket divergence nudge — SHADOW LOG ONLY (do not influence trades)
+    # Polymarket divergence nudge — use shadow price already fetched above
     poly_nudge = 0.0
-    poly_yes = get_polymarket_yes_prob(asset)
+    poly_yes = polymarket_yes_price   # was: get_polymarket_yes_prob(asset)
     kalshi_yes = yes_ask / 100.0
+    _poly_div_threshold = getattr(config, 'CRYPTO_15M_POLY_DIVERGENCE_THRESHOLD', 0.03)
+    _poly_nudge_weight  = getattr(config, 'CRYPTO_15M_POLY_NUDGE_WEIGHT', 0.3)
     if poly_yes is not None:
-        _poly_div_threshold = getattr(config, 'CRYPTO_15M_POLY_DIVERGENCE_THRESHOLD', 0.03)
-        _poly_nudge_weight  = getattr(config, 'CRYPTO_15M_POLY_NUDGE_WEIGHT', 0.3)
         divergence = poly_yes - kalshi_yes
-        would_nudge = _poly_nudge_weight * divergence if abs(divergence) > _poly_div_threshold else 0.0
-        nudge_dir = "YES" if would_nudge > 0 else ("NO" if would_nudge < 0 else "FLAT")
-        logger.info("[Poly-Shadow] %s consensus=%.3f, kalshi=%.3f, div=%.3f, would nudge %s by %.4f",
-                    asset, poly_yes, kalshi_yes, divergence, nudge_dir, abs(would_nudge))
+        if abs(divergence) > _poly_div_threshold:
+            poly_nudge = _poly_nudge_weight * divergence
         # poly_nudge stays 0.0 — shadow only, no trade influence
+        poly_nudge = 0.0
 
     P_final = max(0.05, min(0.95, P_biased + poly_nudge))
 
@@ -1103,7 +1115,9 @@ def evaluate_crypto_15m_entry(
     else:
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
                        signals, kalshi_info, 'SKIP', 'INSUFFICIENT_EDGE',
-                       max(edge_yes, edge_no), None, None)
+                       max(edge_yes, edge_no), None, None,
+                       polymarket_yes_price=polymarket_yes_price,
+                       polymarket_fetched_at=polymarket_fetched_at)
         return
 
     # ── Capital + Cap Constants ──
@@ -1323,5 +1337,7 @@ def evaluate_crypto_15m_entry(
     _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
                    signals, kalshi_info,
                    'ENTER', None,
-                   edge, entry_price, position_usd)
+                   edge, entry_price, position_usd,
+                   polymarket_yes_price=polymarket_yes_price,
+                   polymarket_fetched_at=polymarket_fetched_at)
 

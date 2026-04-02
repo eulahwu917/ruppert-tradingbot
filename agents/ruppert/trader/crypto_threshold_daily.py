@@ -36,6 +36,7 @@ from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 from agents.ruppert.data_scientist.logger import get_daily_exposure
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from agents.ruppert.env_config import get_paths as _get_paths
+from agents.ruppert.data_analyst.polymarket_client import get_crypto_daily_consensus
 
 logger = logging.getLogger(__name__)
 
@@ -814,7 +815,14 @@ def compute_position_size(capital: float, P_win: float, cost_cents: int,
 
 def _log_decision(asset: str, window: str, signals: dict, decision: str, reason: str,
                   market_id: str = None, size_usd: float = None,
-                  composite: float = None, P_above: float = None, edge: float = None):
+                  composite: float = None, P_above: float = None, edge: float = None,
+                  poly_yes_price: float = None,
+                  poly_market_title: str = None,
+                  poly_volume_24h: float = None,
+                  poly_fetched_at: str = None,
+                  poly_daily_yes_price: float = None,
+                  poly_daily_market_title: str = None,
+                  poly_daily_fetched_at: str = None):
     """
     Append a structured entry to decisions_1d.jsonl.
     """
@@ -853,6 +861,15 @@ def _log_decision(asset: str, window: str, signals: dict, decision: str, reason:
     if size_usd is not None:
         entry['size_usd'] = size_usd
 
+    # Shadow: Polymarket fields
+    entry['poly_yes_price']          = poly_yes_price
+    entry['poly_market_title']       = poly_market_title
+    entry['poly_volume_24h']         = poly_volume_24h
+    entry['poly_fetched_at']         = poly_fetched_at
+    entry['poly_daily_yes_price']    = poly_daily_yes_price
+    entry['poly_daily_market_title'] = poly_daily_market_title
+    entry['poly_daily_fetched_at']   = poly_daily_fetched_at
+
     try:
         DECISION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(DECISION_LOG_PATH, 'a', encoding='utf-8') as f:
@@ -868,13 +885,20 @@ def get_today_settlement_date() -> str:
     return date.today().isoformat()
 
 
-def _skip(asset, window, reason, signals=None):
+def _skip(asset, window, reason, signals=None,
+          poly_yes_price=None, poly_market_title=None, poly_volume_24h=None,
+          poly_fetched_at=None, poly_daily_yes_price=None,
+          poly_daily_market_title=None, poly_daily_fetched_at=None):
     """Return a skip result dict, optionally logging."""
     log_activity(f'[Crypto1D] SKIP {asset} ({window}): {reason}')
-    if signals:
-        _log_decision(asset, window, signals, 'SKIP', reason)
-    else:
-        _log_decision(asset, window, {}, 'SKIP', reason)
+    _log_decision(asset, window, signals or {}, 'SKIP', reason,
+                  poly_yes_price=poly_yes_price,
+                  poly_market_title=poly_market_title,
+                  poly_volume_24h=poly_volume_24h,
+                  poly_fetched_at=poly_fetched_at,
+                  poly_daily_yes_price=poly_daily_yes_price,
+                  poly_daily_market_title=poly_daily_market_title,
+                  poly_daily_fetched_at=poly_daily_fetched_at)
     return {'entered': False, 'ticker': None, 'size_usd': 0.0, 'reason': reason}
 
 
@@ -964,21 +988,44 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
 
     s5 = compute_s5_polymarket(asset)
 
+    # ── Shadow: Polymarket daily consensus (logging only) ──
+    _poly_daily_result     = None
+    _poly_daily_fetched_at = None
+    try:
+        _poly_daily_result = get_crypto_daily_consensus(asset)
+        if _poly_daily_result:
+            _poly_daily_fetched_at = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    except Exception:
+        pass
+    # ── End Polymarket daily shadow ──
+
+    # Helper: build poly kwargs for post-signal _log_decision/_skip calls
+    def _poly_kwargs():
+        return dict(
+            poly_yes_price=s5.get('yes_price') if s5 and s5.get('available') else None,
+            poly_market_title=s5.get('market_title') if s5 and s5.get('available') else None,
+            poly_volume_24h=s5.get('volume_24h') if s5 and s5.get('available') else None,
+            poly_fetched_at=datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ') if s5 and s5.get('available') else None,
+            poly_daily_yes_price=_poly_daily_result.get('yes_price') if _poly_daily_result else None,
+            poly_daily_market_title=_poly_daily_result.get('market_title') if _poly_daily_result else None,
+            poly_daily_fetched_at=_poly_daily_fetched_at,
+        )
+
     signals_dict = {'S1': s1, 'S2': s2, 'S3': s3, 'S4': s4, 'S5': s5}
 
     # 5. Risk filters
     if s2.get('filter_skip'):
-        return _skip(asset, window, 'R6_extreme_funding', signals_dict)
+        return _skip(asset, window, 'R6_extreme_funding', signals_dict, **_poly_kwargs())
 
     # R1: extreme volatility
     atr_pct = s3.get('ATR_pct', 0.0)
     if atr_pct > HIGH_VOL_THRESHOLD.get(asset, 0.04):
-        return _skip(asset, window, f'R1_extreme_vol (ATR_pct={atr_pct:.3f})', signals_dict)
+        return _skip(asset, window, f'R1_extreme_vol (ATR_pct={atr_pct:.3f})', signals_dict, **_poly_kwargs())
 
     # 6. Composite score
     composite = compute_composite_score(s1, s2, s3, s4, s5)
     if composite['direction'] == 'no_trade':
-        return _skip(asset, window, composite.get('skip_reason', 'no_trade'), signals_dict)
+        return _skip(asset, window, composite.get('skip_reason', 'no_trade'), signals_dict, **_poly_kwargs())
 
     # 7. MIN_EDGE threshold (stricter for secondary window)
     min_edge = getattr(config, 'CRYPTO_1D_MIN_EDGE', 0.08)
@@ -988,7 +1035,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
     # 8. Discover markets and select strike
     markets = discover_1d_markets(asset)
     if not markets:
-        return _skip(asset, window, 'no_markets_available', signals_dict)
+        return _skip(asset, window, 'no_markets_available', signals_dict, **_poly_kwargs())
 
     best = select_best_strike(asset, composite['P_above'], markets,
                               direction=composite['direction'])
@@ -999,6 +1046,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         _log_decision(
             asset, window, signals_dict, 'SKIP', reason,
             composite=composite['raw_composite'], P_above=composite['P_above'],
+            **_poly_kwargs(),
         )
         log_activity(f'[Crypto1D] SKIP {asset} ({window}): {reason}')
         return {'entered': False, 'ticker': None, 'size_usd': 0.0, 'reason': reason}
@@ -1009,12 +1057,12 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
     spread = ya + na - 100
     _r2_max_spread = getattr(config, 'CRYPTO_1D_MAX_DISCOVERY_SPREAD', 12)
     if spread > _r2_max_spread:
-        return _skip(asset, window, f'R2_wide_spread (spread={spread})', signals_dict)
+        return _skip(asset, window, f'R2_wide_spread (spread={spread})', signals_dict, **_poly_kwargs())
 
     book_depth = best.get('book_depth_usd', 0) or 0
     _r3_min_depth = getattr(config, 'CRYPTO_1D_MIN_BOOK_DEPTH_USD', 300)
     if book_depth > 0 and book_depth < _r3_min_depth:
-        return _skip(asset, window, f'R3_thin_book (depth={book_depth})', signals_dict)
+        return _skip(asset, window, f'R3_thin_book (depth={book_depth})', signals_dict, **_poly_kwargs())
 
     # 10. Compute size
     side = best.get('side', 'yes')
@@ -1027,7 +1075,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
     remaining = per_asset_cap - asset_daily_deployed
     size_usd = min(size_usd, remaining)
     if size_usd < getattr(config, 'CRYPTO_1D_MIN_POSITION_USD', 10.0):
-        return _skip(asset, window, 'size_below_minimum', signals_dict)
+        return _skip(asset, window, 'size_below_minimum', signals_dict, **_poly_kwargs())
 
     # 11. Place order
     contracts = max(1, int(size_usd / cost_cents * 100))
@@ -1084,6 +1132,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
             f"edge={best.get('edge', 0):.2f} "
             f"size=${actual_cost:.2f}"
         ),
+        **_poly_kwargs(),
     )
 
     if result:

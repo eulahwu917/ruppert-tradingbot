@@ -9,7 +9,7 @@ import math
 import sys
 import requests
 from pathlib import Path
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 # Ensure project root is on sys.path when running standalone
 _AGENTS_ROOT = Path(__file__).parent.parent.parent  # workspace/agents
@@ -28,6 +28,7 @@ from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 from agents.ruppert.strategist.strategy import (
     should_enter, check_daily_cap, check_open_exposure,
 )
+from agents.ruppert.data_analyst.polymarket_client import get_crypto_daily_consensus
 import config
 
 
@@ -203,6 +204,22 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
         # Sort by edge, take top 3 per run max
         new_crypto.sort(key=lambda x: x['edge'], reverse=True)
 
+        # ── Shadow: Polymarket daily consensus for band module (logging only) ──
+        _band_poly_cache = {}  # {asset: {yes_price, market_title, volume_24h, fetched_at}}
+        for _bp_asset in ('BTC', 'ETH'):
+            try:
+                _bp_result = get_crypto_daily_consensus(_bp_asset)
+                if _bp_result:
+                    _band_poly_cache[_bp_asset] = {
+                        'yes_price':    _bp_result.get('yes_price'),
+                        'market_title': _bp_result.get('market_title'),
+                        'volume_24h':   _bp_result.get('volume_24h'),
+                        'fetched_at':   datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                    }
+            except Exception:
+                pass
+        # ── End Polymarket shadow ──
+
         # Daily cap check before executing
         try:
             _total_capital  = get_capital()
@@ -304,6 +321,10 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
             contracts  = max(1, int(size / best_price * 100))
             actual_cost = round(contracts * best_price / 100, 2)
 
+            # Determine which asset this trade is for (for Polymarket shadow lookup)
+            _band_asset = 'BTC' if 'BTC' in t.get('series', '') else 'ETH'
+            _bp_data = _band_poly_cache.get(_band_asset, {})
+
             opp = {
                 'ticker': t['ticker'], 'title': t['title'], 'side': t['side'],
                 'action': 'buy', 'yes_price': t['price'] if t['side'] == 'yes' else 100 - t['price'],
@@ -318,6 +339,11 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 'note': t['note'],
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 'date': str(date.today()),
+                # Shadow: Polymarket daily consensus
+                'poly_daily_yes_price':    _bp_data.get('yes_price'),
+                'poly_daily_market_title': _bp_data.get('market_title'),
+                'poly_daily_volume_24h':   _bp_data.get('volume_24h'),
+                'poly_daily_fetched_at':   _bp_data.get('fetched_at'),
             }
             opp['strategy_size'] = size
             opp['module'] = _t_module

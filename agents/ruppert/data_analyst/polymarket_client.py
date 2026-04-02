@@ -365,6 +365,108 @@ def get_crypto_consensus(asset: str) -> Optional[dict]:
         return None
 
 
+# ─── Daily / long-horizon crypto signals ─────────────────────────────────────
+
+# Daily/long-horizon crypto keywords
+_CRYPTO_DAILY_KEYWORDS: dict[str, list[str]] = {
+    "BTC": ["bitcoin daily", "btc end of day", "bitcoin price today", "btc above", "btc below"],
+    "ETH": ["ethereum daily", "eth end of day", "ethereum price today", "eth above", "eth below"],
+    "SOL": ["solana daily", "sol end of day", "solana price today", "sol above", "sol below"],
+}
+
+# Long-window preference: score higher for daily/weekly terms in market title
+_LONG_WINDOW_TERMS = ["daily", "end of day", "eod", "24h", "24 hour", "today", "this week", "weekly"]
+
+
+def _score_crypto_daily_market(market: dict) -> int:
+    """Higher score = preferred market (long-window, high volume)."""
+    title_lower = (market.get("question") or "").lower()
+    score = 0
+    for term in _LONG_WINDOW_TERMS:
+        if term in title_lower:
+            score += 10
+            break
+    # Penalize short-window markets
+    for term in _SHORT_WINDOW_TERMS:
+        if term in title_lower:
+            score -= 5
+            break
+    if market.get("volume_24h", 0) > 1000:
+        score += 1
+    return score
+
+
+def _fetch_crypto_daily_consensus(asset: str) -> Optional[dict]:
+    """Raw fetch for get_crypto_daily_consensus — not cached directly."""
+    asset = asset.upper()
+    keywords = _CRYPTO_DAILY_KEYWORDS.get(asset)
+    if not keywords:
+        # Fallback to short-window function
+        return _fetch_crypto_consensus(asset)
+
+    candidates = []
+    for kw in keywords:
+        markets = get_markets_by_keyword(kw, limit=10)
+        for m in markets:
+            q_lower = (m.get("question") or "").lower()
+            asset_lower = asset.lower()
+            if asset_lower not in q_lower:
+                continue
+            directional_terms = ["up", "down", "higher", "lower", "above", "below", "rise", "fall"]
+            if not any(t in q_lower for t in directional_terms):
+                continue
+            if m.get("yes_price") is None:
+                continue
+            candidates.append(m)
+
+    if not candidates:
+        # No daily markets found — fall back to short-window consensus
+        return _fetch_crypto_consensus(asset)
+
+    best = max(candidates, key=_score_crypto_daily_market)
+
+    return {
+        "asset":        asset,
+        "yes_price":    best["yes_price"],
+        "market_title": best["question"],
+        "volume_24h":   best.get("volume_24h", 0.0),
+        "source":       "polymarket",
+        "horizon":      "daily",
+    }
+
+
+def get_crypto_daily_consensus(asset: str) -> Optional[dict]:
+    """
+    Get Polymarket consensus price for a crypto asset daily direction.
+
+    Prefers daily/EOD markets. Falls back to short-window consensus if no
+    daily market exists.
+
+    asset: 'BTC' | 'ETH' | 'SOL'
+
+    Returns:
+        asset         str   — normalised asset symbol
+        yes_price     float — probability of UP/ABOVE (0-1)
+        market_title  str   — matched market question
+        volume_24h    float — 24-hour volume
+        source        str   — 'polymarket'
+        horizon       str   — 'daily' if daily market found, absent if fallback
+
+    Returns None if no relevant market found or on error.
+    Cache: 10 minutes (longer than 15m — daily markets don't need sub-5min freshness).
+    """
+    cache_key = f"crypto_daily_consensus:{asset.upper()}"
+    try:
+        return _cached(
+            cache_key,
+            lambda: _fetch_crypto_daily_consensus(asset),
+            ttl_seconds=600,  # 10 minutes
+        )
+    except Exception as exc:
+        logger.warning("polymarket get_crypto_daily_consensus('%s') failed: %s", asset, exc)
+        return None
+
+
 _GEO_DEFAULT_KEYWORDS = [
     "ceasefire", "war", "invasion", "sanctions", "conflict", "nuclear"
 ]
