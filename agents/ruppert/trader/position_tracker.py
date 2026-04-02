@@ -384,7 +384,7 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
                     if _close_dt is not None:
                         _now_utc = datetime.now(tz=timezone.utc)
                         _time_remaining = (_close_dt - _now_utc).total_seconds()
-                        if _time_remaining < 210 and yes_bid < entry_price * 0.40:
+                        if _time_remaining < config.CRYPTO_15M_STOP_LOSS_SECS and yes_bid < entry_price * 0.40:
                             rule = f'stop_loss_expiry_{_time_remaining:.0f}s_left'
                             log_activity(
                                 f'[WS Exit] {ticker} hit {rule} (bid={yes_bid}c, entry={entry_price}c) — exiting'

@@ -52,7 +52,7 @@ def get_environment():
 
 # Legacy keys (kept for reference / future re-enable)
 # WEATHER_DAILY_CAP_PCT = 0.07   # removed Phase 2
-# CRYPTO_DAILY_CAP_PCT  = 0.07   # removed Phase 2
+CRYPTO_DAILY_CAP_PCT  = 0.07   # daily cap for crypto module (legacy fallback)
 # ECON_DAILY_CAP_PCT    = 0.04   # removed Phase 2
 # FED_DAILY_CAP_PCT     = 0.03   # removed Phase 2
 # CRYPTO_15M_DAILY_CAP_PCT = 0.10 # removed Phase 2
@@ -94,10 +94,10 @@ CRYPTO_SIGNAL_THRESHOLD   = 3.5    # bull/bear score threshold to declare direct
 # Auto-trade settings
 # Weather + Crypto + Geo = fully autonomous in DEMO (data collection)
 # Geo = ON in DEMO for data gathering — LLM pipeline (Haiku screen + Sonnet estimate)
-WEATHER_AUTO_TRADE  = True   # Bot executes without asking
+WEATHER_AUTO_TRADE  = False  # HALTED 2026-04-01 - focus on crypto only
 CRYPTO_AUTO_TRADE   = True   # Bot executes without asking
-GEO_AUTO_TRADE      = True   # DEMO: ON for data collection (LLM edge pipeline, not news_volume)
-ECON_AUTO_TRADE       = True    # DEMO: fully autonomous (Phase 5)
+GEO_AUTO_TRADE      = False  # HALTED 2026-04-01 - focus on crypto only
+ECON_AUTO_TRADE       = False   # HALTED 2026-04-01 - focus on crypto only
 ECON_MIN_EDGE         = 0.12   # 12% min edge to trigger a trade
 ECON_MIN_VOLUME       = 100    # minimum market volume (contracts) to consider
 ECON_FAR_DATED_MIN_EDGE = 0.20 # 20% min edge for contracts >60 days out
@@ -192,6 +192,7 @@ CRYPTO_15M_WINDOW_CAP_PCT           = 0.04   # 4% of capital per 15-min window (
 CRYPTO_15M_DAILY_WAGER_CAP_PCT      = 0.60   # 60% backstop — raised to give strategy gate more room; CB is the daily hard stop
 CRYPTO_15M_CIRCUIT_BREAKER_N        = 3      # consecutive complete-loss windows before halt
 CRYPTO_15M_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop — halt all crypto_15m entries for rest of trading day
+CRYPTO_15M_STOP_LOSS_SECS = 210  # stop-loss fires when < this many seconds remain AND bid < 40% of entry
 
 # ── crypto_15m_dir Signal Weights ────────────────────────────────────────────
 CRYPTO_15M_DIR_W_TFI  = 0.50   # Taker Flow Imbalance weight (Phase 2: increased from 0.42)
@@ -402,3 +403,4 @@ KELLY_TIER_25 = 0.05   # 25–40% (data accumulation floor)
 # ── 1h Band Circuit Breaker ───────────────────────────────────────────────────
 CRYPTO_1H_CIRCUIT_BREAKER_N        = 3      # consecutive complete-loss windows before halt
 CRYPTO_1H_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop; True = log only
+
