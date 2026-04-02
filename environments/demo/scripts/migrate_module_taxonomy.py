@@ -32,7 +32,11 @@ def reclassify(record: dict) -> dict | None:
     # ── Already migrated ────────────────────────────────────────────────────
     FINAL_MODULES = {
         'weather_band', 'weather_threshold',
-        'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band',
+        'crypto_dir_15m_btc', 'crypto_dir_15m_eth', 'crypto_dir_15m_sol',
+        'crypto_dir_15m_xrp', 'crypto_dir_15m_doge',
+        'crypto_threshold_daily_btc', 'crypto_threshold_daily_eth',
+        'crypto_band_daily_btc', 'crypto_band_daily_eth',
+        'crypto_band_daily_sol', 'crypto_band_daily_xrp', 'crypto_band_daily_doge',
         'econ_cpi', 'econ_unemployment', 'econ_fed_rate', 'econ_recession',
         'geo', 'manual', 'other',
     }
@@ -49,22 +53,40 @@ def reclassify(record: dict) -> dict | None:
         updated['module'] = new_module
         return updated
 
-    # ── crypto → crypto_1h_band ─────────────────────────────────────────────
-    if old_module == 'crypto':
+    # ── crypto → crypto_band_daily_* (formerly crypto_1h_band) ─────────────
+    if old_module in ('crypto', 'crypto_1h_band'):
+        if 'ETH' in ticker:
+            new_module = 'crypto_band_daily_eth'
+        else:
+            new_module = 'crypto_band_daily_btc'  # default
         updated = dict(record)
-        updated['module'] = 'crypto_1h_band'
+        updated['module'] = new_module
         return updated
 
-    # ── crypto_15m → crypto_15m_dir ─────────────────────────────────────────
-    if old_module == 'crypto_15m':
+    # ── crypto_15m / crypto_15m_dir → crypto_dir_15m_* ──────────────────────
+    if old_module in ('crypto_15m', 'crypto_15m_dir'):
+        if 'ETH' in ticker:
+            new_module = 'crypto_dir_15m_eth'
+        elif 'SOL' in ticker:
+            new_module = 'crypto_dir_15m_sol'
+        elif 'XRP' in ticker:
+            new_module = 'crypto_dir_15m_xrp'
+        elif 'DOGE' in ticker:
+            new_module = 'crypto_dir_15m_doge'
+        else:
+            new_module = 'crypto_dir_15m_btc'  # default
         updated = dict(record)
-        updated['module'] = 'crypto_15m_dir'
+        updated['module'] = new_module
         return updated
 
-    # ── crypto_1d → crypto_1h_dir ────────────────────────────────────────────
-    if old_module == 'crypto_1d':
+    # ── crypto_1d / crypto_1h_dir → crypto_threshold_daily_* ────────────────
+    if old_module in ('crypto_1d', 'crypto_1h_dir'):
+        if 'ETH' in ticker:
+            new_module = 'crypto_threshold_daily_eth'
+        else:
+            new_module = 'crypto_threshold_daily_btc'  # default
         updated = dict(record)
-        updated['module'] = 'crypto_1h_dir'
+        updated['module'] = new_module
         return updated
 
     # ── fed → econ_fed_rate ──────────────────────────────────────────────────

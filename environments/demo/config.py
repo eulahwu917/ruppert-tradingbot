@@ -138,6 +138,7 @@ MIN_HOURS_ENTRY = {
     'crypto_dir_15m_doge':        0.04,
     'crypto_threshold_daily_btc': 2.0,    # hard cutoff at 15:00 ET = 2h before 17:00 settlement
     'crypto_threshold_daily_eth': 2.0,
+    'crypto_threshold_daily_sol': 2.0,
 }
 
 # Minimum confidence thresholds per module
@@ -151,6 +152,7 @@ MIN_CONFIDENCE = {
     'crypto_band_daily_sol':      0.50,
     'crypto_threshold_daily_btc': 0.50,
     'crypto_threshold_daily_eth': 0.50,
+    'crypto_threshold_daily_sol': 0.50,
     'crypto_dir_15m_btc':         0.40,   # Phase 2: lowered from 0.50
     'crypto_dir_15m_eth':         0.40,
     'crypto_dir_15m_sol':         0.40,

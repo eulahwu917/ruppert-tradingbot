@@ -263,11 +263,11 @@ def main():
     def classify_exit_for_module(t, corrected_exits_map):
         """Returns (module, is_win, logged_pnl, true_pnl)"""
         module_raw = t.get('module', 'unknown')
-        # Normalize module names
+        # Normalize module names to new taxonomy
         if 'crypto_15m' in module_raw or module_raw == 'crypto_15m':
-            module = 'crypto_15m_dir'
+            module = 'crypto_dir_15m_btc'
         elif 'crypto_1h' in module_raw or module_raw in ('crypto', 'crypto_1h_band'):
-            module = 'crypto_1h_band'
+            module = 'crypto_band_daily_btc'
         elif 'weather' in module_raw:
             module = 'weather'
         else:

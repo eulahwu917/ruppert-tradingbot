@@ -1405,12 +1405,18 @@ def _build_state():
         module_open[parent_mod]['open_trades']   += 1
         if pnl is not None:
             module_open[parent_mod]['open_pnl'] += pnl
-        # Also accumulate into sub-module if it's a crypto sub
-        if mod in module_open and mod != parent_mod:
-            module_open[mod]['open_deployed'] += cost
-            module_open[mod]['open_trades']   += 1
-            if pnl is not None:
-                module_open[mod]['open_pnl'] += pnl
+        # Also accumulate into sub-module key if it's a crypto sub (prefix matching)
+        # classify_module() returns per-asset names (e.g. crypto_dir_15m_btc);
+        # module_keys contains group keys (e.g. crypto_dir_15m). Use prefix matching.
+        for mk in module_keys:
+            if mk == parent_mod:
+                continue
+            if mod == mk or mod.startswith(mk + '_'):
+                module_open[mk]['open_deployed'] += cost
+                module_open[mk]['open_trades']   += 1
+                if pnl is not None:
+                    module_open[mk]['open_pnl'] += pnl
+                break
 
         edge_val = t.get('edge')
         _raw_title = (t.get('title') or ticker).replace('**', '')

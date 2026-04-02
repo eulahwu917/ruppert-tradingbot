@@ -42,17 +42,17 @@ MIN_EDGE = {
     'weather_band':               getattr(config, 'MIN_EDGE_WEATHER_BAND',      0.12),
     'weather_threshold':          getattr(config, 'MIN_EDGE_WEATHER_THRESHOLD',  0.12),
     # crypto band (formerly crypto_1h_band) — per-asset
-    'crypto_band_daily_btc':      getattr(config, 'MIN_EDGE_CRYPTO_1H_BAND',    0.12),
-    'crypto_band_daily_eth':      getattr(config, 'MIN_EDGE_CRYPTO_1H_BAND',    0.12),
+    'crypto_band_daily_btc':      getattr(config, 'MIN_EDGE_CRYPTO_BAND_DAILY',      0.12),
+    'crypto_band_daily_eth':      getattr(config, 'MIN_EDGE_CRYPTO_BAND_DAILY',      0.12),
     # crypto 15m directional (formerly crypto_15m_dir) — per-asset
-    'crypto_dir_15m_btc':         getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
-    'crypto_dir_15m_eth':         getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
-    'crypto_dir_15m_sol':         getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
-    'crypto_dir_15m_xrp':         getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
-    'crypto_dir_15m_doge':        getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
+    'crypto_dir_15m_btc':         getattr(config, 'MIN_EDGE_CRYPTO_DIR_15M',    0.12),
+    'crypto_dir_15m_eth':         getattr(config, 'MIN_EDGE_CRYPTO_DIR_15M',    0.12),
+    'crypto_dir_15m_sol':         getattr(config, 'MIN_EDGE_CRYPTO_DIR_15M',    0.12),
+    'crypto_dir_15m_xrp':         getattr(config, 'MIN_EDGE_CRYPTO_DIR_15M',    0.12),
+    'crypto_dir_15m_doge':        getattr(config, 'MIN_EDGE_CRYPTO_DIR_15M',    0.12),
     # crypto threshold daily (formerly crypto_1h_dir) — per-asset
-    'crypto_threshold_daily_btc': getattr(config, 'MIN_EDGE_CRYPTO_1H_DIR',     0.08),
-    'crypto_threshold_daily_eth': getattr(config, 'MIN_EDGE_CRYPTO_1H_DIR',     0.08),
+    'crypto_threshold_daily_btc': getattr(config, 'MIN_EDGE_CRYPTO_THRESHOLD_DAILY', 0.08),
+    'crypto_threshold_daily_eth': getattr(config, 'MIN_EDGE_CRYPTO_THRESHOLD_DAILY', 0.08),
     'geo':               getattr(config, 'MIN_EDGE_GEO',               0.15),
     'econ_cpi':          getattr(config, 'MIN_EDGE_ECON_CPI',          0.12),
     'econ_unemployment': getattr(config, 'MIN_EDGE_ECON_UNEMPLOYMENT', 0.12),
@@ -64,9 +64,9 @@ MIN_CONFIDENCE   = getattr(config, 'STRATEGY_MIN_CONFIDENCE_FLOOR', 0.25)
 # Prefix-based fallback for MIN_EDGE lookup (handles per-asset module names).
 # Exact key wins first; prefix match is the fallback for unlisted variants.
 MIN_EDGE_PREFIX = {
-    'crypto_band_daily_':      getattr(config, 'MIN_EDGE_CRYPTO_1H_BAND',   0.12),
-    'crypto_dir_15m_':         getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',   0.12),
-    'crypto_threshold_daily_': getattr(config, 'MIN_EDGE_CRYPTO_1H_DIR',    0.08),
+    'crypto_band_daily_':      getattr(config, 'MIN_EDGE_CRYPTO_BAND_DAILY',      0.12),
+    'crypto_dir_15m_':         getattr(config, 'MIN_EDGE_CRYPTO_DIR_15M',         0.12),
+    'crypto_threshold_daily_': getattr(config, 'MIN_EDGE_CRYPTO_THRESHOLD_DAILY', 0.08),
 }
 DEFAULT_MIN_EDGE = 0.12
 
