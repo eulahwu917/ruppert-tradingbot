@@ -59,6 +59,16 @@ ASSET_SYMBOLS = {
     'SOL':  'SOL-USDT-SWAP',
 }
 
+# Per-asset module identifiers (Phase B1 taxonomy)
+ASSET_MODULE_NAMES = {
+    'BTC':  'crypto_dir_15m_btc',
+    'ETH':  'crypto_dir_15m_eth',
+    'SOL':  'crypto_dir_15m_sol',
+    'XRP':  'crypto_dir_15m_xrp',
+    'DOGE': 'crypto_dir_15m_doge',
+}
+_ALL_CRYPTO_15M_MODULES = list(ASSET_MODULE_NAMES.values())
+
 # Signal weights — must sum to 1.0 (config-driven)
 W_TFI  = getattr(config, 'CRYPTO_15M_DIR_W_TFI',  0.42)
 W_OBI  = getattr(config, 'CRYPTO_15M_DIR_W_OBI',  0.25)
@@ -145,12 +155,12 @@ def _rehydrate_state():
     # 1. Daily wager: sum all buys today from trade log
     try:
         from agents.ruppert.data_scientist.logger import get_daily_wager, get_window_exposure
-        _daily_wager = get_daily_wager('crypto_15m_dir')
+        _daily_wager = sum(get_daily_wager(m) for m in _ALL_CRYPTO_15M_MODULES)
 
         # 2. Window exposure: re-hydrate for any window currently open
         current_window_ts = _get_current_window_open_ts()
         if current_window_ts:
-            _window_exposure[current_window_ts] = get_window_exposure('crypto_15m_dir', current_window_ts)
+            _window_exposure[current_window_ts] = sum(get_window_exposure(m, current_window_ts) for m in _ALL_CRYPTO_15M_MODULES)
     except Exception as e:
         logger.warning('[crypto_15m] _rehydrate_state: failed to re-hydrate wager counters: %s', e)
 
@@ -550,7 +560,7 @@ def _get_session_pnl_15m() -> float:
             continue
         try:
             rec = json.loads(line)
-            if rec.get('module') == 'crypto_15m_dir' and rec.get('action') in ('settle', 'exit'):
+            if rec.get('module', '').startswith('crypto_dir_15m_') and rec.get('action') in ('settle', 'exit'):
                 total += float(rec.get('pnl', 0.0))
         except Exception:
             continue
@@ -862,6 +872,8 @@ def evaluate_crypto_15m_entry(
     if not symbol:
         return
 
+    _module_name = ASSET_MODULE_NAMES[asset]
+
     # ── Parse timing ──
     now = datetime.now(timezone.utc)
     window_open_ts = open_time or ''
@@ -1104,7 +1116,7 @@ def evaluate_crypto_15m_entry(
     # Strategy gate: global 70% deployment cap + strategy filters
     from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_exp
     _deployed_today = _get_exp()
-    _module_deployed_today = _get_exp('crypto_15m_dir')
+    _module_deployed_today = _get_exp(_module_name)
     _module_deployed_pct = _module_deployed_today / capital if capital > 0 else 0.0
     from agents.ruppert.data_scientist.capital import get_buying_power as _get_bp
     _bp = _get_bp()
@@ -1114,7 +1126,7 @@ def evaluate_crypto_15m_entry(
         'edge': round(edge, 4),
         'win_prob': round(P_win, 4),
         'confidence': round(abs(raw_score), 3),
-        'module': 'crypto_15m_dir',
+        'module': _module_name,
         'yes_ask': yes_ask,
         'yes_bid': yes_bid,
         'hours_to_settlement': max(0, (900 - elapsed_secs) / 3600),
@@ -1122,7 +1134,7 @@ def evaluate_crypto_15m_entry(
     }
     _se_decision = should_enter(
         _signal_dict, capital, _deployed_today,
-        module='crypto_15m_dir',
+        module=_module_name,
         module_deployed_pct=_module_deployed_pct,
         traded_tickers=None,
     )
@@ -1264,7 +1276,7 @@ def evaluate_crypto_15m_entry(
         'market_prob': yes_ask / 100.0 if direction == 'yes' else (100 - yes_bid) / 100.0,
         'model_prob': round(P_final, 4),
         'source': 'crypto_15m',
-        'module': 'crypto_15m_dir',
+        'module': _module_name,
         'yes_ask': yes_ask,
         'yes_bid': yes_bid,
         'hours_to_settlement': max(0, (900 - elapsed_secs) / 3600),
@@ -1299,7 +1311,7 @@ def evaluate_crypto_15m_entry(
         fill_contracts_pt = fill_contracts if fill_contracts else contracts
         position_tracker.add_position(
             ticker, fill_contracts_pt, direction, fill_price_pt,
-            module='crypto_15m_dir',
+            module=_module_name,
             title=f'{asset} 15m direction',
             entry_raw_score=raw_score,
             size_dollars=round(position_usd, 2),

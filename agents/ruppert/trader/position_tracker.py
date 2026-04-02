@@ -346,7 +346,7 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
         # Prevents losing positions from riding to 0c at expiry.
         # Fires when <2 min remain on the contract AND bid < 40% of entry.
         # Runs alongside threshold exits — whichever triggers first wins.
-        if pos.get('module') == 'crypto_15m_dir' and pos.get('added_at'):
+        if pos.get('module', '').startswith('crypto_dir_15m_') and pos.get('added_at'):
             # Skip if this position already has a pending exit order
             if key in _exits_in_flight:
                 pass  # let threshold checks run instead
@@ -397,7 +397,8 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
         # Daily crypto contracts (1H Dir KXBTCD, 1H Band KXBTC-*-B*)
         # settle at 17:00 ET (21:00 UTC). Fire when <20 min remain and
         # bid < 30% of entry. Write off at ≤1c if <30 min remain.
-        if pos.get('module') in ('crypto', 'crypto_1d') and pos.get('added_at'):
+        _mod = pos.get('module', '')
+        if (_mod.startswith('crypto_threshold_daily_') or _mod.startswith('crypto_band_daily_')) and pos.get('added_at'):
             if key in _exits_in_flight:
                 pass  # let threshold checks run instead
             else:
