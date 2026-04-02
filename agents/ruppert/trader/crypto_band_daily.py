@@ -21,6 +21,7 @@ _DEMO_ENV_ROOT = _WORKSPACE_ROOT / 'environments' / 'demo'
 if str(_DEMO_ENV_ROOT) not in sys.path:
     sys.path.insert(0, str(_DEMO_ENV_ROOT))
 
+import json
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from agents.ruppert.trader.trader import Trader
 from agents.ruppert.data_scientist.logger import log_activity, log_trade, get_daily_summary, get_daily_exposure
@@ -29,7 +30,12 @@ from agents.ruppert.strategist.strategy import (
     should_enter, check_daily_cap, check_open_exposure,
 )
 from agents.ruppert.data_analyst.polymarket_client import get_crypto_daily_consensus
+from agents.ruppert.env_config import get_paths as _get_bd_paths
 import config
+
+_BD_LOGS_DIR = _get_bd_paths()['logs']
+_BD_LOGS_DIR.mkdir(exist_ok=True)
+BAND_DECISION_LOG_PATH = _BD_LOGS_DIR / 'decisions_band.jsonl'
 
 
 def band_prob(spot, band_mid, half_w, sigma, drift=0.0):
@@ -45,6 +51,64 @@ def band_prob(spot, band_mid, half_w, sigma, drift=0.0):
     p_hi = norm.cdf((math.log(hi) - mu) / s) if hi > 0 else 1.0
     p_lo = norm.cdf((math.log(lo) - mu) / s) if lo > 0 else 0.0
     return max(0.001, min(0.999, p_hi - p_lo))
+
+
+def _log_band_decision(
+    ticker: str,
+    series: str,
+    spot: float,
+    band_mid: float,
+    sigma: float,
+    prob_model: float,
+    mkt_yes: float,
+    edge_yes: float,
+    edge_no: float,
+    decision: str,
+    skip_reason: str = None,
+    side: str = None,
+    edge: float = None,
+    confidence: float = None,
+    size_usd: float = None,
+    hours_to_settlement: float = None,
+    poly_daily_yes_price: float = None,
+    poly_daily_market_title: str = None,
+    poly_daily_fetched_at: str = None,
+):
+    """Append one evaluation record to decisions_band.jsonl."""
+    entry = {
+        'ts':         datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+        'ticker':     ticker,
+        'series':     series,
+        'decision':   decision,
+        'skip_reason': skip_reason,
+        # Market state
+        'spot':       spot,
+        'band_mid':   band_mid,
+        'sigma':      round(sigma, 6) if sigma is not None else None,
+        # Model
+        'model_prob':   round(prob_model, 4) if prob_model is not None else None,
+        'model_source': 'log_normal_band',
+        # Market prices
+        'mkt_yes':  round(mkt_yes, 4) if mkt_yes is not None else None,
+        'edge_yes': round(edge_yes, 4) if edge_yes is not None else None,
+        'edge_no':  round(edge_no, 4) if edge_no is not None else None,
+        # ENTER fields
+        'side':       side,
+        'edge':       round(edge, 4) if edge is not None else None,
+        'confidence': round(confidence, 4) if confidence is not None else None,
+        'size_usd':   size_usd,
+        'hours_to_settlement': hours_to_settlement,
+        # Shadow: Polymarket
+        'poly_daily_yes_price':    poly_daily_yes_price,
+        'poly_daily_market_title': poly_daily_market_title,
+        'poly_daily_fetched_at':   poly_daily_fetched_at,
+    }
+    try:
+        BAND_DECISION_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(BAND_DECISION_LOG_PATH, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry) + '\n')
+    except Exception as e:
+        print(f'  [BandDecision] log failed for {ticker}: {e}')
 
 
 def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open_position_value=0.0):
@@ -74,6 +138,9 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
         print(f"  BTC=${btc:,.0f}  ETH=${eth:,.2f}  XRP=${xrp:.4f}  SOL=${sol:.2f}  DOGE=${doge:.5f}")
 
         drift_sigma = 0.0
+
+        # Pre-initialize poly cache — populated after new_crypto scan, referenced in SKIP logs
+        _band_poly_cache = {}
 
         SERIES_CFG = [
             ('KXBTC',  btc,  250,   0.025, 18),
@@ -165,8 +232,26 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 best_price  = na if best_action == 'no' else ya
 
                 if best_edge < config.CRYPTO_MIN_EDGE_THRESHOLD:
+                    _bp_skip = _band_poly_cache.get(
+                        'BTC' if 'BTC' in series else ('ETH' if 'ETH' in series else ''), {}
+                    )
+                    _log_band_decision(
+                        ticker=ticker, series=series, spot=spot, band_mid=band_mid,
+                        sigma=sigma, prob_model=prob_model, mkt_yes=mkt_yes,
+                        edge_yes=round(edge_yes, 4), edge_no=round(edge_no, 4),
+                        decision='SKIP', skip_reason='edge_below_threshold',
+                        poly_daily_yes_price=_bp_skip.get('yes_price'),
+                        poly_daily_market_title=_bp_skip.get('market_title'),
+                        poly_daily_fetched_at=_bp_skip.get('fetched_at'),
+                    )
                     continue
                 if best_price > 95:
+                    _log_band_decision(
+                        ticker=ticker, series=series, spot=spot, band_mid=band_mid,
+                        sigma=sigma, prob_model=prob_model, mkt_yes=mkt_yes,
+                        edge_yes=round(edge_yes, 4), edge_no=round(edge_no, 4),
+                        decision='SKIP', skip_reason='price_too_high',
+                    )
                     continue
 
                 _hours_left = 18.0
@@ -198,6 +283,11 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                     'hours_to_settlement': _hours_left,
                     'edge': round(best_edge, 3), 'series': series,
                     'module': _band_module,
+                    'spot': spot,
+                    'band_mid': band_mid,
+                    'sigma': sigma,
+                    'edge_yes': round(edge_yes, 4),
+                    'edge_no': round(edge_no, 4),
                     'note': f'{series} {direction} | model={prob_model*100:.0f}% mkt={mkt_yes*100:.0f}% edge={best_edge*100:.0f}%',
                 })
 
@@ -205,7 +295,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
         new_crypto.sort(key=lambda x: x['edge'], reverse=True)
 
         # ── Shadow: Polymarket daily consensus for band module (logging only) ──
-        _band_poly_cache = {}  # {asset: {yes_price, market_title, volume_24h, fetched_at}}
+        # _band_poly_cache initialized earlier; populate now that scan is complete.
         for _bp_asset in ('BTC', 'ETH'):
             try:
                 _bp_result = get_crypto_daily_consensus(_bp_asset)
@@ -330,6 +420,9 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 'action': 'buy', 'yes_price': t['price'] if t['side'] == 'yes' else 100 - t['price'],
                 'market_prob': t['price'] / 100, 'noaa_prob': None,
                 'edge': t['edge'], 'confidence': t.get('confidence', t['edge']),
+                'model_prob':   t['prob_model'],          # log-normal P(in-band)
+                'model_source': 'log_normal_band',
+                'hours_to_settlement': t.get('hours_to_settlement', 18.0),
                 'size_dollars': actual_cost,
                 'contracts': contracts, 'source': 'crypto',
                 'scan_price': t['price'],
@@ -353,18 +446,47 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 continue
 
             # Log Brier prediction at trade entry
+            # Fix: predicted_prob must be P(our side wins), not raw prob_model.
+            # For NO trades (we profit when price is OUT of band): use 1 - prob_model.
             try:
                 from brier_tracker import log_prediction
+                _brier_prob_band = t['prob_model'] if t['side'] == 'yes' else (1.0 - t['prob_model'])
                 log_prediction(
-                    domain='crypto',
+                    domain='crypto_band_daily',
                     ticker=t['ticker'],
-                    predicted_prob=t['prob_model'],
-                    market_price=t['yes_ask'] / 100,
+                    predicted_prob=_brier_prob_band,
+                    market_price=t['price'] / 100,
                     edge=t['edge'],
                     side=t['side'],
+                    extra={
+                        'series':       t.get('series'),
+                        'prob_model':   t['prob_model'],
+                        'model_source': 'log_normal_band',
+                        'module':       t.get('module'),
+                    },
                 )
             except Exception:
                 pass
+
+            # Log ENTER decision
+            _log_band_decision(
+                ticker=t['ticker'], series=t.get('series', ''),
+                spot=t.get('spot'), band_mid=t.get('band_mid'),
+                sigma=t.get('sigma'),
+                prob_model=t['prob_model'],
+                mkt_yes=t['yes_ask'] / 100,
+                edge_yes=t.get('edge_yes', 0.0),
+                edge_no=t.get('edge_no', 0.0),
+                decision='ENTER',
+                side=t['side'],
+                edge=t['edge'],
+                confidence=t.get('confidence'),
+                size_usd=actual_cost,
+                hours_to_settlement=t.get('hours_to_settlement'),
+                poly_daily_yes_price=_bp_data.get('yes_price'),
+                poly_daily_market_title=_bp_data.get('market_title'),
+                poly_daily_fetched_at=_bp_data.get('fetched_at'),
+            )
             # Baseline: log uniform sizing vs actual Kelly sizing
             try:
                 from baselines import log_uniform_sizing

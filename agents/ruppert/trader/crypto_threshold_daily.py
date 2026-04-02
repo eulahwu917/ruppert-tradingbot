@@ -816,6 +816,7 @@ def compute_position_size(capital: float, P_win: float, cost_cents: int,
 def _log_decision(asset: str, window: str, signals: dict, decision: str, reason: str,
                   market_id: str = None, size_usd: float = None,
                   composite: float = None, P_above: float = None, edge: float = None,
+                  confidence: float = None,
                   poly_yes_price: float = None,
                   poly_market_title: str = None,
                   poly_volume_24h: float = None,
@@ -858,6 +859,8 @@ def _log_decision(asset: str, window: str, signals: dict, decision: str, reason:
         entry['P_above'] = P_above
     if edge is not None:
         entry['edge'] = edge
+    if confidence is not None:
+        entry['confidence'] = confidence
     if size_usd is not None:
         entry['size_usd'] = size_usd
 
@@ -1091,6 +1094,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         'market_prob': (best.get('yes_ask', 50)) / 100.0,
         'edge':        best.get('edge'),
         'confidence':  composite['confidence'],
+        'model_prob':  composite['P_above'],
         'size_dollars': actual_cost,
         'contracts':   contracts,
         'source':      'crypto_1d',
@@ -1126,6 +1130,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         decision='ENTER', market_id=market_id, size_usd=actual_cost,
         composite=composite['raw_composite'], P_above=composite['P_above'],
         edge=best.get('edge'),
+        confidence=composite['confidence'],
         reason=(
             f"composite={composite['raw_composite']:.2f} "
             f"P_above={composite['P_above']:.2f} "
@@ -1134,6 +1139,29 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         ),
         **_poly_kwargs(),
     )
+
+    # 14. Brier: log prediction at entry
+    if result:
+        try:
+            from brier_tracker import log_prediction as _log_brier
+            _brier_prob = composite['P_above'] if side == 'yes' else (1.0 - composite['P_above'])
+            _log_brier(
+                domain='crypto_threshold_daily',
+                ticker=market_id,
+                predicted_prob=_brier_prob,
+                market_price=cost_cents / 100.0,
+                edge=best.get('edge', 0.0),
+                side=side,
+                extra={
+                    'asset':     asset,
+                    'window':    window,
+                    'P_above':   composite['P_above'],
+                    'direction': composite['direction'],
+                    'module':    _asset_module,
+                },
+            )
+        except Exception:
+            pass
 
     if result:
         log_activity(

@@ -442,3 +442,26 @@ KELLY_TIER_25 = 0.05   # 25–40% (data accumulation floor)
 CRYPTO_1H_CIRCUIT_BREAKER_N        = 3      # consecutive complete-loss windows before halt
 CRYPTO_1H_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop; True = log only
 
+# ── Daily module stop-loss (band + threshold) ─────────────────────────────────
+# Applies to: crypto_band_daily_* and crypto_threshold_daily_*
+
+# Entry guard: do not evaluate stops until this many seconds after position opened
+DAILY_STOP_ENTRY_GUARD_SECS       = 1800   # 30 min (unchanged from prior behaviour)
+
+# Write-off: if bid ≤ 1c and less than this many seconds to settlement, skip sell
+DAILY_STOP_WRITE_OFF_TIME_SECS    = 1200   # 20 min (tightened from 30 min)
+
+# Catastrophic tier: bid below this fraction of entry → exit, no time check
+DAILY_STOP_CATASTROPHIC_PCT       = 0.15   # 15% of entry price
+
+# Catastrophic tier: absolute floor — catches cheap contracts where 15% rounds to ≤1c
+DAILY_STOP_CATASTROPHIC_ABS_CENTS = 2      # ≤2c always triggers catastrophic
+
+# Severe tier: bid below this fraction of entry AND time < DAILY_STOP_SEVERE_TIME_SECS
+DAILY_STOP_SEVERE_PCT             = 0.25   # 25% of entry price
+DAILY_STOP_SEVERE_TIME_SECS       = 3600   # 1 hour remaining
+
+# Terminal tier: bid below this fraction of entry AND time < DAILY_STOP_TERMINAL_TIME_SECS
+DAILY_STOP_TERMINAL_PCT           = 0.30   # 30% of entry price
+DAILY_STOP_TERMINAL_TIME_SECS     = 1200   # 20 min remaining
+

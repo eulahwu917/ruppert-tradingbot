@@ -53,6 +53,42 @@ _EXIT_COOLDOWN_TTL = 300  # 5 minutes
 _recently_exited: dict[tuple, float] = {}
 
 
+_MONTH_MAP = {
+    'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+    'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12,
+}
+
+
+def _parse_close_time(ticker: str) -> 'datetime | None':
+    """Parse settlement datetime (UTC) from a Kalshi ticker string.
+
+    Supports both daily and 15m tickers:
+      KXBTC-26APR0207-B66375   → 2026-04-02 11:00 UTC  (daily, MM=0)
+      KXBTCD-26APR0213-T67499  → 2026-04-02 17:00 UTC  (daily, MM=0)
+      KXBTC15M-26APR011315-15  → 2026-04-01 17:15 UTC  (15m, MM=15)
+
+    Returns None on any parse failure — callers must handle gracefully.
+    """
+    try:
+        parts = ticker.split('-')
+        if len(parts) >= 2:
+            m = re.match(r'(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})?', parts[1])
+            if m:
+                yr  = 2000 + int(m.group(1))
+                mon = _MONTH_MAP.get(m.group(2))
+                dd  = int(m.group(3))
+                hh  = int(m.group(4))
+                mm  = int(m.group(5)) if m.group(5) else 0
+                if mon:
+                    from pytz import timezone as _tz
+                    _est = _tz('America/New_York')
+                    _naive = datetime(yr, mon, dd, hh, mm)
+                    return _est.localize(_naive).astimezone(timezone.utc)
+    except Exception:
+        pass
+    return None
+
+
 def _persist():
     """Write tracked positions to disk. Keys are serialized as 'ticker::side' strings."""
     try:
@@ -377,31 +413,9 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
 
                 # Step 2: Guard check — only evaluate stops once guard has elapsed
                 if elapsed_secs >= min_elapsed:
-                    # Parse contract close time from ticker
+                    # Parse contract close time from ticker using shared helper
                     # e.g. KXBTC15M-26APR011315-15 -> opens 13:15 EST, closes 13:30 EST
-                    _close_dt = None
-                    try:
-                        _MONTH_MAP = {
-                            'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
-                            'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12,
-                        }
-                        _parts = ticker.split('-')
-                        if len(_parts) >= 2:
-                            _m = re.match(r'(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})', _parts[1])
-                            if _m:
-                                _yr = 2000 + int(_m.group(1))
-                                _mon = _MONTH_MAP.get(_m.group(2))
-                                _dd = int(_m.group(3))
-                                _hh = int(_m.group(4))
-                                _mm = int(_m.group(5))
-                                if _mon:
-                                    from pytz import timezone as _tz
-                                    _est = _tz('America/New_York')
-                                    _close_naive = datetime(_yr, _mon, _dd, _hh, _mm)
-                                    _close_est = _est.localize(_close_naive)
-                                    _close_dt = _close_est.astimezone(timezone.utc)
-                    except Exception:
-                        pass
+                    _close_dt = _parse_close_time(ticker)
 
                     if _close_dt is not None:
                         _now_utc = datetime.now(tz=timezone.utc)
@@ -445,10 +459,9 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
                             continue  # position exited, skip threshold checks
         # ── End Design D stop-loss ────────────────────────────────────────────────────
 
-        # ── Time-decay stop-loss for crypto_1d positions ─────────────────
-        # Daily crypto contracts (1H Dir KXBTCD, 1H Band KXBTC-*-B*)
-        # settle at 17:00 ET (21:00 UTC). Fire when <20 min remain and
-        # bid < 30% of entry. Write off at ≤1c if <30 min remain.
+        # ── Stop-loss for crypto_band_daily_* and crypto_threshold_daily_* ──
+        # Settlement time is parsed from the ticker (same helper as check_expired_positions).
+        # Replaces prior hardcoded 21:00 UTC which was wrong for hourly contracts.
         _mod = pos.get('module', '')
         if (_mod.startswith('crypto_threshold_daily_') or _mod.startswith('crypto_band_daily_')) and pos.get('added_at'):
             if key in _exits_in_flight:
@@ -456,34 +469,85 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
             else:
                 entry_price = pos['entry_price']
                 elapsed_secs = now - pos['added_at']
-                # 30-min entry guard: don't stop out positions we just entered
-                if elapsed_secs >= 1800:
-                    _now_utc = datetime.now(tz=timezone.utc)
-                    # Settlement is always 17:00 ET = 21:00 UTC today
-                    _settle_utc = _now_utc.replace(hour=21, minute=0, second=0, microsecond=0)
-                    _time_remaining = (_settle_utc - _now_utc).total_seconds()
-                    if _time_remaining > 0:  # skip if already past settlement
-                        _mins_left = _time_remaining / 60
 
-                        # Write-off: bid ≤ 1c and <30 min → not worth selling
-                        if yes_bid <= 1 and _time_remaining < 1800:
-                            log_activity(
-                                f'[WS Exit] {ticker} crypto_1d write-off '
-                                f'(bid={yes_bid}c, T-{_mins_left:.0f}min) — skipping sell'
-                            )
-                            continue
+                # ── Entry guard: 30 min before any stop evaluates ──────────────
+                _daily_guard = getattr(config, 'DAILY_STOP_ENTRY_GUARD_SECS', 1800)
+                if elapsed_secs >= _daily_guard:
 
-                        # Time-decay stop: bid < 30% of entry and <20 min left
-                        if _time_remaining < 1200 and yes_bid < entry_price * 0.30:
-                            rule = f'crypto_1d_time_decay_stop_{_time_remaining:.0f}s_left'
-                            log_activity(
-                                f'[WS Exit] {ticker} crypto_1d time-decay stop '
-                                f'(bid={yes_bid}c < 30% of {entry_price}c, '
-                                f'T-{_mins_left:.0f}min) — exiting'
-                            )
-                            await execute_exit(key, pos, yes_bid, rule)
-                            continue  # position exited, skip threshold checks
-        # ── End crypto_1d time-decay stop-loss ───────────────────────────
+                    # ── Parse settlement time from ticker ──────────────────────
+                    # e.g. KXBTC-26APR0207-B66375  → 2026-04-02 11:00 UTC
+                    # e.g. KXBTCD-26APR0213-T67499 → 2026-04-02 17:00 UTC
+                    _settle_dt = _parse_close_time(ticker)
+
+                    if _settle_dt is None:
+                        # Cannot parse settlement — skip safely rather than fire wrong stop
+                        logger.warning(
+                            '[PositionTracker] daily stop: no settlement time for %s — skipping stop check',
+                            ticker
+                        )
+                    else:
+                        _now_utc = datetime.now(tz=timezone.utc)
+                        _time_remaining = (_settle_dt - _now_utc).total_seconds()
+
+                        if _time_remaining > 0:  # skip if settlement already passed
+
+                            # Load config constants (with safe fallbacks)
+                            _write_off_time = getattr(config, 'DAILY_STOP_WRITE_OFF_TIME_SECS',    1200)
+                            _cat_pct        = getattr(config, 'DAILY_STOP_CATASTROPHIC_PCT',        0.15)
+                            _cat_abs        = getattr(config, 'DAILY_STOP_CATASTROPHIC_ABS_CENTS',  2)
+                            _severe_pct     = getattr(config, 'DAILY_STOP_SEVERE_PCT',              0.25)
+                            _severe_time    = getattr(config, 'DAILY_STOP_SEVERE_TIME_SECS',        3600)
+                            _terminal_pct   = getattr(config, 'DAILY_STOP_TERMINAL_PCT',            0.30)
+                            _terminal_time  = getattr(config, 'DAILY_STOP_TERMINAL_TIME_SECS',      1200)
+
+                            _mins_left = _time_remaining / 60
+
+                            # ── LEVEL 1: Write-off ─────────────────────────────────────────
+                            # Bid at 1c near settlement → let expire; not worth selling
+                            if yes_bid <= 1 and _time_remaining < _write_off_time:
+                                log_activity(
+                                    f'[WS Exit] {ticker} daily write-off '
+                                    f'(bid={yes_bid}c, T-{_mins_left:.0f}min) — skipping sell'
+                                )
+                                continue  # do NOT exit — let it expire to 0
+
+                            # ── LEVEL 2: Catastrophic stop (no time check) ─────────────────
+                            # Below 15% of entry (or absolute ≤2c floor) → cut regardless of time
+                            _cat_threshold = max(entry_price * _cat_pct, _cat_abs)
+                            if yes_bid < _cat_threshold:
+                                rule = f'daily_stop_catastrophic_{elapsed_secs:.0f}s'
+                                log_activity(
+                                    f'[WS Exit] {ticker} daily CATASTROPHIC stop '
+                                    f'(bid={yes_bid}c < {_cat_threshold:.1f}c, '
+                                    f'T-{_mins_left:.0f}min) — exiting'
+                                )
+                                await execute_exit(key, pos, yes_bid, rule)
+                                continue
+
+                            # ── LEVEL 3: Severe stop (< 1 hour remaining) ──────────────────
+                            # Below 25% of entry with < 1 hour left — recovery needs 4x move
+                            if yes_bid < entry_price * _severe_pct and _time_remaining < _severe_time:
+                                rule = f'daily_stop_severe_{_time_remaining:.0f}s_left'
+                                log_activity(
+                                    f'[WS Exit] {ticker} daily SEVERE stop '
+                                    f'(bid={yes_bid}c < 25% of {entry_price}c, '
+                                    f'T-{_mins_left:.0f}min) — exiting'
+                                )
+                                await execute_exit(key, pos, yes_bid, rule)
+                                continue
+
+                            # ── LEVEL 4: Terminal stop (< 20 min remaining) ────────────────
+                            # Below 30% of entry with < 20 min — near-certain loss, cut now
+                            if yes_bid < entry_price * _terminal_pct and _time_remaining < _terminal_time:
+                                rule = f'daily_stop_terminal_{_time_remaining:.0f}s_left'
+                                log_activity(
+                                    f'[WS Exit] {ticker} daily TERMINAL stop '
+                                    f'(bid={yes_bid}c < 30% of {entry_price}c, '
+                                    f'T-{_mins_left:.0f}min) — exiting'
+                                )
+                                await execute_exit(key, pos, yes_bid, rule)
+                                continue
+        # ── End daily stop-loss ───────────────────────────────────────────────
 
         thresholds = pos.get('exit_thresholds')
         if thresholds is None:
@@ -746,32 +810,8 @@ async def check_expired_positions():
         if not pos:
             continue
 
-        # Parse close_time from ticker: format KXBTC15M-26APR011315-15
-        # The window close = window open + 15 minutes
-        close_dt = None
-        try:
-            parts = ticker.split('-')
-            if len(parts) >= 2:
-                date_part = parts[1]
-                m = re.match(r'(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})?', date_part)
-                if m:
-                    MONTH_MAP = {
-                        'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
-                        'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12,
-                    }
-                    yr = 2000 + int(m.group(1))
-                    mon = MONTH_MAP.get(m.group(2))
-                    dd = int(m.group(3))
-                    hh = int(m.group(4))
-                    mm = int(m.group(5)) if m.group(5) else 0
-                    if mon:
-                        from pytz import timezone as _tz
-                        _est = _tz('America/New_York')
-                        _close_naive = datetime(yr, mon, dd, hh, mm)
-                        _close_est = _est.localize(_close_naive)
-                        close_dt = _close_est.astimezone(timezone.utc)
-        except Exception:
-            pass
+        # Parse close_time from ticker using shared helper
+        close_dt = _parse_close_time(ticker)
 
         if close_dt is None or now_utc < close_dt:
             continue  # not expired yet (or can't parse)
