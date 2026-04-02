@@ -1,12 +1,12 @@
 # setup_crypto_1d_scheduler.ps1
-# Ruppert Trading Bot — Register crypto_1d Task Scheduler task
+# Ruppert Trading Bot — Register crypto_threshold_daily Task Scheduler task
 # Run as Administrator
 
 $PythonExe  = "C:\Users\David Wu\AppData\Local\Programs\Python\Python312\python.exe"
 $WorkDir    = "C:\Users\David Wu\.openclaw\workspace"
-$TaskName   = "Ruppert-Crypto1D"
+$TaskName   = "Ruppert-CryptoThresholdDaily"
 
-Write-Host "=== Ruppert-Crypto1D Scheduler Setup ===" -ForegroundColor Cyan
+Write-Host "=== Ruppert-CryptoThresholdDaily Scheduler Setup ===" -ForegroundColor Cyan
 
 # Remove existing task if present (idempotent)
 try {
@@ -38,7 +38,7 @@ Register-ScheduledTask `
     -Action $action `
     -Trigger @($trigger0630, $trigger1030) `
     -Settings $settings `
-    -Description "Ruppert crypto_1d scanner: daily crypto above/below (KXBTCD/KXETHD/KXSOLD). Runs 06:30 AM + 10:30 AM PDT." `
+    -Description "Ruppert crypto_threshold_daily scanner: daily crypto above/below (KXBTCD/KXETHD/KXSOLD). Runs 06:30 AM + 10:30 AM PDT." `
     -RunLevel Highest
 
 Write-Host "  Created: $TaskName" -ForegroundColor Green

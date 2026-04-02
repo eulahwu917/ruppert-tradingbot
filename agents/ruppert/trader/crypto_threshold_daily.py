@@ -1,5 +1,5 @@
 """
-crypto_1d.py — Daily crypto above/below trading module.
+crypto_threshold_daily.py — Daily crypto above/below trading module.
 
 Trades KXBTCD (BTC above/below) and KXETHD (ETH above/below) on Kalshi.
 Uses 4 daily-scale signals: 24h momentum, funding rate regime, ATR band

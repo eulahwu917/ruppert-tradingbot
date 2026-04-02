@@ -615,7 +615,7 @@ def compute_closed_pnl_from_logs() -> float:
         trades_dir = _paths['trades']
 
         # Gather all log files and compute max mtime for cache invalidation
-        since = '2026-03-26'
+        since = '2026-04-02'
         log_files = []
         for p in sorted(trades_dir.glob('trades_*.jsonl')):
             try:
