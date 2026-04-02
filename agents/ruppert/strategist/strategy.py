@@ -674,51 +674,22 @@ def get_strategy_summary() -> dict:
 
 def check_loss_circuit_breaker(capital: float) -> dict:
     """
-    Check if today's realized losses exceed the circuit breaker threshold.
+    Check if today's net realized P&L exceeds the circuit breaker threshold.
     Returns: {'tripped': bool, 'reason': str, 'loss_today': float}
+
+    Delegates to circuit_breaker.check_global_net_loss() which uses NET P&L
+    (sum of all pnl on exit/settle records, wins and losses combined).
 
     Threshold: config.LOSS_CIRCUIT_BREAKER_PCT (default 0.05 = 5% of capital)
     """
-    if capital <= 0:
-        return {
-            'tripped': True,
-            'reason': f'Capital is negative ({capital}) — trading halted until P&L is reconciled',
-            'loss_today': 0.0
-        }
-
-    threshold_pct = getattr(_cfg, 'LOSS_CIRCUIT_BREAKER_PCT', 0.05)
-    threshold_dollars = capital * threshold_pct
-    loss_today = 0.0
-
-    from agents.ruppert.env_config import get_paths as _get_paths_cb
-    trade_log = _get_paths_cb()['trades'] / f'trades_{date.today().isoformat()}.jsonl'
-    if not trade_log.exists():
-        return {'tripped': False, 'reason': 'no_trade_log', 'loss_today': 0.0}
-
-    try:
-        for line in trade_log.read_text(encoding='utf-8').splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            rec = json.loads(line)
-            if rec.get('action') != 'exit':
-                continue
-            pnl = rec.get('pnl')
-            if pnl is not None and pnl < 0:
-                loss_today += abs(pnl)
-    except Exception as e:
-        logger.error(f"[CircuitBreaker] Failed to read trade log: {e}. Failing closed.")
-        return {'tripped': True, 'reason': f'log_read_error (fail-closed): {e}', 'loss_today': 0.0}
-
-    if loss_today > threshold_dollars:
-        return {
-            'tripped': True,
-            'reason': (f'Loss circuit breaker tripped: ${loss_today:.2f} losses today '
-                       f'exceed {threshold_pct:.0%} of capital (${threshold_dollars:.2f})'),
-            'loss_today': round(loss_today, 2),
-        }
-
-    return {'tripped': False, 'reason': 'within_threshold', 'loss_today': round(loss_today, 2)}
+    from agents.ruppert.trader.circuit_breaker import check_global_net_loss
+    result = check_global_net_loss(capital)
+    # Normalize key: circuit_breaker uses 'net_loss_today'; callers expect 'loss_today'
+    return {
+        'tripped':    result['tripped'],
+        'reason':     result['reason'],
+        'loss_today': result['net_loss_today'],
+    }
 
 
 # ---------------------------------------------------------------------------

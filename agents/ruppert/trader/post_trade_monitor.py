@@ -40,20 +40,21 @@ from scripts.event_logger import log_event
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from agents.ruppert.data_scientist.logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock, normalize_entry_price
 from agents.ruppert.trader import position_tracker
+from agents.ruppert.trader import circuit_breaker
 
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
-def _update_circuit_breaker_state(module: str, window_open_ts: str, settlements: list):
+def _update_circuit_breaker_state(module_key: str, window_open_ts: str, settlements: list):
     """
-    Classify the just-settled window as complete loss, win, or partial loss,
-    then update the circuit breaker state file.
+    Classify the just-settled window as complete loss or win, then update
+    the unified circuit breaker state via circuit_breaker module.
 
     Called after each 15m window's positions are fully settled.
 
     Args:
-        module:          Module name (e.g. 'crypto_15m')
+        module_key:      CB module key (e.g. 'crypto_dir_15m_btc')
         window_open_ts:  ISO timestamp of the window that just settled
         settlements:     List of settlement result dicts for this window.
                          Each dict must have at minimum: {'payout': float}
@@ -62,65 +63,26 @@ def _update_circuit_breaker_state(module: str, window_open_ts: str, settlements:
     if not settlements:
         return  # No settlements to classify — don't update state
 
-    # Use absolute path via _get_paths() to avoid working-directory ambiguity.
-    state_path = os.path.join(str(_get_paths()['logs']), 'crypto_15m_circuit_breaker.json')
-
     # Classify the window
     payouts = [float(s.get('payout', 0.0)) for s in settlements]
     if all(p == 0.0 for p in payouts):
-        window_result = 'loss'        # complete loss — all entries expired worthless
-    elif any(p > 0.0 for p in payouts):
-        window_result = 'win'         # at least one winner
+        window_result = 'loss'
+        circuit_breaker.increment_consecutive_losses(module_key, window_open_ts)
     else:
-        window_result = 'partial_loss'  # shouldn't reach here given above logic
+        window_result = 'win'
+        circuit_breaker.reset_consecutive_losses(module_key, window_open_ts)
 
-    # Read current state (or initialize)
-    import pytz as _pytz
-    pdt = _pytz.timezone('America/Los_Angeles')
-    today_str = datetime.now(pdt).strftime('%Y-%m-%d')
-    try:
-        with open(state_path, 'r', encoding='utf-8') as f:
-            state = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        state = {'consecutive_losses': 0, 'advisory_would_have_fired_count': 0}
-    state['date'] = today_str
-
-    # Update consecutive loss counter
-    if window_result == 'loss':
-        state['consecutive_losses'] = state.get('consecutive_losses', 0) + 1
-    else:
-        # Any non-complete-loss resets the counter
-        state['consecutive_losses'] = 0
-
-    # Track advisory fire count for calibration
     cb_n = getattr(config, 'CRYPTO_15M_CIRCUIT_BREAKER_N', 3)
-    if state['consecutive_losses'] >= cb_n:
-        state['advisory_would_have_fired_count'] = state.get('advisory_would_have_fired_count', 0) + 1
+    losses = circuit_breaker.get_consecutive_losses(module_key)
+    if losses >= cb_n:
         print(
-            f'  [circuit_breaker] Advisory: {state["consecutive_losses"]} consecutive complete-loss '
-            f'windows for {module} (threshold={cb_n}). '
-            f'advisory_would_have_fired_count={state["advisory_would_have_fired_count"]}'
+            f'  [circuit_breaker] Advisory: {losses} consecutive complete-loss '
+            f'windows for {module_key} (threshold={cb_n}).'
         )
-
-    state['last_updated']       = datetime.utcnow().isoformat()
-    state['last_window_ts']     = window_open_ts
-    state['last_window_result'] = window_result
-
-    # Atomic write via .tmp + os.replace
-    os.makedirs(os.path.dirname(state_path), exist_ok=True)
-    tmp_path = state_path + '.tmp'
-    try:
-        Path(tmp_path).unlink(missing_ok=True)  # clean up any stale .tmp
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(state, f, indent=2)
-        os.replace(tmp_path, state_path)
-    except Exception as e:
-        print(f'  [circuit_breaker] State file write failed: {e}')
-        return
 
     print(
         f'  [circuit_breaker] Window {window_open_ts} result={window_result}, '
-        f'consecutive_losses={state["consecutive_losses"]}'
+        f'consecutive_losses={losses} ({module_key})'
     )
 
 
@@ -183,11 +145,9 @@ def check_settlements(client):
         return
 
     settled_count = 0
-    # Accumulate 15m settlements per window for circuit breaker update
-    # dict: window_open_ts → list of {'payout': float}
-    _15m_window_settlements: dict = {}
-    # Accumulate 1h band settlements per window for circuit breaker update
-    _1h_band_settlements: dict = {}
+    # Accumulate settlements per (module_key, window_open_ts) for circuit breaker update.
+    # dict: (module_key, window_open_ts) → list of {'payout': float}
+    _module_window_settlements: dict = {}
     for pos in open_positions:
         ticker = pos.get('ticker', '')
         side = pos.get('side', '')
@@ -335,139 +295,75 @@ def check_settlements(client):
         except Exception as _pt_err:
             print(f"  [Settlement Checker] WARN: could not remove {ticker} {side} from tracker: {_pt_err}")
 
-        # Accumulate 15m crypto settlements by window for circuit breaker update
-        if pos.get('module') in ('crypto_15m', 'crypto_15m_dir'):
-            win_ts = pos.get('window_open_ts', '')
-            if win_ts:
-                payout = exit_price if (
+        # Accumulate settlements by (module_key, window_open_ts) for circuit breaker update.
+        # Handles both 15m directional (crypto_dir_15m_*) and band daily (crypto_band_daily_*) modules.
+        _pos_module = pos.get('module', '')
+        _is_cb_module = (
+            _pos_module.startswith('crypto_dir_15m_') or
+            _pos_module.startswith('crypto_band_daily_') or
+            _pos_module.startswith('crypto_threshold_daily_') or
+            # Legacy taxonomy aliases — map to current names
+            _pos_module in ('crypto_15m', 'crypto_15m_dir', 'crypto_1h_band', 'crypto_1h_dir')
+        )
+        if _is_cb_module:
+            # Normalize legacy module names to current taxonomy
+            _cb_module_key = _pos_module
+            if _pos_module in ('crypto_15m', 'crypto_15m_dir'):
+                _cb_module_key = 'crypto_dir_15m_btc'   # best-effort fallback; no asset tag in old records
+            elif _pos_module == 'crypto_1h_band':
+                _cb_module_key = 'crypto_band_daily_btc'  # best-effort fallback
+            elif _pos_module == 'crypto_1h_dir':
+                _cb_module_key = 'crypto_threshold_daily_btc'  # best-effort fallback
+            _win_ts_key = pos.get('window_open_ts', pos.get('date', ''))
+            if _win_ts_key:
+                _cb_payout = exit_price if (
                     (side == 'yes' and result == 'yes') or
                     (side == 'no'  and result == 'no')
                 ) else 0.0
-                _15m_window_settlements.setdefault(win_ts, []).append({'payout': payout})
-
-        # Accumulate 1h band settlements by window for circuit breaker update
-        if pos.get('module') == 'crypto_1h_band':
-            # Use date as proxy window_ts for 1h band (hourly windows align to date+hour)
-            win_ts_1h = pos.get('window_open_ts', pos.get('date', ''))
-            if win_ts_1h:
-                payout_1h = exit_price if (
-                    (side == 'yes' and result == 'yes') or
-                    (side == 'no'  and result == 'no')
-                ) else 0.0
-                _1h_band_settlements.setdefault(win_ts_1h, []).append({'payout': payout_1h})
+                _module_window_settlements.setdefault((_cb_module_key, _win_ts_key), []).append({'payout': _cb_payout})
 
     if settled_count == 0:
         print(f"  [Settlement Checker] no newly settled positions")
     else:
         print(f"  [Settlement Checker] settled {settled_count} position(s)")
 
-    # Update circuit breaker state for each fully-settled 15m window
-    for win_ts, win_settlements in _15m_window_settlements.items():
+    # Update circuit breaker state for each fully-settled (module, window) pair
+    for (cb_mod, win_ts), win_settlements in _module_window_settlements.items():
         try:
-            _update_circuit_breaker_state('crypto_15m', win_ts, win_settlements)
+            _update_circuit_breaker_state(cb_mod, win_ts, win_settlements)
         except Exception as _cb_err:
-            print(f"  [circuit_breaker] State update failed for window {win_ts}: {_cb_err}")
-
-    # Update 1h band circuit breaker state for each fully-settled 1h window
-    for win_ts, win_settlements in _1h_band_settlements.items():
-        try:
-            update_1h_circuit_breaker(win_ts, win_settlements)
-        except Exception as _cb_err:
-            print(f"  [1h_circuit_breaker] State update failed for window {win_ts}: {_cb_err}")
+            print(f"  [circuit_breaker] State update failed for {cb_mod}/{win_ts}: {_cb_err}")
 
 
-def _read_1h_circuit_breaker_state() -> int:
+def update_1h_circuit_breaker(window_ts: str, settlements: list, module_key: str = 'crypto_band_daily_btc'):
     """
-    Read the current consecutive_losses count from the 1h band circuit breaker state file.
-    Performs a daily reset: if the stored date differs from today (PDT), resets
-    consecutive_losses to 0 and updates the file.
-    Returns 0 if the file doesn't exist or is unreadable (safe/permissive default).
+    Update the band daily circuit breaker state after a band window settles.
 
-    Mirrors _read_circuit_breaker_state() in crypto_15m.py.
-    """
-    import pytz as _pytz
-    state_path = os.path.join(str(_get_paths()['logs']), 'crypto_1h_circuit_breaker.json')
-    pdt = _pytz.timezone('America/Los_Angeles')
-    today_str = datetime.now(pdt).strftime('%Y-%m-%d')
-    try:
-        with open(state_path, 'r', encoding='utf-8') as f:
-            state = json.load(f)
-        stored_date = state.get('date', '')
-        if stored_date != today_str:
-            state['consecutive_losses'] = 0
-            state['date'] = today_str
-            tmp_path = state_path + '.tmp'
-            Path(tmp_path).unlink(missing_ok=True)  # clean up any stale .tmp
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(state, f)
-            os.replace(tmp_path, state_path)
-            return 0
-        return int(state.get('consecutive_losses', 0))
-    except (FileNotFoundError, json.JSONDecodeError, Exception):
-        return 0
-
-
-def update_1h_circuit_breaker(window_ts: str, settlements: list):
-    """
-    Update the 1h band circuit breaker state after a 1h band window settles.
-
-    Called by check_settlements() after all crypto_1h_band positions for a given
-    window_ts are settled.
-
-    A window is a "complete loss" if all positions resulted in payout=0.
-    A profitable window (any payout > 0) resets the counter.
+    Called by check_settlements() after all crypto_band_daily positions for a given
+    window_ts are settled. Delegates to the unified circuit_breaker module.
 
     Args:
         window_ts:   ISO timestamp identifying the settled window
         settlements: List of {'payout': float} dicts for the window
+        module_key:  CB module key (default: 'crypto_band_daily_btc')
     """
     if not settlements:
         return
 
-    import pytz as _pytz
-    state_path = os.path.join(str(_get_paths()['logs']), 'crypto_1h_circuit_breaker.json')
-    pdt = _pytz.timezone('America/Los_Angeles')
-    today_str = datetime.now(pdt).strftime('%Y-%m-%d')
-
     payouts = [float(s.get('payout', 0.0)) for s in settlements]
     if all(p == 0.0 for p in payouts):
         window_result = 'loss'
-    elif any(p > 0.0 for p in payouts):
+        circuit_breaker.increment_consecutive_losses(module_key, window_ts)
+    else:
         window_result = 'win'
-    else:
-        window_result = 'partial_loss'
-
-    try:
-        with open(state_path, 'r', encoding='utf-8') as f:
-            state = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        state = {'consecutive_losses': 0}
-    state['date'] = today_str
-
-    if window_result == 'loss':
-        state['consecutive_losses'] = state.get('consecutive_losses', 0) + 1
-    else:
-        state['consecutive_losses'] = 0
+        circuit_breaker.reset_consecutive_losses(module_key, window_ts)
 
     cb_n = getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3)
-    state['last_updated'] = datetime.utcnow().isoformat()
-    state['last_window_ts'] = window_ts
-    state['last_window_result'] = window_result
-
-    os.makedirs(os.path.dirname(state_path), exist_ok=True)
-    tmp_path = state_path + '.tmp'
-    try:
-        Path(tmp_path).unlink(missing_ok=True)  # clean up any stale .tmp
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(state, f, indent=2)
-        os.replace(tmp_path, state_path)
-    except Exception as e:
-        print(f'  [1h_circuit_breaker] State file write failed: {e}')
-        return
+    losses = circuit_breaker.get_consecutive_losses(module_key)
 
     print(
         f'  [1h_circuit_breaker] Window {window_ts} result={window_result}, '
-        f'consecutive_losses={state["consecutive_losses"]} (threshold={cb_n})'
+        f'consecutive_losses={losses} (threshold={cb_n}, module={module_key})'
     )
 
 

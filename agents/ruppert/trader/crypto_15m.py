@@ -78,6 +78,7 @@ W_OI   = getattr(config, 'CRYPTO_15M_DIR_W_OI',   0.18)
 from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.strategist.strategy import should_enter
 from agents.ruppert.data_analyst.polymarket_client import get_crypto_consensus
+from agents.ruppert.trader import circuit_breaker
 LOGS_DIR = _get_paths()['logs']
 LOGS_DIR.mkdir(exist_ok=True)
 DECISION_LOG = LOGS_DIR / 'decisions_15m.jsonl'
@@ -91,39 +92,10 @@ _window_lock           = threading.Lock()
 _window_exposure: dict = {}    # dict: window_open_ts (str) → float (dollars committed this window)
 _daily_wager           = 0.0   # float: total dollars wagered today (all buys)
 _daily_wager_date      = ''    # str: ISO date string, used to detect midnight rollover
-_cb_consecutive_losses = 0     # int: consecutive complete-loss windows (circuit breaker counter)
-_cb_last_window_ts     = ''    # str: last window_open_ts seen; triggers CB state file re-read on change
+_cb_last_window_ts     = ''    # str: last window_open_ts seen (used to detect window transition)
 
 _state_initialized = False     # guard: _rehydrate_state() runs only once per process
 
-
-def _read_circuit_breaker_state() -> int:
-    """
-    Read the current consecutive_losses count from the circuit breaker state file.
-    Performs a daily reset: if the stored date differs from today (PDT), resets
-    consecutive_losses to 0 and updates the file with today's date.
-    Returns 0 if the file doesn't exist or is unreadable (safe/permissive default).
-    """
-    state_path = LOGS_DIR / 'crypto_15m_circuit_breaker.json'
-    pdt = pytz.timezone('America/Los_Angeles')
-    today_str = datetime.now(pdt).strftime('%Y-%m-%d')
-    try:
-        with open(state_path, 'r', encoding='utf-8') as f:
-            state = json.load(f)
-        stored_date = state.get('date', '')
-        if stored_date != today_str:
-            # New day — reset consecutive losses
-            state['consecutive_losses'] = 0
-            state['date'] = today_str
-            tmp_path = str(state_path) + '.tmp'
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(state, f)
-            import os as _os
-            _os.replace(tmp_path, state_path)
-            return 0
-        return int(state.get('consecutive_losses', 0))
-    except (FileNotFoundError, json.JSONDecodeError, Exception):
-        return 0
 
 
 def _get_current_window_open_ts() -> str:
@@ -143,7 +115,7 @@ def _rehydrate_state():
     Re-read trade log and circuit breaker state file to restore in-memory counters
     after a restart. Called once at startup before first evaluation.
     """
-    global _daily_wager, _daily_wager_date, _window_exposure, _cb_consecutive_losses, _state_initialized
+    global _daily_wager, _daily_wager_date, _window_exposure, _state_initialized
 
     if _state_initialized:
         return
@@ -164,12 +136,12 @@ def _rehydrate_state():
     except Exception as e:
         logger.warning('[crypto_15m] _rehydrate_state: failed to re-hydrate wager counters: %s', e)
 
-    # 3. Circuit breaker: re-read consecutive complete-loss count from state file
-    _cb_consecutive_losses = _read_circuit_breaker_state()
+    # 3. Circuit breaker: log max consecutive losses from unified state file
+    _cb_max = max((circuit_breaker.get_consecutive_losses(m) for m in _ALL_CRYPTO_15M_MODULES), default=0)
 
     logger.info(
-        '[crypto_15m] State rehydrated: daily_wager=$%.2f, cb_consecutive_losses=%d',
-        _daily_wager, _cb_consecutive_losses,
+        '[crypto_15m] State rehydrated: daily_wager=$%.2f, cb_max_consecutive_losses=%d',
+        _daily_wager, _cb_max,
     )
 
 
@@ -1186,21 +1158,20 @@ def evaluate_crypto_15m_entry(
     # ── Three-Tier Cap Check (race-safe, inside lock) ──
     # Required global declarations — without these, Python raises UnboundLocalError
     # on assignment to module-level variables inside this function.
-    global _cb_consecutive_losses, _cb_last_window_ts
+    global _cb_last_window_ts
     global _daily_wager, _daily_wager_date, _window_exposure
 
     _skip_reason = None
 
     with _window_lock:
 
-        # --- Fix (Critical): Re-read CB state file on each window transition ---
-        # settlement_checker updates the state FILE after each settled window, but
-        # does NOT update the in-memory variable. Without this re-read, the circuit
-        # breaker can only fire as a startup gate — it never trips mid-session.
+        # --- Re-read CB state from unified file on each window transition ---
+        # post_trade_monitor updates the state FILE after each settled window.
+        # Re-read fresh from disk on window change to catch updates written externally.
         win_key = window_open_ts or 'unknown'
         if win_key != _cb_last_window_ts:
-            _cb_consecutive_losses = _read_circuit_breaker_state()
             _cb_last_window_ts = win_key
+        _cb_consecutive_losses = circuit_breaker.get_consecutive_losses(_module_name)
 
         # --- Check 0: Circuit breaker ---
         if _cb_consecutive_losses >= cb_n:
