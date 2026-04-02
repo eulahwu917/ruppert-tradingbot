@@ -250,6 +250,50 @@ def _translate_15m_side(ticker: str, side: str) -> str:
     return side
 
 
+def _parse_crypto_band_title(ticker: str, side: str) -> str | None:
+    """Parse 1H Dir/Band tickers into human-readable position titles.
+
+    KXBTCD-26APR0121-T68499.99  → 'BTC > $68,500'  (yes) / 'BTC < $68,500' (no)
+    KXBTC-26APR0121-B68450      → 'BTC band $68,450'
+    Works for BTC, ETH, XRP, DOGE, SOL variants.
+    """
+    import re as _re
+    tk = (ticker or '').upper()
+    # Map ticker prefixes to display asset names
+    _asset_map = {
+        'KXBTCD': 'BTC', 'KXBTC': 'BTC',
+        'KXETHD': 'ETH', 'KXETH': 'ETH',
+        'KXXRPD': 'XRP', 'KXXRP': 'XRP',
+        'KXDOGED': 'DOGE', 'KXDOGE': 'DOGE',
+        'KXSOLD': 'SOL', 'KXSOL': 'SOL',
+    }
+    # Match direction (threshold) tickers: e.g. KXBTCD-26APR0121-T68499.99
+    m = _re.match(r'^(KX\w+?D)-[\dA-Z]+-T([\d.]+)$', tk)
+    if m:
+        prefix, val_str = m.group(1), m.group(2)
+        asset = _asset_map.get(prefix)
+        if not asset:
+            return None
+        val = float(val_str)
+        # Round to nearest 50 for cleaner display
+        rounded = int(round(val / 50) * 50)
+        display = f'{rounded:,}'
+        if side == 'no':
+            return f'{asset} < ${display}'
+        return f'{asset} > ${display}'
+    # Match band tickers: e.g. KXBTC-26APR0121-B68450
+    m = _re.match(r'^(KX\w+?)-[\dA-Z]+-B([\d.]+)$', tk)
+    if m:
+        prefix, val_str = m.group(1), m.group(2)
+        asset = _asset_map.get(prefix)
+        if not asset:
+            return None
+        val = int(float(val_str))
+        display = f'{val:,}'
+        return f'{asset} band ${display}'
+    return None
+
+
 from agents.ruppert.data_scientist.ticker_utils import is_settled_ticker  # noqa: F401
 
 @app.get("/api/summary")
@@ -481,6 +525,9 @@ def get_trades():
 
         # Apply 15M display title transformation (mirrors open positions path)
         raw_title = (t.get('title') or ticker).replace('**', '')
+        _band_title = _parse_crypto_band_title(ticker, side)
+        if _band_title:
+            raw_title = _band_title
         _win_time = _parse_15m_window_time(ticker)
         if _win_time:
             import re as _re
@@ -599,6 +646,9 @@ def get_active_positions():
     for t in open_trades:
         ticker = t.get('ticker', '')
         raw_title = (t.get('title') or ticker).replace('**', '')
+        _band_title = _parse_crypto_band_title(ticker, side)
+        if _band_title:
+            raw_title = _band_title
         # 15M entries: replace the date segment with a PDT time label for readability
         _win_time = _parse_15m_window_time(ticker)
         if _win_time:
@@ -892,7 +942,7 @@ def get_pnl_history():
     manual_cost_basis = 0.0
 
     # Per-module stats (bot trades only)
-    module_keys = ['weather', 'crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'fed', 'geo', 'sports', 'other']
+    module_keys = ['crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'other']
     module_stats = {m: {
         'closed_pnl': 0.0,
         'closed_pnl_day': 0.0,
@@ -1308,7 +1358,7 @@ def _build_state():
             }
 
     # ── Build positions list (reuses prices fetched above) ────────────────────
-    module_keys = ['weather', 'crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'fed', 'geo', 'sports', 'other']
+    module_keys = ['crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'other']
     module_open: dict = {m: {'open_deployed': 0.0, 'open_trades': 0, 'open_pnl': 0.0} for m in module_keys}
 
     positions = []
@@ -1364,6 +1414,9 @@ def _build_state():
 
         edge_val = t.get('edge')
         _raw_title = (t.get('title') or ticker).replace('**', '')
+        _band_title = _parse_crypto_band_title(ticker, side)
+        if _band_title:
+            _raw_title = _band_title
         _win_time2 = _parse_15m_window_time(ticker)
         if _win_time2:
             import re as _re3
@@ -1398,7 +1451,7 @@ def _build_state():
     closed_wins      = 0
     closed_count     = 0
 
-    module_closed_keys = ['weather', 'crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'fed', 'geo', 'sports', 'other']
+    module_closed_keys = ['crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'other']
     module_closed: dict = {m: {
         'closed_pnl': 0.0,
         'closed_pnl_day': 0.0,
@@ -1583,7 +1636,7 @@ def _build_state():
 
     # ── Finalize module stats ─────────────────────────────────────────────────
     modules_out: dict = {}
-    for mod in ['weather', 'crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band', 'fed', 'geo', 'sports']:
+    for mod in ['crypto', 'crypto_15m_dir', 'crypto_1h_dir', 'crypto_1h_band']:
         oc = module_open.get(mod, {})
         cc = module_closed.get(mod, {})
         tc = cc.get('trade_count', 0)
@@ -1601,38 +1654,11 @@ def _build_state():
             'trade_count':       tc,
         }
 
-    # crypto_1d: only populate from actual 1D trades (not aliased to 1h_dir).
-    # If no crypto_1d trades exist yet, return a zeroed dict so the card shows '--'.
-    c1d = module_closed.get('crypto_1d', {})
-    c1d_tc = c1d.get('trade_count', 0)
-    c1d_oc = module_open.get('crypto_1d', {})
-    if c1d_tc > 0 or c1d_oc.get('open_trades', 0) > 0:
-        c1d_wr = round(c1d['wins'] / c1d_tc * 100, 1) if c1d_tc > 0 else None
-        modules_out['crypto_1d'] = {
-            'open_trades':       c1d_oc.get('open_trades', 0),
-            'open_deployed':     round(c1d_oc.get('open_deployed', 0.0), 2),
-            'open_pnl':          round(c1d_oc.get('open_pnl', 0.0), 2),
-            'closed_pnl':        round(c1d.get('closed_pnl', 0.0), 2),
-            'closed_pnl_day':    round(c1d.get('closed_pnl_day', 0.0), 2),
-            'closed_pnl_week':   round(c1d.get('closed_pnl_week', 0.0), 2),
-            'closed_pnl_month':  round(c1d.get('closed_pnl_month', 0.0), 2),
-            'closed_pnl_year':   round(c1d.get('closed_pnl_year', 0.0), 2),
-            'win_rate':          c1d_wr,
-            'trade_count':       c1d_tc,
-        }
-    else:
-        modules_out['crypto_1d'] = {
-            'open_trades': 0, 'open_deployed': 0, 'open_pnl': 0,
-            'closed_pnl': 0, 'closed_pnl_day': 0, 'closed_pnl_week': 0,
-            'closed_pnl_month': 0, 'closed_pnl_year': 0,
-            'win_rate': None, 'trade_count': 0,
-        }
-
     # ── Account ───────────────────────────────────────────────────────────────
     deployed     = round(sum(p['cost'] for p in positions), 2)
     buying_power = round(max(STARTING_CAPITAL - deployed, 0), 2)
 
-    _parent_mods = ['weather', 'crypto', 'fed', 'geo', 'sports', 'other']
+    _parent_mods = ['crypto', 'other']
     total_bot_trades = sum(module_closed[m]['trade_count'] for m in _parent_mods if m in module_closed)
     total_bot_wins   = sum(module_closed[m]['wins'] for m in _parent_mods if m in module_closed)
     win_rate = round(total_bot_wins / total_bot_trades * 100, 1) if total_bot_trades > 0 else None
