@@ -266,7 +266,8 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 
 
 
-  <!-- Module Performance Cards: Weather / Sports Odds / Geo / Fed / Crypto -->
+  <!-- HIDDEN: inactive module cards (weather/sports/geo/fed removed from backend api.py) -->
+  <!--
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px;align-items:stretch;" id="module-cards-row">
 
     <!-- 🌤 Weather -->
@@ -458,9 +459,11 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
     </div>
 
   </div>
+  -->
+  <!-- END HIDDEN inactive module cards -->
 
-  <!-- Row 2: Crypto sub-module cards -->
-  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px;align-items:stretch;" id="crypto-cards-row">
+  <!-- Row 2: Crypto sub-module cards (active: 15m Dir, 1H Dir, 1H Band) -->
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;align-items:stretch;" id="crypto-cards-row">
     <!-- ₿ 15m Dir -->
     <div class="card" style="border-left:3px solid #a78bfa;">
       <div style="padding:16px;">
@@ -593,50 +596,11 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
         </div>
       </div>
     </div>
-    <!-- ₿ 1D -->
+    <!-- HIDDEN: inactive module (crypto_1d removed from backend)
     <div class="card" style="border-left:3px solid #a78bfa;">
-      <div style="padding:16px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
-          <span style="font-size:18px;">&#x20BF;</span>
-          <span style="font-size:13px;font-weight:700;color:#fff;">1D</span>
-        </div>
-        <div style="display:flex;align-items:center;margin-bottom:14px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
-            <div class="pnl-neu" id="crypto_1d-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
-          </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
-              Closed P&amp;L
-              <select id="crypto_1d-period" onchange="setModulePeriod('crypto_1d',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
-                <option value="month" selected>This Month</option>
-                <option value="year">This Year</option>
-                <option value="all">All Time</option>
-              </select>
-            </div>
-            <div class="pnl-neu" id="crypto_1d-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
-          </div>
-          <div style="flex:1;padding-left:12px;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
-            <div style="font-size:22px;font-weight:700;color:#888;" id="crypto_1d-winrate">--</div>
-          </div>
-        </div>
-        <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto_1d-open-dep">--</div>
-          </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto_1d-open-cnt">--</div>
-          </div>
-          <div style="flex:1;padding-left:12px;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="crypto_1d-total-trades">--</div>
-          </div>
-        </div>
-      </div>
+      ...crypto_1d card hidden...
     </div>
+    -->
   </div>
 
   <!-- P&L Chart | Positions + Trades -->
