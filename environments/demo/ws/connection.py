@@ -119,8 +119,8 @@ class KalshiWebSocket:
             self._ws = await websockets.connect(
                 self.url,
                 additional_headers=headers,
-                ping_interval=HEARTBEAT_INTERVAL,
-                ping_timeout=10,
+                ping_interval=None,   # Kalshi sends server-side pings every 10s; client pings cause false 1011 disconnects
+                ping_timeout=None,
             )
             self._connected = True
             self._reconnect_delay = RECONNECT_DELAY_INITIAL

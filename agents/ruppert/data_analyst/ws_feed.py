@@ -677,8 +677,8 @@ async def run_ws_feed():
             async with websockets.connect(
                 'wss://api.elections.kalshi.com/trade-api/ws/v2',
                 additional_headers=headers,
-                ping_interval=30,
-                ping_timeout=10,
+                ping_interval=None,   # Kalshi sends server-side pings every 10s; client pings cause false 1011 disconnects
+                ping_timeout=None,    # recv timeout below handles zombie detection
             ) as ws:
                 print(f'  [WS Feed] Connected at {ts()}')
                 log_activity('[WS Feed] Connected')
@@ -709,7 +709,13 @@ async def run_ws_feed():
                     logger.warning('[WS Feed] REST bootstrap error: %s', _boot_err)
 
                 try:
-                    async for raw in ws:
+                    while True:
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=30)
+                        except asyncio.TimeoutError:
+                            # No message in 30s (Kalshi pings every 10s) — connection is dead
+                            log_activity('[WS Feed] recv timeout (30s silence) — reconnecting')
+                            break
                         try:
                             msg = json.loads(raw)
                         except json.JSONDecodeError as e:
