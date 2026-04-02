@@ -39,11 +39,20 @@ import config
 # Module-specific thresholds (mirrors config.py constants)
 # ---------------------------------------------------------------------------
 MIN_EDGE = {
-    'weather_band':      getattr(config, 'MIN_EDGE_WEATHER_BAND',      0.12),
-    'weather_threshold': getattr(config, 'MIN_EDGE_WEATHER_THRESHOLD',  0.12),
-    'crypto_1h_band':    getattr(config, 'MIN_EDGE_CRYPTO_1H_BAND',    0.12),
-    'crypto_15m_dir':    getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
-    'crypto_1h_dir':     getattr(config, 'MIN_EDGE_CRYPTO_1H_DIR',     0.08),
+    'weather_band':               getattr(config, 'MIN_EDGE_WEATHER_BAND',      0.12),
+    'weather_threshold':          getattr(config, 'MIN_EDGE_WEATHER_THRESHOLD',  0.12),
+    # crypto band (formerly crypto_1h_band) — per-asset
+    'crypto_band_daily_btc':      getattr(config, 'MIN_EDGE_CRYPTO_1H_BAND',    0.12),
+    'crypto_band_daily_eth':      getattr(config, 'MIN_EDGE_CRYPTO_1H_BAND',    0.12),
+    # crypto 15m directional (formerly crypto_15m_dir) — per-asset
+    'crypto_dir_15m_btc':         getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
+    'crypto_dir_15m_eth':         getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
+    'crypto_dir_15m_sol':         getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
+    'crypto_dir_15m_xrp':         getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
+    'crypto_dir_15m_doge':        getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',    0.12),
+    # crypto threshold daily (formerly crypto_1h_dir) — per-asset
+    'crypto_threshold_daily_btc': getattr(config, 'MIN_EDGE_CRYPTO_1H_DIR',     0.08),
+    'crypto_threshold_daily_eth': getattr(config, 'MIN_EDGE_CRYPTO_1H_DIR',     0.08),
     'geo':               getattr(config, 'MIN_EDGE_GEO',               0.15),
     'econ_cpi':          getattr(config, 'MIN_EDGE_ECON_CPI',          0.12),
     'econ_unemployment': getattr(config, 'MIN_EDGE_ECON_UNEMPLOYMENT', 0.12),
@@ -51,6 +60,26 @@ MIN_EDGE = {
     'econ_recession':    getattr(config, 'MIN_EDGE_ECON_RECESSION',    0.12),
 }
 MIN_CONFIDENCE   = getattr(config, 'STRATEGY_MIN_CONFIDENCE_FLOOR', 0.25)
+
+# Prefix-based fallback for MIN_EDGE lookup (handles per-asset module names).
+# Exact key wins first; prefix match is the fallback for unlisted variants.
+MIN_EDGE_PREFIX = {
+    'crypto_band_daily_':      getattr(config, 'MIN_EDGE_CRYPTO_1H_BAND',   0.12),
+    'crypto_dir_15m_':         getattr(config, 'MIN_EDGE_CRYPTO_15M_DIR',   0.12),
+    'crypto_threshold_daily_': getattr(config, 'MIN_EDGE_CRYPTO_1H_DIR',    0.08),
+}
+DEFAULT_MIN_EDGE = 0.12
+
+
+def _get_min_edge(module: str) -> float:
+    """Return the MIN_EDGE threshold for a given module name.
+    Exact dict key wins; prefix fallback used for per-asset module variants."""
+    if module in MIN_EDGE:
+        return MIN_EDGE[module]
+    for prefix, val in MIN_EDGE_PREFIX.items():
+        if module.startswith(prefix):
+            return val
+    return DEFAULT_MIN_EDGE
 MIN_HOURS_ENTRY  = 0.5           # local fallback only — strategy reads config.MIN_HOURS_ENTRY dict
 MIN_HOURS_ADD    = getattr(config, 'STRATEGY_MIN_HOURS_ADD', 2.0)
 DAILY_CAP_RATIO  = getattr(config, 'DAILY_CAP_RATIO', 0.70)
@@ -319,7 +348,7 @@ def should_enter(
                 'reason': f'low_confidence ({confidence:.2f} < {_per_module_thresh} for {signal_module})'}
 
     # --- Edge gate (module-specific) ---
-    min_edge = MIN_EDGE.get(signal_module, MIN_EDGE.get('weather_band', 0.12))
+    min_edge = _get_min_edge(signal_module)
     if edge < min_edge:
         return {'enter': False, 'size': 0.0,
                 'reason': f'insufficient_edge ({edge:.3f} < {min_edge} for {signal_module})'}
@@ -604,9 +633,9 @@ def get_strategy_summary() -> dict:
         'daily_cap_ratio':          DAILY_CAP_RATIO,
         'min_edge_weather_band':         MIN_EDGE.get('weather_band', 0.12),
         'min_edge_weather_threshold':    MIN_EDGE.get('weather_threshold', 0.12),
-        'min_edge_crypto_1h_band':       MIN_EDGE.get('crypto_1h_band', 0.12),
-        'min_edge_crypto_15m_dir':       MIN_EDGE.get('crypto_15m_dir', 0.12),
-        'min_edge_crypto_1h_dir':        MIN_EDGE.get('crypto_1h_dir', 0.08),
+        'min_edge_crypto_band_daily':          MIN_EDGE.get('crypto_band_daily_btc', 0.12),
+        'min_edge_crypto_dir_15m':             MIN_EDGE.get('crypto_dir_15m_btc', 0.12),
+        'min_edge_crypto_threshold_daily':     MIN_EDGE.get('crypto_threshold_daily_btc', 0.08),
         'min_edge_geo':                  MIN_EDGE.get('geo', 0.15),
         'min_edge_econ_cpi':             MIN_EDGE.get('econ_cpi', 0.12),
         'min_edge_econ_unemployment':    MIN_EDGE.get('econ_unemployment', 0.12),

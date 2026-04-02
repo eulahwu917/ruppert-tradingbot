@@ -574,6 +574,16 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 from agents.ruppert.trader.crypto_client import compute_composite_confidence
                 _crypto_confidence = compute_composite_confidence(best_edge, ya, m.get('yes_bid') or ya, _hours_left)
 
+                # Map series to new per-asset band module name (formerly 'crypto_1h_band')
+                _SERIES_TO_BAND_MODULE = {
+                    'KXBTC':  'crypto_band_daily_btc',
+                    'KXETH':  'crypto_band_daily_eth',
+                    # TODO: verify taxonomy — sol/xrp/doge band modules not yet defined
+                    'KXSOL':  'crypto_band_daily_btc',   # TODO: verify taxonomy
+                    'KXXRP':  'crypto_band_daily_btc',   # TODO: verify taxonomy
+                    'KXDOGE': 'crypto_band_daily_btc',   # TODO: verify taxonomy
+                }
+                _band_module = _SERIES_TO_BAND_MODULE.get(series, 'crypto_band_daily_btc')  # TODO: verify taxonomy
                 new_crypto.append({
                     'ticker': ticker, 'title': m.get('title', ticker),
                     'side': best_action, 'price': best_price,
@@ -582,6 +592,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                     'confidence': _crypto_confidence,
                     'hours_to_settlement': _hours_left,
                     'edge': round(best_edge, 3), 'series': series,
+                    'module': _band_module,
                     'note': f'{series} {direction} | model={prob_model*100:.0f}% mkt={mkt_yes*100:.0f}% edge={best_edge*100:.0f}%',
                 })
 
@@ -607,7 +618,11 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
         _crypto_daily_cap = _total_capital * getattr(config, 'CRYPTO_DAILY_CAP_PCT', 0.07)
         try:
             from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_daily_exp
-            _crypto_deployed_this_cycle = _get_daily_exp(module='crypto_1h_band')
+            # Sum deployed across all per-asset band modules (formerly 'crypto_1h_band')
+            _crypto_deployed_this_cycle = sum(
+                _get_daily_exp(module=m)
+                for m in ('crypto_band_daily_btc', 'crypto_band_daily_eth')
+            )
         except Exception:
             _crypto_deployed_this_cycle = 0.0
 
@@ -637,7 +652,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                       f'(threshold={_cb_1h_n}). Continuing in advisory mode.')
             else:
                 print(f'  [1h CB] CIRCUIT BREAKER TRIPPED: {_cb_1h_losses} consecutive complete-loss '
-                      f'windows (threshold={_cb_1h_n}). Halting crypto_1h_band for today.')
+                      f'windows (threshold={_cb_1h_n}). Halting crypto_band_daily for today.')
                 return []
 
         trader = Trader(dry_run=dry_run)
@@ -650,12 +665,13 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 print(f"  [DailyCap] STOP: crypto budget ${_crypto_daily_cap:.0f} exhausted")
                 break
 
+            _t_module = t.get('module', 'crypto_band_daily_btc')  # per-asset band module
             signal = {
                 'edge': t['edge'],
                 'win_prob': t['prob_model'],
                 'confidence': t.get('confidence', t['edge']),
                 'hours_to_settlement': t.get('hours_to_settlement', 24.0),
-                'module': 'crypto_1h_band',
+                'module': _t_module,
                 'vol_ratio': 1.0,
                 'side': t['side'],
                 'yes_ask': t['yes_ask'],
@@ -664,7 +680,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
             }
             decision = should_enter(
                 signal, _total_capital, _deployed_today,
-                module='crypto_1h_band',
+                module=_t_module,
                 module_deployed_pct=_crypto_deployed_this_cycle / _total_capital if _total_capital > 0 else 0.0,
                 traded_tickers=traded_tickers,
             )
@@ -698,7 +714,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 'date': str(date.today()),
             }
             opp['strategy_size'] = size
-            opp['module'] = 'crypto_1h_band'
+            opp['module'] = _t_module
             result = trader.execute_opportunity(opp)
             if not result:
                 print(f"  [Crypto] execute_opportunity failed for {t['ticker']} — skipping accounting")
@@ -795,7 +811,11 @@ def run_crypto_1d_scan(dry_run=True, traded_tickers=None, open_position_value=0.
         # Capital / daily cap check
         try:
             _capital = get_capital()
-            _1d_deployed = get_daily_exposure(module='crypto_1h_dir')
+            # Sum deployed across per-asset threshold modules (formerly 'crypto_1h_dir')
+            _1d_deployed = sum(
+                get_daily_exposure(module=m)
+                for m in ('crypto_threshold_daily_btc', 'crypto_threshold_daily_eth')
+            )
             _1d_cap = _capital * config.CRYPTO_1D_DAILY_CAP_PCT
         except Exception as _ce:
             log_activity(f"[Crypto1D] Capital check error: {_ce} — using fallback")
@@ -822,11 +842,13 @@ def run_crypto_1d_scan(dry_run=True, traded_tickers=None, open_position_value=0.
                     f"[Crypto1D] ENTERED {asset} {result.get('ticker')} "
                     f"${result.get('size_usd', 0):.2f} ({window} window)"
                 )
+                # Module name: crypto_threshold_daily_{asset} (formerly 'crypto_1h_dir')
+                _1d_module = f'crypto_threshold_daily_{asset}'  # e.g. crypto_threshold_daily_btc
                 executed.append({
                     'asset': asset,
                     'ticker': result.get('ticker'),
                     'size_dollars': result.get('size_usd', 0),
-                    'module': 'crypto_1h_dir',
+                    'module': _1d_module,
                     'window': window,
                 })
             else:
