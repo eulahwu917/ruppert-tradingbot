@@ -623,16 +623,9 @@ def compute_closed_pnl_from_logs() -> float:
         trades_dir = _paths['trades']
 
         # Gather all log files and compute max mtime for cache invalidation
-        since = '2026-04-02'
-        log_files = []
-        for p in sorted(trades_dir.glob('trades_*.jsonl')):
-            try:
-                file_date = p.stem.replace('trades_', '')
-                if file_date < since:
-                    continue
-            except Exception:
-                continue
-            log_files.append(p)
+        # No date filter needed — trades/ only contains clean files (poisoned/archived files
+        # are in trades/archive/ which is not matched by this glob pattern)
+        log_files = sorted(trades_dir.glob('trades_*.jsonl'))
 
         if not log_files:
             return 0.0
