@@ -95,6 +95,9 @@ check("logs/ directory exists", logs_dir.exists())
 
 
 # ── 4. Deprecated/deleted files must NOT exist ───────────────────────────────
+# NOTE: These are intentional existence guards — checking deleted files have NOT come back.
+# code_audit.py may flag these as "dead code references" — that is a false positive.
+# Do NOT remove these entries; they are safety checks, not stale references.
 print("\n=== Deprecated Files (should not exist) ===")
 
 DEPRECATED = [

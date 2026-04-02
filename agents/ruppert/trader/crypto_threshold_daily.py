@@ -37,6 +37,7 @@ from agents.ruppert.data_scientist.logger import get_daily_exposure
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.data_analyst.polymarket_client import get_crypto_daily_consensus
+from agents.ruppert.trader import circuit_breaker as _circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -921,6 +922,30 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
     today_settlement = get_today_settlement_date()
     if not _cross_module_guard(asset, today_settlement):
         return _skip(asset, window, 'cross_module_guard')
+
+    # 1b. Daily circuit breaker gate
+    try:
+        _daily_cb_n = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N',
+                              getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3))
+        _daily_cb_advisory = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_ADVISORY', False)
+        _module_key = f'crypto_threshold_daily_{asset.lower()}'
+        _daily_cb_losses = _circuit_breaker.get_consecutive_losses(_module_key)
+        if _daily_cb_losses >= _daily_cb_n:
+            if _daily_cb_advisory:
+                logger.info(
+                    '[crypto_threshold_daily] CB advisory: %d consecutive losses for %s '
+                    '(threshold=%d) — continuing in advisory mode',
+                    _daily_cb_losses, _module_key, _daily_cb_n
+                )
+            else:
+                logger.info(
+                    '[crypto_threshold_daily] CB TRIPPED: %d consecutive losses for %s '
+                    '(threshold=%d) — halting entries',
+                    _daily_cb_losses, _module_key, _daily_cb_n
+                )
+                return _skip(asset, window, 'circuit_breaker')
+    except Exception as _cb_gate_err:
+        logger.warning('[crypto_threshold_daily] CB gate failed for %s: %s', asset, _cb_gate_err)
 
     # 2. Capital / cap checks
     try:

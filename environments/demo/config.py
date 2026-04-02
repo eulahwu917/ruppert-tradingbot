@@ -442,6 +442,10 @@ KELLY_TIER_25 = 0.05   # 25–40% (data accumulation floor)
 CRYPTO_1H_CIRCUIT_BREAKER_N        = 3      # consecutive complete-loss windows before halt
 CRYPTO_1H_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop; True = log only
 
+# ── Daily Module Circuit Breaker ──────────────────────────────────────────────
+CRYPTO_DAILY_CIRCUIT_BREAKER_N        = 5      # consecutive contract losses before daily CB trips
+CRYPTO_DAILY_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop
+
 # ── Daily module stop-loss (band + threshold) ─────────────────────────────────
 # Applies to: crypto_band_daily_* and crypto_threshold_daily_*
 

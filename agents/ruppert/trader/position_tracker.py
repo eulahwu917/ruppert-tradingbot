@@ -24,6 +24,7 @@ if str(_WORKSPACE_ROOT) not in sys.path:
 from agents.ruppert.env_config import get_paths as _get_paths, require_live_enabled, get_current_env  # noqa: E402
 import config
 from agents.ruppert.data_scientist.logger import log_activity, normalize_entry_price
+from agents.ruppert.trader import circuit_breaker as _circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +36,42 @@ TRADES_DIR = _env_paths['trades']  # P0-1 fix: trade files go to logs/trades/
 # Exit thresholds — config-driven (fallbacks preserve current behavior)
 EXIT_95C_THRESHOLD = getattr(config, 'EXIT_95C_THRESHOLD', 95)
 EXIT_GAIN_PCT      = getattr(config, 'EXIT_GAIN_PCT', 0.70)
+
+
+# ─────────────────────────────── Daily CB helper ──────────────────────────────
+
+
+def _update_daily_cb(module: str, window_ts: str, pnl: float) -> None:
+    """Update per-module CB state after a daily contract settles.
+
+    Called after each crypto_band_daily_* or crypto_threshold_daily_* settlement.
+    A win (pnl > 0) resets consecutive losses; a loss increments them.
+
+    Args:
+        module:     Module key, e.g. 'crypto_band_daily_btc'
+        window_ts:  Timestamp string identifying this settlement window
+        pnl:        Realized P&L for this contract (positive=win, negative=loss)
+    """
+    if not (module.startswith('crypto_band_daily_') or
+            module.startswith('crypto_threshold_daily_')):
+        return  # Only for daily modules
+
+    try:
+        cb_n = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N',
+                       getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3))
+
+        if pnl <= 0:
+            _circuit_breaker.increment_consecutive_losses(module, window_ts)
+        else:
+            _circuit_breaker.reset_consecutive_losses(module, window_ts)
+
+        losses = _circuit_breaker.get_consecutive_losses(module)
+        logger.info(
+            '[PositionTracker][CB] %s: pnl=$%.2f -> %s | consecutive_losses=%d (threshold=%d)',
+            module, pnl, 'loss' if pnl <= 0 else 'win', losses, cb_n
+        )
+    except Exception as _cb_err:
+        logger.warning('[PositionTracker][CB] update failed for %s: %s', module, _cb_err)
 
 
 # ─────────────────────────────── In-memory state ──────────────────────────────
@@ -724,6 +761,12 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
             print(
                 f'  [WS EXIT] {ticker} {side.upper()} SETTLE_LOSS | YES won | P&L=${pnl:+.2f}'
             )
+
+            # ── Daily module CB update ────────────────────────────────────────
+            if module.startswith('crypto_band_daily_') or module.startswith('crypto_threshold_daily_'):
+                _sl_window_ts = datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+                _update_daily_cb(module, _sl_window_ts, pnl)
+
             remove_position(ticker, side)
             _recently_exited[(ticker, side)] = time.time()
             return  # Do NOT fall through to sell order logic
@@ -785,6 +828,11 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
 
         log_activity(f'[WS EXIT] {ticker} {side.upper()} @ {current_bid}c | {rule} | P&L=${pnl:+.2f}')
         print(f'  [WS EXIT] {ticker} {side.upper()} @ {current_bid}c | {rule} | P&L=${pnl:+.2f}')
+
+        # ── Daily module CB update ────────────────────────────────────────
+        if module.startswith('crypto_band_daily_') or module.startswith('crypto_threshold_daily_'):
+            _exit_window_ts = datetime.now(tz=timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            _update_daily_cb(module, _exit_window_ts, pnl)
 
         remove_position(ticker, side)
         _recently_exited[(ticker, side)] = time.time()  # cooldown: prevent re-fire for TTL window
@@ -884,6 +932,13 @@ async def check_expired_positions():
             '[PositionTracker] Expired %s %s: result=%s, P&L=$%.2f',
             ticker, side, result, pnl
         )
+
+        # ── Daily module CB update ────────────────────────────────────────
+        if module.startswith('crypto_band_daily_') or module.startswith('crypto_threshold_daily_'):
+            _settle_window_ts = (close_dt.strftime('%Y-%m-%dT%H:%M:%SZ')
+                                 if close_dt else datetime.now(tz=timezone.utc).isoformat())
+            _update_daily_cb(module, _settle_window_ts, pnl)
+
         keys_to_remove.append(key)
 
     for key in keys_to_remove:

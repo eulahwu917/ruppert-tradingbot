@@ -350,22 +350,28 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
         except Exception:
             _open_exposure = open_position_value
 
-        # ── 1h Band Circuit Breaker gate (Phase 2 — 2026-03-31) ──────────────
-        _cb_1h_n        = getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3)
-        _cb_1h_advisory = getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_ADVISORY', False)
+        # ── Daily Band Circuit Breaker gate ───────────────────────────────────
+        _cb_1h_n        = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N',
+                                  getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3))
+        _cb_1h_advisory = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_ADVISORY',
+                                  getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_ADVISORY', False))
         try:
-            from agents.ruppert.trader.post_trade_monitor import _read_1h_circuit_breaker_state
-            _cb_1h_losses = _read_1h_circuit_breaker_state()
-        except Exception:
+            from agents.ruppert.trader import circuit_breaker as _cb_mod
+            _cb_1h_losses = max(
+                _cb_mod.get_consecutive_losses('crypto_band_daily_btc'),
+                _cb_mod.get_consecutive_losses('crypto_band_daily_eth'),
+            )
+        except Exception as _cb_read_err:
+            logger.warning('[crypto_band_daily] CB read failed, defaulting to 0: %s', _cb_read_err)
             _cb_1h_losses = 0
 
         if _cb_1h_losses >= _cb_1h_n:
             if _cb_1h_advisory:
-                print(f'  [1h CB] Advisory: {_cb_1h_losses} consecutive complete-loss windows '
+                print(f'  [daily CB] Advisory: {_cb_1h_losses} consecutive losses '
                       f'(threshold={_cb_1h_n}). Continuing in advisory mode.')
             else:
-                print(f'  [1h CB] CIRCUIT BREAKER TRIPPED: {_cb_1h_losses} consecutive complete-loss '
-                      f'windows (threshold={_cb_1h_n}). Halting crypto_band_daily for today.')
+                print(f'  [daily CB] CIRCUIT BREAKER TRIPPED: {_cb_1h_losses} consecutive losses '
+                      f'(threshold={_cb_1h_n}). Halting crypto_band_daily for today.')
                 return []
 
         trader = Trader(dry_run=dry_run)
