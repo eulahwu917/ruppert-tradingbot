@@ -393,6 +393,45 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
                             continue  # position exited, skip threshold checks
         # ── End time-to-expiry stop-loss ──────────────────────────────────
 
+        # ── Time-decay stop-loss for crypto_1d positions ─────────────────
+        # Daily crypto contracts (1H Dir KXBTCD, 1H Band KXBTC-*-B*)
+        # settle at 17:00 ET (21:00 UTC). Fire when <20 min remain and
+        # bid < 30% of entry. Write off at ≤1c if <30 min remain.
+        if pos.get('module') in ('crypto', 'crypto_1d') and pos.get('added_at'):
+            if key in _exits_in_flight:
+                pass  # let threshold checks run instead
+            else:
+                entry_price = pos['entry_price']
+                elapsed_secs = now - pos['added_at']
+                # 30-min entry guard: don't stop out positions we just entered
+                if elapsed_secs >= 1800:
+                    _now_utc = datetime.now(tz=timezone.utc)
+                    # Settlement is always 17:00 ET = 21:00 UTC today
+                    _settle_utc = _now_utc.replace(hour=21, minute=0, second=0, microsecond=0)
+                    _time_remaining = (_settle_utc - _now_utc).total_seconds()
+                    if _time_remaining > 0:  # skip if already past settlement
+                        _mins_left = _time_remaining / 60
+
+                        # Write-off: bid ≤ 1c and <30 min → not worth selling
+                        if yes_bid <= 1 and _time_remaining < 1800:
+                            log_activity(
+                                f'[WS Exit] {ticker} crypto_1d write-off '
+                                f'(bid={yes_bid}c, T-{_mins_left:.0f}min) — skipping sell'
+                            )
+                            continue
+
+                        # Time-decay stop: bid < 30% of entry and <20 min left
+                        if _time_remaining < 1200 and yes_bid < entry_price * 0.30:
+                            rule = f'crypto_1d_time_decay_stop_{_time_remaining:.0f}s_left'
+                            log_activity(
+                                f'[WS Exit] {ticker} crypto_1d time-decay stop '
+                                f'(bid={yes_bid}c < 30% of {entry_price}c, '
+                                f'T-{_mins_left:.0f}min) — exiting'
+                            )
+                            await execute_exit(key, pos, yes_bid, rule)
+                            continue  # position exited, skip threshold checks
+        # ── End crypto_1d time-decay stop-loss ───────────────────────────
+
         thresholds = pos.get('exit_thresholds')
         if thresholds is None:
             logger.warning('[PositionTracker] %s missing exit_thresholds — skipping exit check', ticker)
