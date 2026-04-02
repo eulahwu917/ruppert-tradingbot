@@ -8,10 +8,11 @@ Called by ws_feed.py on every ticker tick for tracked positions.
 
 import json
 import logging
+import re
 import sys
 import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 # Resolve workspace root and add to path for env_config
@@ -341,25 +342,53 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
         except Exception as _iwl_err:
             logger.debug('[PositionTracker] intra_window_logger: %s', _iwl_err)
 
-        # ── Time-gated stop-loss for crypto_15m_dir positions ─────────────
+        # ── Time-to-expiry stop-loss for crypto_15m_dir positions ─────────
         # Prevents losing positions from riding to 0c at expiry.
+        # Fires when <2 min remain on the contract AND bid < 40% of entry.
         # Runs alongside threshold exits — whichever triggers first wins.
         if pos.get('module') == 'crypto_15m_dir' and pos.get('added_at'):
-            elapsed_min = (now - pos['added_at']) / 60.0
-            entry_price = pos['entry_price']
-            stop_triggered = False
-            if 5 <= elapsed_min < 13 and yes_bid < entry_price * 0.40:
-                stop_triggered = True
-            # 0-5 min: no stop (too early, noise)
-            # 13-15 min: no stop (spread too wide near expiry, let it settle)
-            if stop_triggered:
-                rule = f'stop_loss_{elapsed_min:.0f}m'
-                log_activity(
-                    f'[WS Exit] {ticker} hit {rule} (bid={yes_bid}c, entry={entry_price}c) — exiting'
-                )
-                await execute_exit(key, pos, yes_bid, rule)
-                continue  # position exited, skip threshold checks
-        # ── End time-gated stop-loss ──────────────────────────────────────
+            # Skip if this position already has a pending exit order
+            if key in _exits_in_flight:
+                pass  # let threshold checks run instead
+            else:
+                entry_price = pos['entry_price']
+                elapsed_secs = now - pos['added_at']
+                # 0-5 min guard: don't stop out positions we just entered
+                if elapsed_secs >= 300:
+                    # Parse contract close time from ticker
+                    # e.g. KXBTC15M-26APR011315-15 → opens 13:15, closes 13:30
+                    _close_dt = None
+                    try:
+                        _MONTH_MAP = {
+                            'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
+                            'JUL': 7, 'AUG': 8, 'SEP': 9, 'OCT': 10, 'NOV': 11, 'DEC': 12,
+                        }
+                        _parts = ticker.split('-')
+                        if len(_parts) >= 2:
+                            _m = re.match(r'(\d{2})([A-Z]{3})(\d{2})(\d{2})(\d{2})', _parts[1])
+                            if _m:
+                                _yr = 2000 + int(_m.group(1))
+                                _mon = _MONTH_MAP.get(_m.group(2))
+                                _dd = int(_m.group(3))
+                                _hh = int(_m.group(4))
+                                _mm = int(_m.group(5))
+                                if _mon:
+                                    _open_dt = datetime(_yr, _mon, _dd, _hh, _mm, tzinfo=timezone.utc)
+                                    _close_dt = _open_dt + timedelta(minutes=15)
+                    except Exception:
+                        pass
+
+                    if _close_dt is not None:
+                        _now_utc = datetime.now(tz=timezone.utc)
+                        _time_remaining = (_close_dt - _now_utc).total_seconds()
+                        if _time_remaining < 120 and yes_bid < entry_price * 0.40:
+                            rule = f'stop_loss_expiry_{_time_remaining:.0f}s_left'
+                            log_activity(
+                                f'[WS Exit] {ticker} hit {rule} (bid={yes_bid}c, entry={entry_price}c) — exiting'
+                            )
+                            await execute_exit(key, pos, yes_bid, rule)
+                            continue  # position exited, skip threshold checks
+        # ── End time-to-expiry stop-loss ──────────────────────────────────
 
         thresholds = pos.get('exit_thresholds')
         if thresholds is None:
@@ -626,7 +655,6 @@ async def check_expired_positions():
         # The window close = window open + 15 minutes
         close_dt = None
         try:
-            import re
             parts = ticker.split('-')
             if len(parts) >= 2:
                 date_part = parts[1]
@@ -642,7 +670,6 @@ async def check_expired_positions():
                     hh = int(m.group(4))
                     mm = int(m.group(5))
                     if mon:
-                        from datetime import timedelta
                         open_dt = datetime(yr, mon, dd, hh, mm, tzinfo=timezone.utc)
                         close_dt = open_dt + timedelta(minutes=15)
         except Exception:
