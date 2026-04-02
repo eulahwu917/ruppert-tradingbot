@@ -353,8 +353,8 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
             else:
                 entry_price = pos['entry_price']
                 elapsed_secs = now - pos['added_at']
-                # 0-5 min guard: don't stop out positions we just entered
-                if elapsed_secs >= 300:
+                # 0-8 min guard: don't stop out positions we just entered
+                if elapsed_secs >= 480:
                     # Parse contract close time from ticker
                     # e.g. KXBTC15M-26APR011315-15 → opens 13:15, closes 13:30
                     _close_dt = None
