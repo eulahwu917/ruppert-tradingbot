@@ -1498,7 +1498,6 @@ def _build_state():
             if not is_manual:
                 mod_c = classify_module(src, ticker)
                 _bc = _stat_bucket(mod_c)
-                import logging as _lg; _lg.getLogger('pnl_debug').warning(f'BUCKET: src={src} ticker={ticker} mod_c={mod_c} _bc={_bc} pnl={pnl_val}')
                 module_closed[_bc]['closed_pnl']  += pnl_val
                 module_closed[_bc]['trade_count'] += 1
                 if pnl_val > 0:
