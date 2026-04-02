@@ -474,6 +474,8 @@ def classify_module(src: str, ticker: str) -> str:
       crypto_threshold_daily_btc  KXBTCD*
       crypto_threshold_daily_eth  KXETHD*
       crypto_threshold_daily_sol  KXSOLD*  (future)
+      crypto_threshold_daily_xrp  KXXRPD*
+      crypto_threshold_daily_doge KXDOGED*
       crypto_band_daily_btc     KXBTC (band, no D/15M suffix)
       crypto_band_daily_eth     KXETH (band, no D/15M suffix)
       crypto_band_daily_xrp     KXXRP
@@ -517,6 +519,10 @@ def classify_module(src: str, ticker: str) -> str:
         return 'crypto_threshold_daily_eth'
     if t.startswith('KXSOLD') or (src == 'crypto_1d' and t.startswith('KXSOL')):
         return 'crypto_threshold_daily_sol'
+    if t.startswith('KXXRPD') or (src == 'crypto_1d' and t.startswith('KXXRP')):
+        return 'crypto_threshold_daily_xrp'
+    if t.startswith('KXDOGED') or (src == 'crypto_1d' and t.startswith('KXDOGE')):
+        return 'crypto_threshold_daily_doge'
     # Fallback for src='crypto_1d' with unrecognised asset
     if src == 'crypto_1d':
         return 'crypto_threshold_daily_btc'

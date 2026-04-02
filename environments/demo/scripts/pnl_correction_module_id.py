@@ -29,6 +29,8 @@ _TICKER_MODULE_PATTERNS = [
     (re.compile(r'^KXBTCD-.*-T'),  'crypto_threshold_daily_btc'),
     (re.compile(r'^KXETHD-.*-T'),  'crypto_threshold_daily_eth'),
     (re.compile(r'^KXSOLD-.*-T'),  'crypto_threshold_daily_sol'),
+    (re.compile(r'^KXXRPD'),       'crypto_threshold_daily_xrp'),
+    (re.compile(r'^KXDOGED'),      'crypto_threshold_daily_doge'),
 ]
 
 
