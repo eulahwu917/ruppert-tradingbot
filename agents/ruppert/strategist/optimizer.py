@@ -76,7 +76,7 @@ def detect_module(ticker: str) -> str:
 def load_trades() -> list:
     trades = []
     patterns = [
-        LOGS_DIR.glob("trades_*.jsonl"),
+        (LOGS_DIR / "trades").glob("trades_*.jsonl"),
         ARCHIVE_DIR.glob("trades_*.jsonl") if ARCHIVE_DIR.exists() else iter([]),
     ]
     for pattern in patterns:
@@ -241,33 +241,51 @@ def analyze_confidence_tiers(trades: list):
     return results
 
 
-def analyze_exit_timing(trades: list):
-    """Returns {avg_hold_hours, avg_pnl, count} for trades with exit_price."""
+def analyze_exit_timing(trades: list, buy_index: dict = None):
+    """
+    Returns {avg_hold_hours, avg_pnl, count} for trades with exit_price.
+
+    Args:
+        trades:     Enriched trades list (all records including buys, exits, settles).
+        buy_index:  Dict of ticker -> buy record, for computing hold time.
+                    If None or a ticker has no buy record, hold time is skipped for that
+                    record but P&L is still counted. Build from buy/open records only.
+    """
+    if buy_index is None:
+        buy_index = {}
     hold_times = []
     pnls = []
     for t in trades:
         if "exit_price" not in t or t["exit_price"] is None:
             continue
-        # Try to compute hold time from entry/exit timestamps
-        entry_ts = t.get("timestamp")
-        exit_ts = t.get("exit_timestamp")
-        if entry_ts and exit_ts:
+
+        # exit_ts: the timestamp on the exit/settle record IS the exit time
+        exit_ts_str = t.get("timestamp")
+        ticker = t.get("ticker", "")
+
+        # entry_ts: comes from the matching buy record, looked up by ticker
+        buy_rec = buy_index.get(ticker)
+        entry_ts_str = buy_rec.get("timestamp") if buy_rec else None
+
+        if entry_ts_str and exit_ts_str:
             try:
-                entry_dt = datetime.fromisoformat(str(entry_ts)[:19])
-                exit_dt = datetime.fromisoformat(str(exit_ts)[:19])
+                entry_dt = datetime.fromisoformat(str(entry_ts_str)[:19])
+                exit_dt = datetime.fromisoformat(str(exit_ts_str)[:19])
                 hold_hours = (exit_dt - entry_dt).total_seconds() / 3600
                 hold_times.append(hold_hours)
             except (ValueError, TypeError):
                 pass
-        # P&L
+
+        # P&L: pnl field is present and correct on exit/settle records
         pnl = t.get("pnl") if t.get("pnl") is not None else t.get("realized_pnl")
         if pnl is not None:
             try:
                 pnls.append(float(pnl))
             except (ValueError, TypeError):
                 pass
+
     return {
-        "count": len(hold_times),
+        "count": len(pnls),          # KEY FIX: was len(hold_times) — now len(pnls)
         "avg_hold_hours": statistics.mean(hold_times) if hold_times else None,
         "avg_pnl": statistics.mean(pnls) if pnls else None,
     }
@@ -305,6 +323,8 @@ def analyze_daily_cap_utilization(trades: list):
     """Returns {avg_daily_dollars, avg_utilization, days_tracked}."""
     daily = defaultdict(float)
     for t in trades:
+        if t.get("action") not in ("buy", "open"):
+            continue
         ts = t.get("timestamp", "")
         size = t.get("size_dollars", 0.0)
         if not ts:
@@ -661,8 +681,16 @@ def main():
 
     print()
 
-    # 3. Exit timing
-    exit_timing = analyze_exit_timing(trades)
+    # Build buy record index keyed by ticker — used by analyze_exit_timing for hold time computation
+    buy_index_for_exits = {}
+    for t in trades:
+        if t.get("action") in ("buy", "open"):
+            ticker = t.get("ticker", "")
+            if ticker and ticker not in buy_index_for_exits:
+                buy_index_for_exits[ticker] = t
+
+    # 3. Exit timing (pass buy index for hold time computation)
+    exit_timing = analyze_exit_timing(trades, buy_index_for_exits)
     print("[3/6] Exit timing:")
     if exit_timing["count"] == 0:
         print("      No trades with exit data (dry-run mode expected).")
