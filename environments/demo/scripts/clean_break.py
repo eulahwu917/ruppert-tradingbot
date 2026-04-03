@@ -71,3 +71,17 @@ for d in clean_deposits:
 
 print()
 print('Done. Clean break complete.')
+
+# ── CB state refresh (DS recommendation) ─────────────────────────────────────
+# After any trade log mutation, the CB's cached global state goes stale.
+# Refresh it now so the CB reflects the true post-cleanup capital.
+try:
+    import sys as _sys
+    _sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+    import agents.ruppert.trader.circuit_breaker as _cb
+    from agents.ruppert.data_scientist.capital import get_capital as _get_capital
+    _cb.update_global_state(_get_capital())
+    print('[CB] Global state refreshed after cleanup.')
+except Exception as _cb_refresh_err:
+    print(f'[CB] State refresh failed (non-fatal): {_cb_refresh_err}')
+# ── End CB state refresh ──────────────────────────────────────────────────────

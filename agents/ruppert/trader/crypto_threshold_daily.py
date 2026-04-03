@@ -834,6 +834,10 @@ def _log_decision(asset: str, window: str, signals: dict, decision: str, reason:
                   market_id: str = None, size_usd: float = None,
                   composite: float = None, P_above: float = None, edge: float = None,
                   confidence: float = None,
+                  model_prob: float = None,
+                  ticker: str = None,
+                  side: str = None,
+                  end_date: str = None,
                   poly_yes_price: float = None,
                   poly_market_title: str = None,
                   poly_volume_24h: float = None,
@@ -848,11 +852,15 @@ def _log_decision(asset: str, window: str, signals: dict, decision: str, reason:
         'ts': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
         'asset': asset,
         'window': window,
+        'ticker': ticker or market_id,
         'market_id': market_id,
+        'side': side,
         'decision': decision,
         'reason': reason,
         'module': ASSET_MODULE_NAMES_1D.get(asset, 'crypto_threshold_daily_btc'),
     }
+    if end_date is not None:
+        entry['end_date'] = end_date
 
     if signals:
         s1 = signals.get('S1', {})
@@ -878,6 +886,8 @@ def _log_decision(asset: str, window: str, signals: dict, decision: str, reason:
         entry['edge'] = edge
     if confidence is not None:
         entry['confidence'] = confidence
+    if model_prob is not None:
+        entry['model_prob'] = model_prob
     if size_usd is not None:
         entry['size_usd'] = size_usd
 

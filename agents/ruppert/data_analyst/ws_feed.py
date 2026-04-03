@@ -394,10 +394,50 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     edge = model_prob - market_prob
     side = 'yes' if edge > 0 else 'no'
 
+    # ── Decision logging helpers ─────────────────────────────────────────────
+    # Import log functions lazily — only needed when a decision is made.
+    def _log_threshold_skip(reason_str):
+        """Log a SKIP decision for threshold_daily (above/below) contracts."""
+        if strike_type in ('greater', 'less'):
+            try:
+                from agents.ruppert.trader.crypto_threshold_daily import _log_decision as _log_td
+                _log_td(
+                    asset=asset, window='ws', signals={}, decision='SKIP', reason=reason_str,
+                    ticker=ticker, side=side, edge=round(edge, 4),
+                    model_prob=round(model_prob, 4), confidence=confidence,
+                )
+            except Exception as _ld_err:
+                logger.debug('[WS-CRYPTO] _log_threshold_skip failed: %s', _ld_err)
+
+    def _log_band_skip(reason_str):
+        """Log a SKIP decision for band_daily (between) contracts."""
+        if strike_type == 'between':
+            try:
+                from agents.ruppert.trader.crypto_band_daily import _log_band_decision as _log_bd
+                _log_bd(
+                    ticker=ticker, series=series,
+                    spot=current_price, band_mid=strike,
+                    sigma=sigma, prob_model=model_prob,
+                    mkt_yes=yes_ask / 100.0,
+                    edge_yes=round(edge, 4) if side == 'yes' else round(-edge, 4),
+                    edge_no=round(-edge, 4) if side == 'yes' else round(edge, 4),
+                    decision='SKIP', skip_reason=reason_str,
+                )
+            except Exception as _ld_err:
+                logger.debug('[WS-CRYPTO] _log_band_skip failed: %s', _ld_err)
+
+    def _log_skip(reason_str):
+        """Dispatch SKIP log to the right module based on strike_type."""
+        if strike_type in ('greater', 'less'):
+            _log_threshold_skip(reason_str)
+        else:
+            _log_band_skip(reason_str)
+    # ── End decision logging helpers ──────────────────────────────────────────
+
     # Check minimum edge threshold
     min_edge = getattr(config, 'CRYPTO_MIN_EDGE_THRESHOLD', 0.12)
     if abs(edge) < min_edge:
-        return
+        return  # sub-threshold: not worth logging (very frequent, noisy)
 
     # Check if already traded
     traded_tickers = load_traded_tickers()
@@ -413,6 +453,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
 
     if current_exposure >= daily_cap:
         logger.debug(f"Crypto daily cap reached: ${current_exposure:.2f} >= ${daily_cap:.2f}")
+        _log_skip('daily_cap_reached')
         return
 
     # ── Circuit breaker gate (per-module) ────────────────────────────────────
@@ -435,6 +476,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
                     '[WS-CRYPTO] CB TRIPPED: %d consecutive losses for %s (threshold=%d) — entry blocked',
                     _cb_losses, _ws_module, _cb_n
                 )
+                _log_skip('circuit_breaker')
                 return
     except Exception as _cb_err:
         logger.warning('[WS-CRYPTO] CB gate failed for %s: %s', _ws_module, _cb_err)
@@ -475,6 +517,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     if not decision['enter']:
         reason = decision['reason']
         logger.debug(f"[WS Crypto] {ticker}: entry blocked — {reason}")
+        _log_skip(f'strategy_gate:{reason}')
         return
 
     # Calculate position size
@@ -487,6 +530,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     size = min(size, daily_cap - current_exposure, 100.0)  # $100 max per trade
 
     if size < 5:
+        _log_skip('size_below_minimum')
         return
 
     # Execute trade
@@ -541,6 +585,35 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
                                       module=opp.get('module', 'crypto'), title=opp.get('title', ''))
     except Exception as _pt_err:
         logger.warning('[WS-CRYPTO] position_tracker.add_position failed: %s', _pt_err)
+
+    # ── Log entry decision ──────────────────────────────────────────────────
+    try:
+        if strike_type in ('greater', 'less'):
+            from agents.ruppert.trader.crypto_threshold_daily import _log_decision as _log_td
+            _log_td(
+                asset=asset, window='ws', signals={}, decision='ENTER',
+                ticker=ticker, side=side, edge=round(edge, 4),
+                model_prob=round(model_prob, 4), confidence=confidence,
+                size_usd=round(size, 2),
+                reason='ws_entry',
+            )
+        else:
+            from agents.ruppert.trader.crypto_band_daily import _log_band_decision as _log_bd
+            _log_bd(
+                ticker=ticker, series=series,
+                spot=current_price, band_mid=strike,
+                sigma=sigma, prob_model=model_prob,
+                mkt_yes=yes_ask / 100.0,
+                edge_yes=round(edge, 4) if side == 'yes' else round(model_prob - yes_ask / 100.0, 4),
+                edge_no=round(1.0 - model_prob - (100 - yes_ask) / 100.0, 4) if side == 'yes' else round(edge, 4),
+                decision='ENTER',
+                side=side, edge=round(edge, 4), confidence=confidence,
+                size_usd=round(size, 2),
+                hours_to_settlement=hours_left,
+            )
+    except Exception as _le_err:
+        logger.debug('[WS-CRYPTO] entry decision log failed: %s', _le_err)
+    # ── End entry decision log ────────────────────────────────────────────────
 
 
 # ─────────────────── Background Task Wrappers (non-blocking) ─────────────────

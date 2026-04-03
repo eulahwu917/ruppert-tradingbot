@@ -182,3 +182,15 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+    # ── CB state refresh ──────────────────────────────────────────────────────
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
+        import agents.ruppert.trader.circuit_breaker as _cb
+        from agents.ruppert.data_scientist.capital import get_capital as _get_capital
+        _cb.update_global_state(_get_capital())
+        print('[CB] Global state refreshed after taxonomy migration.')
+    except Exception as _cb_refresh_err:
+        print(f'[CB] State refresh failed (non-fatal): {_cb_refresh_err}')
+    # ── End CB state refresh ──────────────────────────────────────────────────
