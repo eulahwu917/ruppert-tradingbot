@@ -6,6 +6,7 @@ When a tracked position's bid hits the exit threshold, exit immediately.
 Called by ws_feed.py on every ticker tick for tracked positions.
 """
 
+import asyncio
 import json
 import logging
 import re
@@ -82,6 +83,7 @@ _tracked = {}
 # Dedup guard: tracks (ticker, side) keys currently in the middle of execute_exit()
 # Prevents WS duplicate events from firing two exits for the same position.
 _exits_in_flight: set[tuple] = set()
+_exits_lock = asyncio.Lock()
 
 # Post-exit cooldown guard: prevents sequential re-fires after position removal.
 # Maps (ticker, side) -> unix timestamp of completed exit.
@@ -716,25 +718,27 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
     ticker, side = key
 
     # Dedup guard: if this (ticker, side) exit is already in-flight, skip.
-    # Prevents WS duplicate events from firing two exits for the same position.
-    # NOTE: does NOT use contracts as part of the key — a single position per
-    # (ticker, side) key is the invariant enforced by add_position(). Scale-in
-    # is not possible for the same key; Cases 2 & 3 had distinct keys before
-    # this guard existed.
-    if key in _exits_in_flight:
-        logger.warning(
-            '[PositionTracker] Dedup guard: exit for %s %s already in-flight — skipping duplicate',
-            ticker, side
-        )
-        return
+    # Atomic check-and-set under lock (ISSUE-002).
+    async with _exits_lock:
+        if key in _exits_in_flight:
+            logger.warning(
+                '[PositionTracker] Dedup guard: exit for %s %s already in-flight — skipping duplicate',
+                ticker, side
+            )
+            return
+        _exits_in_flight.add(key)
 
-    _exits_in_flight.add(key)
     try:
-        from agents.ruppert.data_analyst.kalshi_client import KalshiClient
+        # ── Snapshot position data before any await (ISSUE-107) ──────────────
+        # Prevents stale reads if another task modifies _tracked during an await.
+        entry_price  = pos['entry_price']
+        quantity     = pos['quantity']
+        module       = pos.get('module', '')
+        title        = pos.get('title', '')
+        size_dollars = pos.get('size_dollars')
+        # ── End snapshot ─────────────────────────────────────────────────────
 
-        entry_price = pos['entry_price']
-        quantity = pos['quantity']
-        module = pos.get('module', '')
+        from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 
         # ── Settlement Loss Path ──────────────────────────────────────────────
         # When settle_loss=True: YES won, our NO is worthless.
@@ -744,14 +748,14 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
             # NO-side loss: use size_dollars as the true cost (entry_price is unreliable
             # due to the NO-side flip in add_position — 15m passes correct NO price but
             # flip converts e.g. 3c → 97c, inflating the calculated loss).
-            pnl = -pos.get('size_dollars', entry_price * quantity / 100)
+            pnl = -(size_dollars if size_dollars is not None else entry_price * quantity / 100)
             log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
             exit_record = {
                 'trade_id': str(uuid.uuid4()),
                 'timestamp': datetime.now().isoformat(),
                 'date': str(date.today()),
                 'ticker': ticker,
-                'title': pos.get('title', ''),
+                'title': title,
                 'side': side,
                 'action': 'exit',
                 'action_detail': f'SETTLE_LOSS yes_won @ 0c',
@@ -806,6 +810,23 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
                 order_result = client.sell_position(ticker, side, current_bid, quantity)
             except Exception as e:
                 logger.error('[WS Exit] Execute failed for %s: %s', ticker, e)
+                # Track consecutive failures (ISSUE-003) — write to live pos dict
+                pos['_exit_failures'] = pos.get('_exit_failures', 0) + 1
+                _persist()
+                if pos['_exit_failures'] >= 3:
+                    # 3 consecutive exit failures — abandon position and alert.
+                    # No time gate: a brief API blip can trigger this. Accepted tradeoff.
+                    logger.error(
+                        '[WS Exit] %s %s: 3 consecutive exit failures — abandoning position',
+                        ticker, side
+                    )
+                    try:
+                        from agents.ruppert.trader.utils import push_alert
+                        push_alert('error', f'EXIT ABANDONED after 3 failures: {ticker} {side.upper()}', ticker=ticker)
+                    except Exception as _alert_err:
+                        logger.error('[WS Exit] push_alert failed on abandonment: %s', _alert_err)
+                    remove_position(ticker, side)
+                    _recently_exited[key] = time.time()
                 return
 
         # Log the exit trade — P0-1 fix: write to logs/trades/ not logs/
@@ -820,7 +841,7 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
             'timestamp': datetime.now().isoformat(),
             'date': str(date.today()),
             'ticker': ticker,
-            'title': pos.get('title', ''),
+            'title': title,
             'side': side,
             'action': 'exit',
             'action_detail': f'WS_EXIT {rule} @ {action_detail_price}c (yes_bid={current_bid}c)',
