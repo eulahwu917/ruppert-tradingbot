@@ -369,6 +369,7 @@ def should_enter(
                 'reason': 'global_exposure_cap_reached (70% of capital)'}
 
     # --- Per-module daily cap ---
+    _module_cap_missing = False  # ISSUE-104: init before if block (linter hygiene)
     if module is not None:
         _module_key = module.upper() + '_DAILY_CAP_PCT'
         _module_cap = getattr(config, _module_key, None)

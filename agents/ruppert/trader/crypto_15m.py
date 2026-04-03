@@ -70,10 +70,41 @@ ASSET_MODULE_NAMES = {
 _ALL_CRYPTO_15M_MODULES = list(ASSET_MODULE_NAMES.values())
 
 # Signal weights — must sum to 1.0 (config-driven)
-W_TFI  = getattr(config, 'CRYPTO_15M_DIR_W_TFI',  0.42)
-W_OBI  = getattr(config, 'CRYPTO_15M_DIR_W_OBI',  0.25)
-W_MACD = getattr(config, 'CRYPTO_15M_DIR_W_MACD', 0.15)
-W_OI   = getattr(config, 'CRYPTO_15M_DIR_W_OI',   0.18)
+# ISSUE-069: named defaults so we can detect MISSING keys via hasattr()
+_W_TFI_DEFAULT  = 0.42
+_W_OBI_DEFAULT  = 0.25
+_W_MACD_DEFAULT = 0.15
+_W_OI_DEFAULT   = 0.18
+
+W_TFI  = getattr(config, 'CRYPTO_15M_DIR_W_TFI',  _W_TFI_DEFAULT)
+W_OBI  = getattr(config, 'CRYPTO_15M_DIR_W_OBI',  _W_OBI_DEFAULT)
+W_MACD = getattr(config, 'CRYPTO_15M_DIR_W_MACD', _W_MACD_DEFAULT)
+W_OI   = getattr(config, 'CRYPTO_15M_DIR_W_OI',   _W_OI_DEFAULT)
+
+# ISSUE-069: warn if any weight key is MISSING from config (hasattr detects absence, not value equality)
+_missing_weight_keys = [
+    key for key, present in [
+        ('CRYPTO_15M_DIR_W_TFI',  hasattr(config, 'CRYPTO_15M_DIR_W_TFI')),
+        ('CRYPTO_15M_DIR_W_OBI',  hasattr(config, 'CRYPTO_15M_DIR_W_OBI')),
+        ('CRYPTO_15M_DIR_W_MACD', hasattr(config, 'CRYPTO_15M_DIR_W_MACD')),
+        ('CRYPTO_15M_DIR_W_OI',   hasattr(config, 'CRYPTO_15M_DIR_W_OI')),
+    ] if not present
+]
+if _missing_weight_keys:
+    logger.warning(
+        'crypto_15m: signal weight config keys missing: %s. '
+        'Using fallback defaults: TFI=%.2f OBI=%.2f MACD=%.2f OI=%.2f',
+        ', '.join(_missing_weight_keys),
+        W_TFI, W_OBI, W_MACD, W_OI,
+    )
+
+# ISSUE-114: raise ValueError (not assert — immune to -O flag) if weights don't sum to 1.0
+_weights_sum = W_TFI + W_OBI + W_MACD + W_OI
+if abs(_weights_sum - 1.0) >= 1e-6:
+    raise ValueError(
+        f"CRYPTO_15M signal weights must sum to 1.0, got {_weights_sum:.6f} "
+        f"(TFI={W_TFI}, OBI={W_OBI}, MACD={W_MACD}, OI={W_OI})"
+    )
 
 from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.strategist.strategy import should_enter
@@ -408,7 +439,7 @@ def fetch_oi_conviction(symbol: str) -> dict:
     prev_oi = _cache_get(prev_oi_key, ttl=600)  # 10 min TTL for previous snapshot
     _cache_set(prev_oi_key, curr_oi)
 
-    if prev_oi is _CACHE_MISS or prev_oi == 0:
+    if prev_oi is _CACHE_MISS or prev_oi < 1e-6:  # ISSUE-129: guard near-zero prev_oi
         return {'oi_z': 0.0, 'stale': False, 'raw': 0.0, 'ts': last_ts}
 
     oi_delta_pct = (curr_oi - prev_oi) / prev_oi
@@ -1178,6 +1209,9 @@ def evaluate_crypto_15m_entry(
     global _daily_wager, _daily_wager_date, _window_exposure
 
     _skip_reason = None
+    # ISSUE-105: Step 1 — declare before lock; will be set inside lock if trade proceeds
+    actual_spend = None
+    contracts    = None
 
     with _window_lock:
 
@@ -1230,9 +1264,17 @@ def evaluate_crypto_15m_entry(
                     position_usd = trimmed
 
         if not _skip_reason:
-            # Reserve capacity atomically (release on order failure below)
-            _window_exposure[win_key] = _window_exposure.get(win_key, 0.0) + position_usd
-            _daily_wager += position_usd
+            # ISSUE-105: compute contracts INSIDE lock using final post-trim position_usd
+            # Step 2: Compute contracts from FINAL post-trim position_usd
+            _contracts = max(1, int(position_usd / (entry_price / 100.0)))
+            # Step 3: Compute actual_spend = contracts × entry_price/100
+            _actual_spend = _contracts * (entry_price / 100.0)
+            # Step 4: Reserve actual_spend (not position_usd)
+            _window_exposure[win_key] = _window_exposure.get(win_key, 0.0) + _actual_spend
+            _daily_wager += _actual_spend
+            # Step 5: Expose to enclosing scope for rollback and log record
+            actual_spend = _actual_spend
+            contracts = _contracts
 
     # --- Outside lock ---
     if _skip_reason:
@@ -1242,7 +1284,7 @@ def evaluate_crypto_15m_entry(
         return
 
     # ── Execute ──
-    contracts = max(1, int(position_usd / (entry_price / 100.0)))
+    # ISSUE-105: contracts and actual_spend set inside lock above; do NOT recompute here
 
     print(f"  [15m Crypto] {ticker} {direction.upper()} | P={P_final:.2f} edge={edge:+.1%} | ${position_usd:.2f}")
 
@@ -1259,11 +1301,11 @@ def evaluate_crypto_15m_entry(
             print(f"  [15m Crypto] Order failed: {e}")
             _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
                            signals, kalshi_info, 'SKIP', f'ORDER_FAILED:{e}',
-                           edge, entry_price, position_usd)
-            # Release reservation on order failure
+                           edge, entry_price, actual_spend)
+            # ISSUE-105: Release reservation on order failure — use actual_spend
             with _window_lock:
-                _window_exposure[win_key] = max(0.0, _window_exposure.get(win_key, 0.0) - position_usd)
-                _daily_wager = max(0.0, _daily_wager - position_usd)
+                _window_exposure[win_key] = max(0.0, _window_exposure.get(win_key, 0.0) - actual_spend)
+                _daily_wager = max(0.0, _daily_wager - actual_spend)
             return
 
     # ── Log trade ──
@@ -1283,7 +1325,7 @@ def evaluate_crypto_15m_entry(
         'hours_to_settlement': max(0, (900 - elapsed_secs) / 3600),
         'action': 'buy',
         'contracts': contracts,
-        'size_dollars': round(position_usd, 2),
+        'size_dollars': round(actual_spend, 2),  # ISSUE-105: use actual_spend (post-floor rounding)
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'date': str(date.today()),
         'scan_price': entry_price,
@@ -1296,7 +1338,7 @@ def evaluate_crypto_15m_entry(
         'kalshi_spread_cents':   yes_ask - yes_bid,               # spread in cents at entry
     }
 
-    log_trade(opp, position_usd, contracts, order_result)
+    log_trade(opp, actual_spend, contracts, order_result)  # ISSUE-105: use actual_spend
     log_activity(f'[15M-CRYPTO] Entered {ticker} {direction.upper()} @ {entry_price}c | edge={edge:+.1%} P={P_final:.2f}')
     push_alert('trade', f'15M Crypto: {ticker} {direction.upper()} @ {entry_price}c', ticker=ticker)
 
