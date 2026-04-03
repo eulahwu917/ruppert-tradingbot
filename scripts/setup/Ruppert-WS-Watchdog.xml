@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-16"?>
+
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+
+  <RegistrationInfo>
+
+    <Date>2026-03-30T13:26:37</Date>
+
+    <Author>DESKTOP-SRE91\David Wu</Author>
+
+    <URI>\Ruppert-WS-Watchdog</URI>
+
+  </RegistrationInfo>
+
+  <Principals>
+
+    <Principal id="Author">
+
+      <UserId>S-1-5-21-2705398086-981554346-795053559-1005</UserId>
+
+      <LogonType>InteractiveToken</LogonType>
+
+      <RunLevel>HighestAvailable</RunLevel>
+
+    </Principal>
+
+  </Principals>
+
+  <Settings>
+
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+
+    <RestartOnFailure>
+
+      <Count>10</Count>
+
+      <Interval>PT2M</Interval>
+
+    </RestartOnFailure>
+
+    <IdleSettings>
+
+      <Duration>PT10M</Duration>
+
+      <WaitTimeout>PT1H</WaitTimeout>
+
+      <StopOnIdleEnd>true</StopOnIdleEnd>
+
+      <RestartOnIdle>false</RestartOnIdle>
+
+    </IdleSettings>
+
+  </Settings>
+
+  <Triggers>
+
+    <BootTrigger>
+
+      <StartBoundary>2026-03-30T13:26:00</StartBoundary>
+
+    </BootTrigger>
+
+  </Triggers>
+
+  <Actions Context="Author">
+
+    <Exec>
+
+      <Command>"C:\Users\David Wu\AppData\Local\Programs\Python\Python312\python.exe"</Command>
+
+      <Arguments>-m scripts.ws_feed_watchdog --env demo</Arguments>
+
+      <WorkingDirectory>C:\Users\David Wu\.openclaw\workspace</WorkingDirectory>
+
+    </Exec>
+
+  </Actions>
+
+</Task>
