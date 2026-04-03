@@ -39,6 +39,13 @@ from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.data_analyst.polymarket_client import get_crypto_daily_consensus
 from agents.ruppert.trader import circuit_breaker as _circuit_breaker
 
+# ISSUE-053: portalocker for cross-process daily cap race protection
+try:
+    import portalocker as _portalocker
+    _HAS_PORTALOCKER = True
+except ImportError:
+    _HAS_PORTALOCKER = False
+
 logger = logging.getLogger(__name__)
 
 # ─────────────────────────── Constants ────────────────────────────────────────
@@ -486,16 +493,35 @@ def compute_s4_oi_regime(asset: str, current_oi: float, s1_regime: str = 'neutra
 
 def compute_s5_polymarket(asset: str) -> dict:
     """
-    Signal 5 — Polymarket consensus directional probability.
+    Signal 5 — Polymarket consensus directional probability (daily scale).
     Returns {'yes_price', 'raw_score', 'available'}.
+
+    ISSUE-057: uses get_crypto_daily_consensus (end-of-day above/below markets),
+    not get_crypto_consensus (15min/1hr short-window markets).
+    ISSUE-089: validates yes_price is near-the-money [0.25, 0.75] before using
+    as directional signal — far-from-money yes_price reflects strike distance, not direction.
     """
     try:
-        from agents.ruppert.data_analyst.polymarket_client import get_crypto_consensus
-        result = get_crypto_consensus(asset)
+        # ISSUE-057: use daily consensus (already imported at module top line 39)
+        # Removed local import of get_crypto_consensus — it was the wrong function for daily trades
+        result = get_crypto_daily_consensus(asset)
         if result is None:
             return {'yes_price': None, 'raw_score': 0.0, 'available': False}
 
-        yes_price = result['yes_price']  # 0–1 probability of UP
+        # ISSUE-089: guard against None yes_price before bounds comparison
+        yes_price = result.get('yes_price')
+        if yes_price is None:
+            return {'yes_price': None, 'raw_score': 0.0, 'available': False, 'reason': 'poly_yes_price_missing'}
+
+        # ISSUE-089: only use signal when market is near-the-money [0.25, 0.75].
+        # Far-from-money yes_price reflects strike distance vs spot, not bullish/bearish consensus.
+        if yes_price < 0.25 or yes_price > 0.75:
+            logger.info(
+                'compute_s5_polymarket(%s): yes_price=%.3f out of [0.25, 0.75] — suppressed (strike_far_from_money)',
+                asset, yes_price
+            )
+            return {'yes_price': None, 'raw_score': 0.0, 'available': False, 'reason': 'poly_strike_far_from_money'}
+
         # Map [0, 1] to [-1, 1]: 0.5 → 0.0 (neutral), 0.7 → 0.4, 0.3 → -0.4
         raw_score = (yes_price - 0.5) * 2.0
         return {
@@ -981,6 +1007,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         logger.warning('evaluate_crypto_1d_entry: get_capital() failed: %s — using fallback', e)
 
     _asset_module = ASSET_MODULE_NAMES_1D.get(asset, 'crypto_threshold_daily_btc')
+
     try:
         asset_daily_deployed = get_daily_exposure(module=_asset_module, asset=asset)
     except TypeError:
@@ -1143,6 +1170,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         'side':        side,
         'action':      'buy',
         'yes_price':   best.get('yes_ask'),
+        'no_ask':      best.get('no_ask'),   # ISSUE-017: explicit no_ask for correct NO-side fill price
         'market_prob': (best.get('yes_ask', 50)) / 100.0,
         'edge':        best.get('edge'),
         'confidence':  composite['confidence'],
@@ -1165,6 +1193,14 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
     }
     trade_opp['strategy_size'] = actual_cost
 
+    # ISSUE-053: acquire cross-process cap lock around execute_opportunity.
+    # Prevents race where BTC+ETH both read cap as 0 before either logs a trade.
+    _cap_lock_path = _LOGS_DIR / 'crypto_1d_cap.lock'
+    if not _HAS_PORTALOCKER:
+        logger.warning('[crypto_threshold_daily] portalocker unavailable — cap race not protected for %s', asset)
+    _cap_lock_f = open(_cap_lock_path, 'w') if _HAS_PORTALOCKER else None
+    if _cap_lock_f:
+        _portalocker.lock(_cap_lock_f, _portalocker.LOCK_EX)
     try:
         from agents.ruppert.trader.trader import Trader
         dry_run = config.DRY_RUN
@@ -1172,6 +1208,14 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
     except Exception as e:
         logger.error('evaluate_crypto_1d_entry: execute_opportunity failed: %s', e)
         result = None
+    finally:
+        # Release cap lock after execute (trade log written inside execute_opportunity)
+        if _cap_lock_f:
+            try:
+                _portalocker.unlock(_cap_lock_f)
+                _cap_lock_f.close()
+            except Exception:
+                pass
 
     # 12. Post-trade: write OI snapshot
     cache_oi_snapshot(asset, current_oi, write=True)

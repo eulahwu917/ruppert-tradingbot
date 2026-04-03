@@ -34,6 +34,13 @@ from agents.ruppert.data_analyst.polymarket_client import get_crypto_daily_conse
 from agents.ruppert.env_config import get_paths as _get_bd_paths
 import config
 
+# ISSUE-053: portalocker for cross-process daily cap race protection
+try:
+    import portalocker as _portalocker
+    _HAS_PORTALOCKER = True
+except ImportError:
+    _HAS_PORTALOCKER = False
+
 logger = logging.getLogger(__name__)
 
 _BD_LOGS_DIR = _get_bd_paths()['logs']
@@ -112,6 +119,198 @@ def _log_band_decision(
             f.write(json.dumps(entry) + '\n')
     except Exception as e:
         print(f'  [BandDecision] log failed for {ticker}: {e}')
+
+
+def _execute_band_trades(new_crypto, trader, total_capital, crypto_daily_cap,
+                         deployed_today, open_position_value, band_poly_cache, traded_tickers):
+    """
+    ISSUE-053: Extracted helper for cap-check + circuit-breaker + trade-execution loop.
+    Called inside a portalocker cap lock so BTC and ETH evaluations are mutually exclusive.
+
+    Returns list of executed opp dicts.
+    """
+    executed = []
+
+    # Read deployed amount from disk (inside lock — this is the race-critical read)
+    try:
+        from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_daily_exp
+        _crypto_deployed_this_cycle = sum(
+            _get_daily_exp(module=m)
+            for m in ('crypto_band_daily_btc', 'crypto_band_daily_eth',
+                      'crypto_band_daily_sol', 'crypto_band_daily_xrp',
+                      'crypto_band_daily_doge')
+        )
+    except Exception:
+        _crypto_deployed_this_cycle = 0.0
+
+    if _crypto_deployed_this_cycle >= crypto_daily_cap:
+        print(f"  [DailyCap] Crypto daily cap already reached: ${_crypto_deployed_this_cycle:.2f} deployed "
+              f"(cap ${crypto_daily_cap:.0f}). Skipping scan.")
+        return []
+
+    try:
+        _api_exposure = max(0.0, total_capital - get_buying_power())
+        _open_exposure = max(_api_exposure, open_position_value)
+    except Exception:
+        _open_exposure = open_position_value
+
+    # ── Daily Band Circuit Breaker gate ──────────────────────────────────────
+    _cb_1h_n        = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N',
+                              getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3))
+    _cb_1h_advisory = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_ADVISORY',
+                              getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_ADVISORY', False))
+    try:
+        from agents.ruppert.trader import circuit_breaker as _cb_mod
+        _cb_1h_losses = max(
+            _cb_mod.get_consecutive_losses('crypto_band_daily_btc'),
+            _cb_mod.get_consecutive_losses('crypto_band_daily_eth'),
+        )
+    except Exception as _cb_read_err:
+        logger.warning('[crypto_band_daily] CB read failed, defaulting to 0: %s', _cb_read_err)
+        _cb_1h_losses = 0
+
+    if _cb_1h_losses >= _cb_1h_n:
+        if _cb_1h_advisory:
+            print(f'  [daily CB] Advisory: {_cb_1h_losses} consecutive losses '
+                  f'(threshold={_cb_1h_n}). Continuing in advisory mode.')
+        else:
+            print(f'  [daily CB] CIRCUIT BREAKER TRIPPED: {_cb_1h_losses} consecutive losses '
+                  f'(threshold={_cb_1h_n}). Halting crypto_band_daily for today.')
+            return []
+
+    _deployed_today = deployed_today
+    for t in new_crypto[:3]:
+        if not check_open_exposure(total_capital, _open_exposure):
+            print(f"  [GlobalCap] STOP: open exposure ${_open_exposure:.2f} >= 70% of capital")
+            break
+
+        if _crypto_deployed_this_cycle >= crypto_daily_cap:
+            print(f"  [DailyCap] STOP: crypto budget ${crypto_daily_cap:.0f} exhausted")
+            break
+
+        _t_module = t.get('module', 'crypto_band_daily_btc')
+        signal = {
+            'edge': t['edge'],
+            'win_prob': t['prob_model'],
+            'confidence': t.get('confidence', t['edge']),
+            'hours_to_settlement': t.get('hours_to_settlement', 24.0),
+            'module': _t_module,
+            'vol_ratio': 1.0,
+            'side': t['side'],
+            'yes_ask': t['yes_ask'],
+            'yes_bid': t.get('yes_bid', t['yes_ask']),
+            'open_position_value': _open_exposure,
+        }
+        decision = should_enter(
+            signal, total_capital, _deployed_today,
+            module=_t_module,
+            module_deployed_pct=_crypto_deployed_this_cycle / total_capital if total_capital > 0 else 0.0,
+            traded_tickers=traded_tickers,
+        )
+        if decision.get('warning'):
+            log_activity(f"  [Strategy] WARNING: {decision['warning']}")
+        if not decision['enter']:
+            print(f"  [Strategy] SKIP {t['ticker']}: {decision['reason']}")
+            continue
+        if _crypto_deployed_this_cycle + decision['size'] > crypto_daily_cap:
+            print(f"  [DailyCap] SKIP {t['ticker']}: would exceed crypto daily cap")
+            continue
+
+        size = decision['size']
+        best_price = t['price']
+        contracts  = max(1, int(size / best_price * 100))
+        actual_cost = round(contracts * best_price / 100, 2)
+
+        _band_asset = 'BTC' if 'BTC' in t.get('series', '') else 'ETH'
+        _bp_data = band_poly_cache.get(_band_asset, {})
+
+        opp = {
+            'ticker': t['ticker'], 'title': t['title'], 'side': t['side'],
+            'action': 'buy', 'yes_price': t['price'] if t['side'] == 'yes' else 100 - t['price'],
+            'no_ask': t.get('no_ask'),               # ISSUE-017: explicit no_ask (robustness)
+            'market_prob': t['price'] / 100, 'noaa_prob': None,
+            'edge': t['edge'], 'confidence': t.get('confidence', t['edge']),
+            'model_prob':   t['prob_model'],
+            'model_source': 'log_normal_band',
+            'hours_to_settlement': t.get('hours_to_settlement', 18.0),
+            'size_dollars': actual_cost,
+            'contracts': contracts, 'source': 'crypto',
+            'scan_price': t['price'],
+            'fill_price': t['price'],
+            'scan_contracts': contracts,
+            'fill_contracts': contracts,
+            'note': t['note'],
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'date': str(date.today()),
+            'poly_daily_yes_price':    _bp_data.get('yes_price'),
+            'poly_daily_market_title': _bp_data.get('market_title'),
+            'poly_daily_volume_24h':   _bp_data.get('volume_24h'),
+            'poly_daily_fetched_at':   _bp_data.get('fetched_at'),
+        }
+        opp['strategy_size'] = size
+        opp['module'] = _t_module
+        result = trader.execute_opportunity(opp)
+        if not result:
+            print(f"  [Crypto] execute_opportunity failed for {t['ticker']} — skipping accounting")
+            continue
+
+        try:
+            from brier_tracker import log_prediction
+            _brier_prob_band = t['prob_model'] if t['side'] == 'yes' else (1.0 - t['prob_model'])
+            log_prediction(
+                domain='crypto_band_daily',
+                ticker=t['ticker'],
+                predicted_prob=_brier_prob_band,
+                market_price=t['price'] / 100,
+                edge=t['edge'],
+                side=t['side'],
+                extra={
+                    'series':       t.get('series'),
+                    'prob_model':   t['prob_model'],
+                    'model_source': 'log_normal_band',
+                    'module':       t.get('module'),
+                },
+            )
+        except Exception:
+            pass
+
+        _log_band_decision(
+            ticker=t['ticker'], series=t.get('series', ''),
+            spot=t.get('spot'), band_mid=t.get('band_mid'),
+            sigma=t.get('sigma'),
+            prob_model=t['prob_model'],
+            mkt_yes=t['yes_ask'] / 100,
+            edge_yes=t.get('edge_yes', 0.0),
+            edge_no=t.get('edge_no', 0.0),
+            decision='ENTER',
+            side=t['side'],
+            edge=t['edge'],
+            confidence=t.get('confidence'),
+            size_usd=actual_cost,
+            hours_to_settlement=t.get('hours_to_settlement'),
+            poly_daily_yes_price=_bp_data.get('yes_price'),
+            poly_daily_market_title=_bp_data.get('market_title'),
+            poly_daily_fetched_at=_bp_data.get('fetched_at'),
+        )
+        try:
+            from baselines import log_uniform_sizing
+            log_uniform_sizing(
+                ticker=t['ticker'],
+                domain='crypto',
+                actual_action=t['side'],
+                actual_price=t['price'] / 100,
+                actual_size=actual_cost,
+            )
+        except Exception:
+            pass
+
+        traded_tickers.add(t['ticker'])
+        _crypto_deployed_this_cycle += actual_cost
+        _open_exposure += actual_cost
+        _deployed_today += actual_cost
+        executed.append(opp)
+
+    return executed
 
 
 def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open_position_value=0.0):
@@ -212,10 +411,11 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                         mins_left = (ct - datetime.now(timezone.utc)).total_seconds() / 60
                         if mins_left < 120:
                             continue
-                        # DS-SETTLE-AUDIT-2026-03-29: skip markets expiring today or already closed
-                        from datetime import date as _date
-                        if ct.date() <= _date.today():
-                            log_activity(f"  [Crypto] Skipping {ticker}: expires today or already closed")
+                        # ISSUE-016: only skip markets whose close_time has already passed.
+                        # Previously skipped all same-day contracts (ct.date() <= today),
+                        # which blocked valid band contracts settling at 21:00 UTC.
+                        if ct <= datetime.now(timezone.utc):
+                            log_activity(f"  [Crypto] Skipping {ticker}: already closed ({ct.isoformat()})")
                             continue
                     except Exception:
                         pass
@@ -284,6 +484,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                     'ticker': ticker, 'title': m.get('title', ticker),
                     'side': best_action, 'price': best_price,
                     'yes_ask': ya, 'yes_bid': m.get('yes_bid') or ya,
+                    'no_ask': m.get('no_ask'),   # ISSUE-017: explicit no_ask for forward-looking robustness
                     'prob_model': prob_model,
                     'confidence': _crypto_confidence,
                     'hours_to_settlement': _hours_left,
@@ -333,190 +534,35 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
             _deployed_today = 0.0
 
         _crypto_daily_cap = _total_capital * getattr(config, 'CRYPTO_DAILY_CAP_PCT', 0.07)
-        try:
-            from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_daily_exp
-            # Sum deployed across all per-asset band modules (formerly 'crypto_1h_band')
-            _crypto_deployed_this_cycle = sum(
-                _get_daily_exp(module=m)
-                for m in ('crypto_band_daily_btc', 'crypto_band_daily_eth',
-                          'crypto_band_daily_sol', 'crypto_band_daily_xrp',
-                          'crypto_band_daily_doge')
-            )
-        except Exception:
-            _crypto_deployed_this_cycle = 0.0
 
-        if _crypto_deployed_this_cycle >= _crypto_daily_cap:
-            print(f"  [DailyCap] Crypto daily cap already reached: ${_crypto_deployed_this_cycle:.2f} deployed "
-                  f"(cap ${_crypto_daily_cap:.0f}). Skipping scan.")
-            return []
+        # ISSUE-053: acquire cross-process cap lock before disk read of deployed amount.
+        # Prevents race where concurrent asset evals both pass cap before either logs a trade.
+        _cap_lock_path = _BD_LOGS_DIR / 'crypto_1d_cap.lock'
+        if not _HAS_PORTALOCKER:
+            print('[crypto_band_daily] portalocker unavailable — cap race not protected')
+        _cap_lock_f = open(_cap_lock_path, 'w') if _HAS_PORTALOCKER else None
+        if _cap_lock_f:
+            _portalocker.lock(_cap_lock_f, _portalocker.LOCK_EX)
 
         try:
-            _api_exposure = max(0.0, _total_capital - get_buying_power())
-            _open_exposure = max(_api_exposure, open_position_value)
-        except Exception:
-            _open_exposure = open_position_value
-
-        # ── Daily Band Circuit Breaker gate ───────────────────────────────────
-        _cb_1h_n        = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N',
-                                  getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3))
-        _cb_1h_advisory = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_ADVISORY',
-                                  getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_ADVISORY', False))
-        try:
-            from agents.ruppert.trader import circuit_breaker as _cb_mod
-            _cb_1h_losses = max(
-                _cb_mod.get_consecutive_losses('crypto_band_daily_btc'),
-                _cb_mod.get_consecutive_losses('crypto_band_daily_eth'),
-            )
-        except Exception as _cb_read_err:
-            logger.warning('[crypto_band_daily] CB read failed, defaulting to 0: %s', _cb_read_err)
-            _cb_1h_losses = 0
-
-        if _cb_1h_losses >= _cb_1h_n:
-            if _cb_1h_advisory:
-                print(f'  [daily CB] Advisory: {_cb_1h_losses} consecutive losses '
-                      f'(threshold={_cb_1h_n}). Continuing in advisory mode.')
-            else:
-                print(f'  [daily CB] CIRCUIT BREAKER TRIPPED: {_cb_1h_losses} consecutive losses '
-                      f'(threshold={_cb_1h_n}). Halting crypto_band_daily for today.')
-                return []
-
-        trader = Trader(dry_run=dry_run)
-        for t in new_crypto[:3]:
-            if not check_open_exposure(_total_capital, _open_exposure):
-                print(f"  [GlobalCap] STOP: open exposure ${_open_exposure:.2f} >= 70% of capital")
-                break
-
-            if _crypto_deployed_this_cycle >= _crypto_daily_cap:
-                print(f"  [DailyCap] STOP: crypto budget ${_crypto_daily_cap:.0f} exhausted")
-                break
-
-            _t_module = t.get('module', 'crypto_band_daily_btc')  # per-asset band module
-            signal = {
-                'edge': t['edge'],
-                'win_prob': t['prob_model'],
-                'confidence': t.get('confidence', t['edge']),
-                'hours_to_settlement': t.get('hours_to_settlement', 24.0),
-                'module': _t_module,
-                'vol_ratio': 1.0,
-                'side': t['side'],
-                'yes_ask': t['yes_ask'],
-                'yes_bid': t.get('yes_bid', t['yes_ask']),
-                'open_position_value': _open_exposure,
-            }
-            decision = should_enter(
-                signal, _total_capital, _deployed_today,
-                module=_t_module,
-                module_deployed_pct=_crypto_deployed_this_cycle / _total_capital if _total_capital > 0 else 0.0,
+            _executed_in_lock = _execute_band_trades(
+                new_crypto=new_crypto,
+                trader=Trader(dry_run=dry_run),
+                total_capital=_total_capital,
+                crypto_daily_cap=_crypto_daily_cap,
+                deployed_today=_deployed_today,
+                open_position_value=open_position_value,
+                band_poly_cache=_band_poly_cache,
                 traded_tickers=traded_tickers,
             )
-            if decision.get('warning'):
-                log_activity(f"  [Strategy] WARNING: {decision['warning']}")
-            if not decision['enter']:
-                print(f"  [Strategy] SKIP {t['ticker']}: {decision['reason']}")
-                continue
-            if _crypto_deployed_this_cycle + decision['size'] > _crypto_daily_cap:
-                print(f"  [DailyCap] SKIP {t['ticker']}: would exceed crypto daily cap")
-                continue
-
-            size = decision['size']
-            best_price = t['price']
-            contracts  = max(1, int(size / best_price * 100))
-            actual_cost = round(contracts * best_price / 100, 2)
-
-            # Determine which asset this trade is for (for Polymarket shadow lookup)
-            _band_asset = 'BTC' if 'BTC' in t.get('series', '') else 'ETH'
-            _bp_data = _band_poly_cache.get(_band_asset, {})
-
-            opp = {
-                'ticker': t['ticker'], 'title': t['title'], 'side': t['side'],
-                'action': 'buy', 'yes_price': t['price'] if t['side'] == 'yes' else 100 - t['price'],
-                'market_prob': t['price'] / 100, 'noaa_prob': None,
-                'edge': t['edge'], 'confidence': t.get('confidence', t['edge']),
-                'model_prob':   t['prob_model'],          # log-normal P(in-band)
-                'model_source': 'log_normal_band',
-                'hours_to_settlement': t.get('hours_to_settlement', 18.0),
-                'size_dollars': actual_cost,
-                'contracts': contracts, 'source': 'crypto',
-                'scan_price': t['price'],
-                'fill_price': t['price'],
-                'scan_contracts': contracts,
-                'fill_contracts': contracts,
-                'note': t['note'],
-                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                'date': str(date.today()),
-                # Shadow: Polymarket daily consensus
-                'poly_daily_yes_price':    _bp_data.get('yes_price'),
-                'poly_daily_market_title': _bp_data.get('market_title'),
-                'poly_daily_volume_24h':   _bp_data.get('volume_24h'),
-                'poly_daily_fetched_at':   _bp_data.get('fetched_at'),
-            }
-            opp['strategy_size'] = size
-            opp['module'] = _t_module
-            result = trader.execute_opportunity(opp)
-            if not result:
-                print(f"  [Crypto] execute_opportunity failed for {t['ticker']} — skipping accounting")
-                continue
-
-            # Log Brier prediction at trade entry
-            # Fix: predicted_prob must be P(our side wins), not raw prob_model.
-            # For NO trades (we profit when price is OUT of band): use 1 - prob_model.
-            try:
-                from brier_tracker import log_prediction
-                _brier_prob_band = t['prob_model'] if t['side'] == 'yes' else (1.0 - t['prob_model'])
-                log_prediction(
-                    domain='crypto_band_daily',
-                    ticker=t['ticker'],
-                    predicted_prob=_brier_prob_band,
-                    market_price=t['price'] / 100,
-                    edge=t['edge'],
-                    side=t['side'],
-                    extra={
-                        'series':       t.get('series'),
-                        'prob_model':   t['prob_model'],
-                        'model_source': 'log_normal_band',
-                        'module':       t.get('module'),
-                    },
-                )
-            except Exception:
-                pass
-
-            # Log ENTER decision
-            _log_band_decision(
-                ticker=t['ticker'], series=t.get('series', ''),
-                spot=t.get('spot'), band_mid=t.get('band_mid'),
-                sigma=t.get('sigma'),
-                prob_model=t['prob_model'],
-                mkt_yes=t['yes_ask'] / 100,
-                edge_yes=t.get('edge_yes', 0.0),
-                edge_no=t.get('edge_no', 0.0),
-                decision='ENTER',
-                side=t['side'],
-                edge=t['edge'],
-                confidence=t.get('confidence'),
-                size_usd=actual_cost,
-                hours_to_settlement=t.get('hours_to_settlement'),
-                poly_daily_yes_price=_bp_data.get('yes_price'),
-                poly_daily_market_title=_bp_data.get('market_title'),
-                poly_daily_fetched_at=_bp_data.get('fetched_at'),
-            )
-            # Baseline: log uniform sizing vs actual Kelly sizing
-            try:
-                from baselines import log_uniform_sizing
-                log_uniform_sizing(
-                    ticker=t['ticker'],
-                    domain='crypto',
-                    actual_action=t['side'],
-                    actual_price=t['price'] / 100,
-                    actual_size=actual_cost,
-                )
-            except Exception:
-                pass
-
-            traded_tickers.add(t['ticker'])
-            _crypto_deployed_this_cycle += actual_cost
-            _open_exposure += actual_cost
-            _deployed_today += actual_cost
-            executed.append(opp)
+            executed.extend(_executed_in_lock)
+        finally:
+            if _cap_lock_f:
+                try:
+                    _portalocker.unlock(_cap_lock_f)
+                    _cap_lock_f.close()
+                except Exception:
+                    pass
 
     except Exception as e:
         print(f"  Crypto scan error: {e}")

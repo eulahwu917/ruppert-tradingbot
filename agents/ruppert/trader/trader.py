@@ -83,7 +83,12 @@ class Trader:
             send_telegram(f"🚨 Trade skipped: {ticker} had no strategy_size. Scanner output broken — investigate immediately.")
             return False
 
-        price_cents = opportunity['yes_price'] if side == 'yes' else (100 - opportunity['yes_price'])
+        # ISSUE-017: use explicit no_ask when available (avoids spread error on NO orders).
+        # Falls back to 100 - yes_price for backward compat with callers that don't pass no_ask.
+        if side == 'yes':
+            price_cents = opportunity['yes_price']
+        else:
+            price_cents = opportunity.get('no_ask') or (100 - opportunity['yes_price'])
         contracts = contracts_from_size(strategy_size, price_cents)
         if contracts <= 0:
             log_activity(f"  Skipped: strategy_size ${strategy_size:.2f} too small for {price_cents}¢ contract")
