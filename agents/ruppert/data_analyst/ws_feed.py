@@ -55,6 +55,7 @@ DRY_RUN = getattr(config, 'DRY_RUN', True)
 # Per-window evaluation dedup guard
 # Key: "{series}::{window_open_iso}"  Value: ISO timestamp when evaluated
 _window_evaluated: dict[str, str] = {}
+_window_eval_lock = asyncio.Lock()
 
 # Lazy KalshiClient instance for REST fallback (avoids re-init per poll cycle)
 _kalshi_client_instance = None
@@ -230,9 +231,11 @@ async def _check_and_fire_fallback() -> None:
     for series in CRYPTO_15M_SERIES:
         guard_key = f"{series}::{window_open_iso}"
 
-        # Skip if WS already evaluated this window
-        if guard_key in _window_evaluated:
-            continue
+        # Skip if WS already evaluated this window (atomic check+set under lock)
+        async with _window_eval_lock:
+            if guard_key in _window_evaluated:
+                continue
+            _window_evaluated[guard_key] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
         try:
             market = await _fetch_15m_market_price(series, window_open_dt)
@@ -253,15 +256,11 @@ async def _check_and_fire_fallback() -> None:
             book_depth_usd = market.get('book_depth_usd', 0.0)
 
             from agents.ruppert.trader.crypto_15m import evaluate_crypto_15m_entry
-            try:
-                evaluate_crypto_15m_entry(
-                    ticker, yes_ask, yes_bid, close_time, open_time,
-                    book_depth_usd=book_depth_usd,  # computed from top-3 volumes each side
-                    dollar_oi=0.0,                  # REST OI not fetched here — strategy must tolerate 0
-                )
-            finally:
-                # Always mark window evaluated — even on exception — to prevent retry storm
-                _window_evaluated[guard_key] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            evaluate_crypto_15m_entry(
+                ticker, yes_ask, yes_bid, close_time, open_time,
+                book_depth_usd=book_depth_usd,  # computed from top-3 volumes each side
+                dollar_oi=0.0,                  # REST OI not fetched here — strategy must tolerate 0
+            )
 
         except Exception as e:
             logger.warning('[Fallback] eval error for %s: %s', series, e)
@@ -448,11 +447,11 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     from agents.ruppert.data_scientist.capital import get_capital
     from agents.ruppert.data_scientist.logger import get_daily_exposure
     capital = get_capital()
-    daily_cap = capital * config.CRYPTO_DAILY_CAP_PCT
+    daily_cap = capital * getattr(config, 'DAILY_CAP_RATIO', 0.70)
     current_exposure = get_daily_exposure()
 
     if current_exposure >= daily_cap:
-        logger.debug(f"Crypto daily cap reached: ${current_exposure:.2f} >= ${daily_cap:.2f}")
+        logger.debug(f"Crypto global daily cap reached: ${current_exposure:.2f} >= ${daily_cap:.2f}")
         _log_skip('daily_cap_reached')
         return
 
@@ -648,6 +647,21 @@ async def _safe_eval_15m(
             except Exception as _e:
                 logger.debug('[WS Feed] depth enrich failed for %s: %s', ticker, _e)
 
+        # ── Atomic window dedup guard ──
+        if open_time:
+            _series = next((s for s in CRYPTO_15M_SERIES if ticker_upper.startswith(s)), None)
+            _open_time_norm = open_time.replace('Z', '+00:00') if open_time and open_time.endswith('Z') else open_time
+            _guard_key = f"{_series}::{_open_time_norm}" if _series and _open_time_norm else None
+        else:
+            _guard_key = None
+
+        async with _window_eval_lock:
+            if _guard_key and _guard_key in _window_evaluated:
+                return  # already evaluated this window — drop silently
+            if _guard_key:
+                _window_evaluated[_guard_key] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            # proceed with evaluation — mark is set inside the lock
+
         _import_ok = True
         try:
             from agents.ruppert.trader.crypto_15m import evaluate_crypto_15m_entry
@@ -660,11 +674,6 @@ async def _safe_eval_15m(
                 evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time, book_depth_usd, dollar_oi)
             except Exception as e:
                 logger.warning('[WS Feed] 15m eval error: %s', e)
-            # Mark this window as evaluated so fallback poll skips it
-            _series = next((s for s in CRYPTO_15M_SERIES if ticker_upper.startswith(s)), None)
-            _open_time_norm = open_time.replace('Z', '+00:00') if open_time and open_time.endswith('Z') else open_time
-            if _series and _open_time_norm:
-                _window_evaluated[f"{_series}::{_open_time_norm}"] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
     except Exception as e:
         logger.warning('[WS Feed] _safe_eval_15m error for %s: %s', ticker, e)
 
@@ -672,7 +681,13 @@ async def _safe_eval_15m(
 async def _safe_eval_hourly(ticker: str, yes_ask: int, yes_bid: int, close_time: str | None):
     """Background task: crypto hourly band entry evaluation."""
     try:
-        evaluate_crypto_entry(ticker, yes_ask, yes_bid, close_time)
+        # push_alert() and position_tracker.add_position() are fully synchronous
+        # (verified 2026-04-03) — safe to run entire function in executor.
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: evaluate_crypto_entry(ticker, yes_ask, yes_bid, close_time)
+        )
     except Exception as e:
         logger.warning('[WS Feed] Crypto eval error: %s', e)
 
@@ -746,13 +761,17 @@ async def _rest_refresh_stale() -> None:
         logger.warning('[WS Feed] _rest_refresh_stale: could not get tracked: %s', e)
         return
 
+    loop = asyncio.get_running_loop()
     for key_str in tracked:
         ticker = key_str.split('::')[0]  # get_tracked() returns 'ticker::side' keys
         try:
             _, _, is_stale = market_cache.get_with_staleness(ticker)
             if not is_stale:
                 continue
-            result = _get_kalshi_client().get_market(ticker)
+            result = await loop.run_in_executor(
+                None,
+                lambda t=ticker: _get_kalshi_client().get_market(t)
+            )
             if result and result.get('yes_bid') is not None and result.get('yes_ask') is not None:
                 bid_d = result['yes_bid'] / 100
                 ask_d = result['yes_ask'] / 100

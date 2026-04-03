@@ -12,6 +12,7 @@ import sys
 import time
 import json
 import os
+import signal
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -79,6 +80,47 @@ def is_heartbeat_fresh() -> bool:
         return False
 
 
+def kill_existing_ws_feed():
+    """Kill any existing ws_feed process before spawning a new one."""
+    hb_file = get_heartbeat_file()
+    if not hb_file.exists():
+        return
+
+    try:
+        data = json.loads(hb_file.read_text(encoding='utf-8'))
+        pid = data.get('pid')
+        if not pid:
+            return
+
+        try:
+            import psutil
+            try:
+                proc = psutil.Process(pid)
+                # Only kill if it looks like our ws_feed process
+                if 'python' in proc.name().lower():
+                    proc.terminate()
+                    log(f"Terminated stale ws_feed PID {pid}")
+                    # Give it 3s to die gracefully, then force kill
+                    try:
+                        proc.wait(timeout=3)
+                    except psutil.TimeoutExpired:
+                        proc.kill()
+                        log(f"Force-killed stale ws_feed PID {pid}")
+            except psutil.NoSuchProcess:
+                pass  # already dead, that's fine
+            except Exception as e:
+                log(f"Could not kill PID {pid}: {e}")
+        except ImportError:
+            # psutil not available — use taskkill on Windows
+            try:
+                subprocess.run(['taskkill', '/F', '/PID', str(pid)], capture_output=True)
+                log(f"Terminated stale ws_feed PID {pid} via taskkill")
+            except Exception as e:
+                log(f"Could not kill PID {pid} via taskkill: {e}")
+    except Exception as e:
+        log(f"kill_existing_ws_feed: heartbeat read failed: {e}")
+
+
 def start_ws_feed():
     """Start ws_feed.py in a new process via module invocation."""
     env_root = get_env_root()
@@ -116,8 +158,9 @@ def run_watchdog():
     while True:
         try:
             if not is_heartbeat_fresh():
-                log("Heartbeat stale or missing — ws_feed appears dead")
-                time.sleep(2)  # Brief pause before restart
+                log("Heartbeat stale or missing — ws_feed appears dead or hung")
+                kill_existing_ws_feed()
+                time.sleep(2)
                 start_ws_feed()
                 log("Restarted ws_feed.py")
             else:
