@@ -24,6 +24,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
+import portalocker
 import pytz
 
 logger = logging.getLogger(__name__)
@@ -107,6 +108,37 @@ def _write_full_state(state: dict) -> None:
         raise
 
 
+def _rw_locked(path: Path, fn) -> None:
+    """Open the state file under an exclusive lock, call fn(state) to modify, then write back.
+
+    Uses 'r+' mode so existing content is preserved; falls back to 'w+' on cold start
+    (FileNotFoundError — file does not exist yet).  fn(state) receives the parsed dict
+    and should mutate it in place (return value is ignored).
+    """
+    os.makedirs(str(path.parent), exist_ok=True)
+    try:
+        fh = open(path, 'r+', encoding='utf-8')
+    except FileNotFoundError:
+        fh = open(path, 'w+', encoding='utf-8')
+
+    with fh:
+        portalocker.lock(fh, portalocker.LOCK_EX)
+        try:
+            content = fh.read()
+            try:
+                state = json.loads(content) if content.strip() else {}
+            except json.JSONDecodeError:
+                state = {}
+
+            fn(state)
+
+            fh.seek(0)
+            fh.truncate()
+            json.dump(state, fh, indent=2)
+        finally:
+            portalocker.unlock(fh)
+
+
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def get_module_state(module: str) -> dict:
@@ -147,40 +179,53 @@ def set_module_state(module: str, new_mod_state: dict) -> None:
 def increment_consecutive_losses(module: str, window_ts: str) -> None:
     """Increment consecutive loss counter and record window_ts + result='loss'."""
     today = _today_pdt()
-    state = _read_full_state()
-    mod   = state.get(module, {})
+    path  = _state_path()
+    _new_count = [0]  # mutable cell so inner fn can report final count
 
-    if not mod or mod.get('date') != today:
-        mod = _default_module_state(today)
+    def _mutate(state):
+        mod = state.get(module, {})
+        if not mod or mod.get('date') != today:
+            mod = _default_module_state(today)
+        mod['consecutive_losses']  = mod.get('consecutive_losses', 0) + 1
+        mod['last_window_ts']      = window_ts
+        mod['last_window_result']  = 'loss'
+        mod['date']                = today
+        state[module]              = mod
+        _new_count[0]              = mod['consecutive_losses']
 
-    mod['consecutive_losses']  = mod.get('consecutive_losses', 0) + 1
-    mod['last_window_ts']      = window_ts
-    mod['last_window_result']  = 'loss'
-    mod['date']                = today
-    state[module]              = mod
-    _write_full_state(state)
+    _rw_locked(path, _mutate)
 
-    logger.info(
-        '[circuit_breaker] %s: consecutive_losses=%d (window=%s)',
-        module, mod['consecutive_losses'], window_ts,
-    )
+    cb_n = getattr(config, 'CRYPTO_15M_CIRCUIT_BREAKER_N',
+                   getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N',
+                           getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3)))
+    if _new_count[0] >= cb_n:
+        logger.warning(
+            '[circuit_breaker] TRIP: %s consecutive_losses=%d hit threshold=%d (window=%s)',
+            module, _new_count[0], cb_n, window_ts,
+        )
+    else:
+        logger.info(
+            '[circuit_breaker] %s: consecutive_losses=%d (window=%s)',
+            module, _new_count[0], window_ts,
+        )
 
 
 def reset_consecutive_losses(module: str, window_ts: str) -> None:
     """Reset consecutive loss counter to 0 and record window_ts + result='win'."""
     today = _today_pdt()
-    state = _read_full_state()
-    mod   = state.get(module, {})
+    path  = _state_path()
 
-    if not mod or mod.get('date') != today:
-        mod = _default_module_state(today)
+    def _mutate(state):
+        mod = state.get(module, {})
+        if not mod or mod.get('date') != today:
+            mod = _default_module_state(today)
+        mod['consecutive_losses']  = 0
+        mod['last_window_ts']      = window_ts
+        mod['last_window_result']  = 'win'
+        mod['date']                = today
+        state[module]              = mod
 
-    mod['consecutive_losses']  = 0
-    mod['last_window_ts']      = window_ts
-    mod['last_window_result']  = 'win'
-    mod['date']                = today
-    state[module]              = mod
-    _write_full_state(state)
+    _rw_locked(path, _mutate)
 
     logger.info('[circuit_breaker] %s: reset to 0 (window=%s)', module, window_ts)
 
@@ -261,13 +306,16 @@ def update_global_state(capital: float) -> None:
     """
     result = check_global_net_loss(capital)
     today  = _today_pdt()
-    state  = _read_full_state()
-    state['global'] = {
-        'net_loss_today': result['net_loss_today'],
-        'tripped':        result['tripped'],
-        'date':           today,
-    }
+    path   = _state_path()
+
+    def _mutate(state):
+        state['global'] = {
+            'net_loss_today': result['net_loss_today'],
+            'tripped':        result['tripped'],
+            'date':           today,
+        }
+
     try:
-        _write_full_state(state)
+        _rw_locked(path, _mutate)
     except Exception as e:
         logger.error('[circuit_breaker] update_global_state write failed: %s', e)
