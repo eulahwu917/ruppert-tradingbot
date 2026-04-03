@@ -46,6 +46,7 @@ import config
 from scripts.event_logger import log_event
 import agents.ruppert.data_analyst.market_cache as market_cache
 import agents.ruppert.trader.position_tracker as position_tracker
+import agents.ruppert.trader.circuit_breaker as circuit_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -413,6 +414,31 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     if current_exposure >= daily_cap:
         logger.debug(f"Crypto daily cap reached: ${current_exposure:.2f} >= ${daily_cap:.2f}")
         return
+
+    # ── Circuit breaker gate (per-module) ────────────────────────────────────
+    # Mirrors the check in crypto_threshold_daily.py step 1b.
+    # Blocks new entries when consecutive losses exceed threshold.
+    # DOES NOT affect exits — this function is entry-only.
+    try:
+        _cb_n = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N',
+                        getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3))
+        _cb_advisory = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_ADVISORY', False)
+        _cb_losses = circuit_breaker.get_consecutive_losses(_ws_module)
+        if _cb_losses >= _cb_n:
+            if _cb_advisory:
+                logger.info(
+                    '[WS-CRYPTO] CB advisory: %d consecutive losses for %s (threshold=%d) — continuing',
+                    _cb_losses, _ws_module, _cb_n
+                )
+            else:
+                logger.warning(
+                    '[WS-CRYPTO] CB TRIPPED: %d consecutive losses for %s (threshold=%d) — entry blocked',
+                    _cb_losses, _ws_module, _cb_n
+                )
+                return
+    except Exception as _cb_err:
+        logger.warning('[WS-CRYPTO] CB gate failed for %s: %s', _ws_module, _cb_err)
+    # ── End circuit breaker gate ──────────────────────────────────────────────
 
     # Build opportunity dict
     confidence = compute_composite_confidence(edge, yes_ask, yes_bid, hours_left)
