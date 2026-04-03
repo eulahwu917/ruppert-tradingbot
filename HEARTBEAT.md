@@ -42,6 +42,10 @@
 - Check `environments/demo/logs/proposals/` — if a new optimizer_proposals_*.md appeared since last check, forward its contents to David
 
 
+## One-time: 2026-04-02 noon check-in (David requested)
+- Send David a morning summary: overnight trade data, first runs of threshold_daily + band_daily, WS health, P&L
+- Check `memory/noon-reminder-2026-04-02.json` and delete after sending
+
 ## Weekend Tasks (next weekend)
 - Run Optimizer for weather domain (66 trades, well past 30-trade threshold)
 - Trigger: "Run Optimizer for weather domain"
