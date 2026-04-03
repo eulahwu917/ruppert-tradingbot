@@ -320,11 +320,45 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     capital = get_capital()
     daily_cap = capital * config.CRYPTO_DAILY_CAP_PCT
     current_exposure = get_daily_exposure()
-    
+
     if current_exposure >= daily_cap:
         logger.debug(f"Crypto daily cap reached: ${current_exposure:.2f} >= ${daily_cap:.2f}")
         return
-    
+
+    # ── Circuit breaker gate (ISSUE-094) ────────────────────────────────────────
+    # Mirror the exact _WS_MODULE_MAP from ws_feed.py.
+    # NOTE: evaluate_crypto_entry() is currently dead code — fix applied defensively.
+    _WS_MODULE_MAP_PM = {
+        ('BTC', 'between'): 'crypto_band_daily_btc',
+        ('ETH', 'between'): 'crypto_band_daily_eth',
+        ('XRP', 'between'): 'crypto_band_daily_xrp',
+        ('DOGE', 'between'): 'crypto_band_daily_doge',
+        ('SOL', 'between'): 'crypto_band_daily_sol',
+        ('BTC', 'greater'): 'crypto_threshold_daily_btc',
+        ('BTC', 'less'):    'crypto_threshold_daily_btc',
+        ('ETH', 'greater'): 'crypto_threshold_daily_eth',
+        ('ETH', 'less'):    'crypto_threshold_daily_eth',
+        ('SOL', 'greater'): 'crypto_threshold_daily_sol',
+        ('SOL', 'less'):    'crypto_threshold_daily_sol',
+    }
+    _ws_module = _WS_MODULE_MAP_PM.get((asset, strike_type), f'crypto_band_daily_{asset.lower()}')
+    try:
+        import agents.ruppert.trader.circuit_breaker as _cb
+        _cb_n = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N',
+                        getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3))
+        _cb_advisory = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_ADVISORY', False)
+        _cb_losses = _cb.get_consecutive_losses(_ws_module)
+        if _cb_losses >= _cb_n:
+            if not _cb_advisory:
+                logger.warning(
+                    '[PositionMonitor] CB TRIPPED: %d consecutive losses for %s — entry blocked',
+                    _cb_losses, _ws_module
+                )
+                return
+    except Exception as _cb_err:
+        logger.warning('[PositionMonitor] CB gate failed for %s: %s', _ws_module, _cb_err)
+    # ── End circuit breaker gate ─────────────────────────────────────────────────
+
     # Build opportunity dict
     confidence = compute_composite_confidence(edge, yes_ask, yes_bid, hours_left)
     
@@ -338,7 +372,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
         'market_prob': market_prob,
         'model_prob': model_prob,
         'source': 'crypto',
-        'module': 'crypto',
+        'module': _ws_module,
         'yes_ask': yes_ask,
         'yes_bid': yes_bid,
         'current_price': current_price,
@@ -498,15 +532,54 @@ def run_polling_scan(client: KalshiClient, run_settlement_check: bool = True):
         
         if action == 'auto_exit':
             print(f"  [Polling] AUTO-EXIT: {ticker} — {reason}")
-            # Execute exit directly — run_monitor() is not called in WS mode.
-            # Reuse post_trade_monitor execution logic.
+            # ISSUE-033: Execute inline — do NOT call run_monitor() (fanout risk).
+            # run_monitor() rescans ALL positions, causing N full rescans for N exits
+            # and near-certain double-settlement at scale.
+            # NOTE: run_polling_scan() is currently dead code — fix applied defensively.
+            _pm_side = pos.get('side', '')
+            _pm_contracts = int(pos.get('contracts', 1) or 1)
+            _pm_price = cur_price  # cur_price is set by the check_* functions
+            if not acquire_exit_lock(ticker, _pm_side):
+                print(f"  [Polling] SKIP: {ticker} exit lock held — another process exiting")
+                continue
             try:
-                from agents.ruppert.trader.post_trade_monitor import run_monitor as _run_monitor_exit
-                # run_monitor() re-scans all positions; call it to handle this exit.
-                # A targeted single-position exit would be preferable long-term (see Notes).
-                _run_monitor_exit()
+                _dry_run = getattr(config, 'DRY_RUN', True)
+                if _dry_run:
+                    _pm_result = {'dry_run': True, 'status': 'simulated'}
+                else:
+                    from agents.ruppert.env_config import require_live_enabled
+                    require_live_enabled()
+                    # Use place_order() with 'sell' action — KalshiClient has no sell_position() method
+                    _pm_result = client.place_order(ticker, _pm_side, _pm_price, _pm_contracts, action='sell')
+                _pm_entry_price = normalize_entry_price(pos)
+                _pm_pnl = round(((_pm_price - _pm_entry_price) if _pm_side == 'yes'
+                                 else (_pm_entry_price - _pm_price)) * _pm_contracts / 100, 2)
+                _pm_opp = {
+                    'ticker': ticker, 'title': pos.get('title', ticker),
+                    'side': _pm_side, 'action': 'exit',
+                    'yes_price': _pm_price if _pm_side == 'yes' else 100 - _pm_price,
+                    'market_prob': _pm_price / 100, 'edge': None,
+                    'size_dollars': round(_pm_contracts * _pm_price / 100, 2),
+                    'contracts': _pm_contracts, 'source': pos.get('source', 'monitor'),
+                    'module': pos.get('module', ''), 'timestamp': ts(), 'date': str(date.today()),
+                    'pnl': _pm_pnl,
+                    'entry_price': _pm_entry_price,
+                    'exit_price': _pm_price,
+                    'scan_price': _pm_price,
+                    'fill_price': _pm_price,
+                }
+                log_trade(_pm_opp, _pm_opp['size_dollars'], _pm_contracts, _pm_result)
+                log_activity(f'[PositionMonitor] AUTO-EXIT {ticker} {_pm_side.upper()} @ {_pm_price}c — {reason}')
+                # Notify position tracker
+                try:
+                    from agents.ruppert.trader import position_tracker as _pt
+                    _pt.remove_position(ticker, _pm_side)
+                except Exception as _pte:
+                    log_activity(f'[PositionMonitor] WARNING: could not remove {ticker} from tracker: {_pte}')
             except Exception as _exit_err:
-                print(f"  [Polling] AUTO-EXIT execution failed for {ticker}: {_exit_err}")
+                print(f"  [Polling] AUTO-EXIT error for {ticker}: {_exit_err}")
+            finally:
+                release_exit_lock(ticker, _pm_side)
         elif action and 'alert' in action:
             push_alert('warning', f'{ticker}: {reason}', ticker=ticker)
         elif action:
