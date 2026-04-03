@@ -40,7 +40,7 @@ DAILY_CAP = _capital * (
     getattr(_config, 'FED_DAILY_CAP_PCT', 0.03)
 )
 MIN_TRADES             = getattr(_config, 'OPTIMIZER_MIN_TRADES', 30)
-DOMAIN_THRESHOLD       = 30
+DOMAIN_THRESHOLD       = 10  # Fine-grained domains (e.g. crypto_dir_15m_btc) — lowered from 30
 LOW_WIN_RATE_THRESHOLD = getattr(_config, 'OPTIMIZER_LOW_WIN_RATE', 0.60)
 BRIER_FLAG_THRESHOLD   = getattr(_config, 'OPTIMIZER_BRIER_FLAG', 0.25)
 HOLD_TIME_FLAG_HOURS   = getattr(_config, 'OPTIMIZER_HOLD_TIME_FLAG_HRS', 12)
@@ -124,7 +124,8 @@ def load_scored_predictions() -> dict:
 def get_domain_trade_counts() -> dict[str, int]:
     """
     Reads scored_predictions.jsonl and returns count of scored trades per domain.
-    Domain is inferred via detect_module(ticker).
+    Domain is read from the stored 'domain' field (fine-grained classify_module name).
+    Falls back to detect_module(ticker) for legacy records without a domain field.
     """
     counts = defaultdict(int)
     scored_path = LOGS_DIR / "scored_predictions.jsonl"
@@ -138,8 +139,10 @@ def get_domain_trade_counts() -> dict[str, int]:
             try:
                 rec = json.loads(line)
                 ticker = rec.get("ticker", "")
-                if ticker:
-                    domain = detect_module(ticker)
+                # Use stored domain (fine-grained classify_module name) if present;
+                # fall back to detect_module for legacy records without domain field.
+                domain = rec.get("domain") or detect_module(ticker)
+                if domain:
                     counts[domain] += 1
             except json.JSONDecodeError:
                 pass
@@ -167,12 +170,14 @@ def run_domain_experiments(domains: list[str]) -> dict:
 
 def enrich_trades(trades: list, outcomes: dict) -> list:
     """Add derived fields: module, confidence, outcome (if available)."""
+    from agents.ruppert.data_scientist.logger import classify_module as _classify_module
     enriched = []
     for t in trades:
         rec = dict(t)
-        # Module
+        # Module: use stored module if present; derive via classify_module (not detect_module)
+        # so win-rate-by-module reports use fine-grained names (crypto_dir_15m_btc, not crypto)
         if "module" not in rec or not rec["module"]:
-            rec["module"] = detect_module(rec.get("ticker", ""))
+            rec["module"] = _classify_module(rec.get("source", ""), rec.get("ticker", ""))
         # Confidence
         if "confidence" not in rec or rec["confidence"] is None:
             edge = rec.get("edge", 0.0)
@@ -607,7 +612,7 @@ def main():
     domain_counts = get_domain_trade_counts()
     eligible_domains = get_eligible_domains()
 
-    print("Per-domain scored trade counts (threshold=30):")
+    print(f"Per-domain scored trade counts (threshold={DOMAIN_THRESHOLD}):")
     for domain, count in sorted(domain_counts.items()):
         status = "ELIGIBLE" if count >= DOMAIN_THRESHOLD else f"NEEDS {DOMAIN_THRESHOLD - count} more"
         print(f"  {domain:12s}: {count:3d} trades  [{status}]")
@@ -717,7 +722,7 @@ def main():
             for domain, result in experiment_results.items():
                 print(f"  {domain}: {result}")
     else:
-        print("No domains eligible for experiments yet (need 30 scored trades each).")
+        print(f"No domains eligible for experiments yet (need {DOMAIN_THRESHOLD} scored trades each).")
 
     print()
     print("-" * 60)
