@@ -10,6 +10,7 @@ DS — 2026-03-31
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 import requests
@@ -269,10 +270,33 @@ def get_smart_money_signal(wallet_addresses: list[str], keyword: str) -> dict:
         return _EMPTY
 
 
-# Crypto asset → search term mapping
+# Asset name aliases for title matching.
+# Some assets have short tickers that don't appear verbatim in Polymarket titles
+# (e.g. "BTC" markets use "Bitcoin" not "BTC" in the question text).
+_ASSET_ALIASES: dict[str, list[str]] = {
+    "BTC":  ["btc", "bitcoin"],
+    "ETH":  ["eth"],        # "eth" is a substring of "ethereum" — filter works
+    "XRP":  ["xrp", "ripple"],
+    "DOGE": ["doge", "dogecoin"],
+    "SOL":  ["sol", "solana"],
+}
+
+
+def _asset_in_title(asset: str, title_lower: str) -> bool:
+    """Return True if any known alias for asset appears in title_lower."""
+    aliases = _ASSET_ALIASES.get(asset.upper(), [asset.lower()])
+    return any(alias in title_lower for alias in aliases)
+
+
+# Crypto asset → search term mapping.
+# BTC/ETH: Polymarket daily above/below markets use title pattern
+#   "Will the price of Bitcoin be above $X on [date]?"
+# The ONLY keywords that reliably find these are "bitcoin above" / "bitcoin below".
+# Short-window Up/Down markets (15min/1hr) do not exist for BTC/ETH on Polymarket;
+# the daily above/below market is the best available proxy.
 _CRYPTO_KEYWORDS: dict[str, list[str]] = {
-    "BTC":  ["bitcoin up", "btc up", "bitcoin 15min", "btc 15min", "bitcoin 1hr", "btc 1hr"],
-    "ETH":  ["ethereum up", "eth up", "ethereum 15min", "eth 15min", "ethereum 1hr", "eth 1hr"],
+    "BTC":  ["bitcoin above", "bitcoin below"],
+    "ETH":  ["ethereum above", "ethereum below"],
     "XRP":  ["xrp up", "ripple up", "xrp 15min", "xrp 1hr"],
     "DOGE": ["doge up", "dogecoin up", "doge 15min", "doge 1hr"],
     "SOL":  ["solana up", "sol up", "solana 15min", "sol 15min", "solana 1hr", "sol 1hr"],
@@ -282,17 +306,36 @@ _CRYPTO_KEYWORDS: dict[str, list[str]] = {
 _SHORT_WINDOW_TERMS = ["15min", "15 min", "1hr", "1 hr", "1-hr", "1h ", "30min", "30 min"]
 
 
-def _score_crypto_market(market: dict) -> int:
-    """Higher score = preferred market (short-window, high volume)."""
+def _days_until_end(market: dict) -> float:
+    """Return fractional days until market end_date, or 999 if unparseable."""
+    end_date_str = market.get("end_date") or ""
+    try:
+        end_dt = datetime.fromisoformat(end_date_str.replace("Z", "+00:00"))
+        delta = (end_dt - datetime.now(timezone.utc)).total_seconds()
+        return max(delta / 86400, 0.0)
+    except Exception:
+        return 999.0
+
+
+def _score_crypto_market(market: dict) -> tuple:
+    """
+    Sortable score tuple for short-window market selection.
+    Priority:
+      1. Short-window terms (15min/1hr) in title — large bonus
+      2. Nearest end_date (prefer today's settlement)
+      3. Volume > $1000
+    Returns tuple so max() picks the best candidate.
+    """
     title_lower = (market.get("question") or "").lower()
-    score = 0
+    short_window_bonus = 0
     for term in _SHORT_WINDOW_TERMS:
         if term in title_lower:
-            score += 10
+            short_window_bonus = 100
             break
-    if market.get("volume_24h", 0) > 1000:
-        score += 1
-    return score
+    days_away = _days_until_end(market)
+    volume_bonus = 1 if market.get("volume_24h", 0) > 1000 else 0
+    # Negate days_away so max() picks the closest-expiry market
+    return (short_window_bonus, -days_away, volume_bonus)
 
 
 def _fetch_crypto_consensus(asset: str) -> Optional[dict]:
@@ -309,9 +352,8 @@ def _fetch_crypto_consensus(asset: str) -> Optional[dict]:
         # get_markets_by_keyword already filters to active+non-closed
         for m in markets:
             q_lower = (m.get("question") or "").lower()
-            # Must mention the asset and be directional (up/down/higher/lower/rise/fall)
-            asset_lower = asset.lower()
-            if asset_lower not in q_lower:
+            # Must mention the asset (check all known aliases, e.g. "bitcoin" for BTC)
+            if not _asset_in_title(asset, q_lower):
                 continue
             directional_terms = ["up", "down", "higher", "lower", "above", "below", "rise", "fall"]
             if not any(t in q_lower for t in directional_terms):
@@ -367,10 +409,13 @@ def get_crypto_consensus(asset: str) -> Optional[dict]:
 
 # ─── Daily / long-horizon crypto signals ─────────────────────────────────────
 
-# Daily/long-horizon crypto keywords
+# Daily/long-horizon crypto keywords.
+# BTC/ETH: use "bitcoin above" / "ethereum above" — the ONLY keywords that
+# reliably return Polymarket's daily price-level markets.
+# Confirmed by Researcher live testing (2026-04-03); other terms return zero results.
 _CRYPTO_DAILY_KEYWORDS: dict[str, list[str]] = {
-    "BTC": ["bitcoin daily", "btc end of day", "bitcoin price today", "btc above", "btc below"],
-    "ETH": ["ethereum daily", "eth end of day", "ethereum price today", "eth above", "eth below"],
+    "BTC": ["bitcoin above", "bitcoin below"],
+    "ETH": ["ethereum above", "ethereum below"],
     "SOL": ["solana daily", "sol end of day", "solana price today", "sol above", "sol below"],
 }
 
@@ -378,22 +423,22 @@ _CRYPTO_DAILY_KEYWORDS: dict[str, list[str]] = {
 _LONG_WINDOW_TERMS = ["daily", "end of day", "eod", "24h", "24 hour", "today", "this week", "weekly"]
 
 
-def _score_crypto_daily_market(market: dict) -> int:
-    """Higher score = preferred market (long-window, high volume)."""
-    title_lower = (market.get("question") or "").lower()
-    score = 0
-    for term in _LONG_WINDOW_TERMS:
-        if term in title_lower:
-            score += 10
-            break
-    # Penalize short-window markets
-    for term in _SHORT_WINDOW_TERMS:
-        if term in title_lower:
-            score -= 5
-            break
-    if market.get("volume_24h", 0) > 1000:
-        score += 1
-    return score
+def _score_crypto_daily_market(market: dict) -> tuple:
+    """
+    Sortable score tuple for daily market selection.
+    Priority:
+      1. Nearest end_date (prefer today's settlement; tomorrow over next week)
+      2. Yes_price closest to 0.5 — signals the strike nearest to current spot price,
+         which is the most informationally relevant market
+      3. Volume > $1000
+    Returns tuple so max() picks the best candidate.
+    """
+    days_away = _days_until_end(market)
+    yes_price = market.get("yes_price") if market.get("yes_price") is not None else 0.5
+    # Prefer yes_price near 0.5 (most uncertain = strike closest to current spot)
+    price_distance = abs(yes_price - 0.5)
+    volume_bonus = 1 if market.get("volume_24h", 0) > 1000 else 0
+    return (-days_away, -price_distance, volume_bonus)
 
 
 def _fetch_crypto_daily_consensus(asset: str) -> Optional[dict]:
@@ -409,8 +454,8 @@ def _fetch_crypto_daily_consensus(asset: str) -> Optional[dict]:
         markets = get_markets_by_keyword(kw, limit=10)
         for m in markets:
             q_lower = (m.get("question") or "").lower()
-            asset_lower = asset.lower()
-            if asset_lower not in q_lower:
+            # Must mention the asset (check all known aliases)
+            if not _asset_in_title(asset, q_lower):
                 continue
             directional_terms = ["up", "down", "higher", "lower", "above", "below", "rise", "fall"]
             if not any(t in q_lower for t in directional_terms):

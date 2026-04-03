@@ -496,3 +496,54 @@ RESEARCH-2026-04-02-E | P&L education: win rate alone doesn't determine profitab
 - Data: clean, reconciles to penny
 - 7-day validation window: April 2–9
 - Checkpoints: Q4 WR ≥ 60%, stop tier distribution, entry timing
+
+---
+
+## 2026-04-02 Evening Session
+
+### Bugs Fixed
+
+BUG-2026-04-02-R | `compute_closed_pnl_from_logs()` had `since = '2026-04-02'` hardcoded — would break on April 3+ by only reading today's file. Removed filter entirely; glob `trades_*.jsonl` already excludes archive/ and non-JSONL files. | Fixed (89c5cf3) QA-passed 33/33.
+
+BUG-2026-04-02-S | Daily module circuit breaker completely non-functional — 3 compounding issues: (1) CB updates only existed in `post_trade_monitor.py` which is disabled, (2) `crypto_band_daily.py` imported `_read_1h_circuit_breaker_state` which doesn't exist → always silently 0, (3) `crypto_threshold_daily.py` had zero CB integration. All 3 confirmed by Dev before fix. | Fixed (59be542): wired `_update_daily_cb()` into `position_tracker.py`, fixed broken import in band_daily, added CB entry gate to threshold_daily. `CRYPTO_DAILY_CIRCUIT_BREAKER_N = 5` in config. QA-passed 33/33.
+
+BUG-2026-04-02-T | WS feed not picking up new code after restarts — `position_tracker.py` changes not taking effect because ws_feed.py process was running as orphan under old watchdog PID. `schtasks /End` kills watchdog but ws_feed continued running. | Fixed (killed watchdog PID directly, forced full relaunch).
+
+BUG-2026-04-02-U | `classify_module()` missing `KXXRPD` → misclassified as `crypto_threshold_daily_xrp` instead of `crypto_band_daily_xrp`. Post-scan audit auto-corrects this every cycle. | Auto-fixed by audit; permanent code fix deferred (low priority).
+
+### Data Operations
+
+DATA-2026-04-02-C | clean_break.py executed: stripped 20 orphan settle records from `trades_2026-04-02.jsonl`, archived poisoned file, removed corrective deposit. True April 2 trading P&L: **+$1,806.97** (107W/125L at 2pm). EOD capital: ~$10,690.
+
+DATA-2026-04-02-D | `trades_2026-04-01.jsonl` moved to archive/ — contained poisoned pre-clean-slate data. `compute_closed_pnl_from_logs()` filter removed (now reads all clean files in trades/).
+
+DATA-2026-04-02-E | P&L verified by DS independent audit: 609 records, zero duplicates, zero old taxonomy, capital reconciles exactly.
+
+### Architecture / Config Changes
+
+ARCH-2026-04-02-D | Added `Ruppert-Crypto-930AM` scheduled task — threshold daily primary window (9:30–11:30 ET) previously had no scan at open. Strategist confirmed 9:30am is highest-volatility/opportunity moment of window.
+
+ARCH-2026-04-02-E | Confirmed band daily already WS-driven (ws_feed.py evaluates all KXBTC/KXETH/KXXRP/KXDOGE tickers on every tick). Scheduled hourly tasks are sweep backup only. No change needed.
+
+ARCH-2026-04-02-F | Confirmed threshold daily should stay scheduled — daily-scale signals (momentum, funding, ATR-14, OI delta) don't benefit from tick-level evaluation.
+
+### Research / Analysis
+
+RESEARCH-2026-04-02-F | Daily modules (band + threshold) had 3-7% WR on April 2. Root cause: crypto crash day (BTC down hard). 21+ contracts expired at 0c before stop could fire (30-min entry guard too slow). Decision: collect 7 days of data before adjusting strategy — one day insufficient.
+
+RESEARCH-2026-04-02-G | Decision orphan analysis: 34 orphan ENTER decisions, all from midnight WS reconnect storm (APR01 contracts, 00:19–01:52 UTC). Zero orphans during normal April 2 trading. No action needed.
+
+RESEARCH-2026-04-02-H | Mathematical insight shared with David: WR alone doesn't determine profitability. EV = (WR × avg_win) - (LR × avg_loss). Today: 46% WR, avg_win $98, avg_loss $69.51 → EV +$7.79/trade → +$1,807 on 232 trades. Design D stop-loss directly enables this asymmetry.
+
+### Commits
+- 89c5cf3 — remove hardcoded since date filter from compute_closed_pnl_from_logs
+- 59be542 — wire daily module circuit breaker into position_tracker + fix band_daily import + threshold_daily CB gate
+- 5d15a19 — add spec files, workspace docs, clean_break script, update HEARTBEAT + CHANGELOG
+- 256b658 — add ROLE docs, task scheduler XMLs, staging env, utility scripts, specs
+
+### EOD State (17:30 PDT)
+- Capital: ~$10,690 (closed some daily positions, 15m still running)
+- Repo: fully pushed, clean working tree
+- 7-day validation window: April 2–9
+- All systems: WS + Dashboard running on latest code
+- Open items: see memory/2026-04-02.md
