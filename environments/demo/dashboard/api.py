@@ -308,6 +308,117 @@ def _stat_bucket(mod: str) -> str:
 
 from agents.ruppert.data_scientist.ticker_utils import is_settled_ticker  # noqa: F401
 
+
+def compute_module_closed_stats_from_logs() -> dict:
+    """Compute per-module closed P&L stats from trade logs — canonical, matches compute_closed_pnl_from_logs().
+
+    Iterates all exit/settle/exit_correction records and buckets them by module.
+    Returns a dict keyed by bucket name (matching _stat_bucket output) with:
+        - closed_pnl: total closed P&L for this module
+        - trade_count: number of closed trades
+        - wins: number of winning closed trades
+
+    Period fields (closed_pnl_day, closed_pnl_week, closed_pnl_month, closed_pnl_year)
+    are computed using the close record timestamp or settlement date parsed from ticker.
+
+    Manual sources (economics, geo, manual) are excluded.
+    """
+    from datetime import date as _date, datetime as _dt, timedelta as _td
+    _today = _date.today()
+    _week_start = _today - _td(days=_today.weekday())
+    _MANUAL_SRC = ('economics', 'geo', 'manual')
+
+    all_trades = read_all_trades()
+
+    module_keys = ['crypto', 'crypto_dir_15m', 'crypto_threshold_daily', 'crypto_band_daily', 'other']
+    stats = {m: {
+        'closed_pnl': 0.0,
+        'closed_pnl_day': 0.0,
+        'closed_pnl_week': 0.0,
+        'closed_pnl_month': 0.0,
+        'closed_pnl_year': 0.0,
+        'trade_count': 0,
+        'wins': 0,
+    } for m in module_keys}
+
+    # For each close/exit/settle record, add to the appropriate bucket.
+    # This mirrors compute_closed_pnl_from_logs() — iterates close records directly.
+    for t in all_trades:
+        action = t.get('action', '')
+        src = t.get('source', 'bot')
+        if src in _MANUAL_SRC:
+            continue
+
+        try:
+            if action in ('exit', 'settle') and t.get('pnl') is not None:
+                pnl = float(t['pnl'])
+                ticker = t.get('ticker', '')
+                module = t.get('module') or classify_module(src, ticker)
+                bucket = _stat_bucket(module)
+
+                stats[bucket]['closed_pnl'] += pnl
+                stats[bucket]['trade_count'] += 1
+                if pnl > 0:
+                    stats[bucket]['wins'] += 1
+
+                # Period bucketing via timestamp or ticker
+                ts = t.get('timestamp')
+                sdate = None
+                if ts:
+                    try:
+                        sdate = _dt.fromisoformat(str(ts).split('+')[0]).date()
+                    except Exception:
+                        sdate = settlement_date_from_ticker(ticker)
+                else:
+                    sdate = settlement_date_from_ticker(ticker)
+
+                if sdate:
+                    if sdate == _today:
+                        stats[bucket]['closed_pnl_day'] += pnl
+                    if sdate >= _week_start:
+                        stats[bucket]['closed_pnl_week'] += pnl
+                    if sdate.year == _today.year and sdate.month == _today.month:
+                        stats[bucket]['closed_pnl_month'] += pnl
+                    if sdate.year == _today.year:
+                        stats[bucket]['closed_pnl_year'] += pnl
+
+            elif action == 'exit_correction' and t.get('pnl_correction') is not None:
+                correction = float(t['pnl_correction'])
+                if correction == 0:
+                    continue
+                ticker = t.get('ticker', '')
+                module = t.get('module') or classify_module(src, ticker)
+                bucket = _stat_bucket(module)
+
+                stats[bucket]['closed_pnl'] += correction
+
+                # If logged_pnl > 0, the original record was a "win" — the correction
+                # reverses it, so decrement wins counter
+                if float(t.get('logged_pnl', 0)) > 0:
+                    stats[bucket]['wins'] = max(0, stats[bucket]['wins'] - 1)
+
+                ts = t.get('timestamp')
+                sdate = None
+                if ts:
+                    try:
+                        sdate = _dt.fromisoformat(str(ts).split('+')[0]).date()
+                    except Exception:
+                        pass
+                if sdate:
+                    if sdate == _today:
+                        stats[bucket]['closed_pnl_day'] += correction
+                    if sdate >= _week_start:
+                        stats[bucket]['closed_pnl_week'] += correction
+                    if sdate.year == _today.year and sdate.month == _today.month:
+                        stats[bucket]['closed_pnl_month'] += correction
+                    if sdate.year == _today.year:
+                        stats[bucket]['closed_pnl_year'] += correction
+        except Exception:
+            pass
+
+    return stats
+
+
 @app.get("/api/summary")
 def get_summary():
     trades = read_all_trades()
@@ -1117,8 +1228,22 @@ def get_pnl_history():
         except Exception:
             pass
 
-    # ── Override closed_pnl_total with canonical single source of truth ────
+    # ── Override closed_pnl_total AND module_stats with canonical source of truth ────
+    # compute_module_closed_stats_from_logs() iterates close records directly —
+    # same path as compute_closed_pnl_from_logs() — eliminating the ticker-
+    # deduplication divergence that caused ~$710 discrepancy in module breakdown.
     closed_pnl_total = compute_closed_pnl_from_logs()
+    _canonical_module_stats = compute_module_closed_stats_from_logs()
+    for _mk in module_keys:
+        if _mk in _canonical_module_stats:
+            _cs = _canonical_module_stats[_mk]
+            module_stats[_mk]['closed_pnl']       = _cs['closed_pnl']
+            module_stats[_mk]['closed_pnl_day']   = _cs['closed_pnl_day']
+            module_stats[_mk]['closed_pnl_week']  = _cs['closed_pnl_week']
+            module_stats[_mk]['closed_pnl_month'] = _cs['closed_pnl_month']
+            module_stats[_mk]['closed_pnl_year']  = _cs['closed_pnl_year']
+            module_stats[_mk]['trade_count']      = _cs['trade_count']
+            module_stats[_mk]['wins']             = _cs['wins']
 
     # ── Open positions ───────────────────────────────────────────────────────
     open_pnl_total = 0.0
@@ -1596,8 +1721,22 @@ def _build_state():
         except Exception:
             pass
 
-    # ── Override closed_pnl_total with canonical single source of truth ────
+    # ── Override closed_pnl_total AND module_closed with canonical source of truth ────
+    # compute_module_closed_stats_from_logs() iterates close records directly —
+    # same path as compute_closed_pnl_from_logs() — eliminating the ticker-
+    # deduplication divergence that caused ~$710 discrepancy in module breakdown.
     closed_pnl_total = compute_closed_pnl_from_logs()
+    _canonical_mod_stats = compute_module_closed_stats_from_logs()
+    for _mk in module_closed_keys:
+        if _mk in _canonical_mod_stats:
+            _cs = _canonical_mod_stats[_mk]
+            module_closed[_mk]['closed_pnl']       = _cs['closed_pnl']
+            module_closed[_mk]['closed_pnl_day']   = _cs['closed_pnl_day']
+            module_closed[_mk]['closed_pnl_week']  = _cs['closed_pnl_week']
+            module_closed[_mk]['closed_pnl_month'] = _cs['closed_pnl_month']
+            module_closed[_mk]['closed_pnl_year']  = _cs['closed_pnl_year']
+            module_closed[_mk]['trade_count']      = _cs['trade_count']
+            module_closed[_mk]['wins']             = _cs['wins']
 
     # ── Finalize module stats ─────────────────────────────────────────────────
     modules_out: dict = {}
