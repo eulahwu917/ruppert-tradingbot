@@ -155,6 +155,17 @@ def score_new_settlements():
         else:
             _outcome = None
 
+        # For NO-side trades: flip outcome and predicted_prob into the bettor's frame.
+        # outcome=1 must mean "bettor won" regardless of side.
+        # predicted_prob must represent the bettor's win probability for Brier to be meaningful.
+        # NOTE: If predicted_prob is None, only _outcome is flipped. Brier stays None (correct).
+        # NOTE: edge is NOT flipped — it is already signed from the bettor's perspective.
+        side = rec.get('side') or buy_rec.get('side', 'yes')
+        if side == 'no' and _outcome is not None:
+            _outcome = 1 - _outcome
+            if predicted_prob is not None:
+                predicted_prob = round(1.0 - float(predicted_prob), 4)
+
         # Compute Brier score
         _brier = None
         if _outcome is not None and predicted_prob is not None:
