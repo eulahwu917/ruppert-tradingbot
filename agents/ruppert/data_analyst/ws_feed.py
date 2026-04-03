@@ -823,6 +823,9 @@ async def run_ws_feed():
     from agents.ruppert.data_scientist.logger import log_activity
     log_activity('[WS Feed] Starting persistent WebSocket feed')
 
+    _reconnect_delay = 5    # ISSUE-096: exponential backoff — starts at 5s, OUTSIDE while True
+    _reconnect_max   = 60   # ISSUE-096: caps at 60s
+
     while True:
         try:
             headers = _build_auth_headers()
@@ -835,6 +838,8 @@ async def run_ws_feed():
             ) as ws:
                 print(f'  [WS Feed] Connected at {ts()}')
                 log_activity('[WS Feed] Connected')
+                # ISSUE-096: reset backoff HERE — connection is live at this point
+                _reconnect_delay = 5
                 _write_heartbeat()  # update heartbeat on every successful reconnect
 
                 # Subscribe to ALL ticker updates (no market_tickers filter)
@@ -918,8 +923,15 @@ async def run_ws_feed():
                     except asyncio.CancelledError:
                         pass
 
+            # ISSUE-096 PATH 1: clean exit from async with ws: after timeout break
+            # Apply backoff before reconnecting (exception path handled separately below)
+            log_activity(f'[WS Feed] Timeout disconnect — reconnecting in {_reconnect_delay}s')
+            await asyncio.sleep(_reconnect_delay)
+            _reconnect_delay = min(_reconnect_delay * 2, _reconnect_max)
+
         except Exception as e:
-            print(f'  [WS Feed] Disconnected: {e} — reconnecting in 5s')
+            # ISSUE-096 PATH 2: exception-based disconnect — use backoff (was flat 5s)
+            print(f'  [WS Feed] Disconnected: {e} — reconnecting in {_reconnect_delay}s')
             log_activity(f'[WS Feed] Disconnected: {e}')
 
             # On disconnect: REST-poll tracked positions to catch missed moves
@@ -928,7 +940,8 @@ async def run_ws_feed():
             except Exception as re:
                 logger.warning('[WS Feed] Recovery poll failed: %s', re)
 
-            await asyncio.sleep(5)  # fixed 5s wait, then infinite retry
+            await asyncio.sleep(_reconnect_delay)
+            _reconnect_delay = min(_reconnect_delay * 2, _reconnect_max)
 
         finally:
             market_cache.persist()

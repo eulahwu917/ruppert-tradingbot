@@ -43,6 +43,7 @@ if str(_CRYPTO_CLIENT_WORKSPACE) not in sys.path:
     sys.path.insert(0, str(_CRYPTO_CLIENT_WORKSPACE))
 
 import config
+from agents.ruppert.env_config import get_paths as _env_get_paths  # ISSUE-032: wallet path fix
 
 try:
     from scipy.stats import t as scipy_t
@@ -78,7 +79,8 @@ TOP_TRADER_WALLETS = {
 }
 
 # Path to the auto-refreshed wallet list produced by bot/wallet_updater.py
-_WALLETS_FILE = Path(__file__).parent / 'logs' / 'smart_money_wallets.json'
+# ISSUE-032: use env_config path so this resolves to environments/demo/logs/ (same dir as wallet_updater writes)
+_WALLETS_FILE = _env_get_paths()['logs'] / 'smart_money_wallets.json'
 
 
 def _load_wallets() -> dict:
@@ -115,6 +117,12 @@ def _load_wallets() -> dict:
                     except Exception:
                         pass
                 return {addr: addr[:8] + '...' for addr in raw}
+            else:
+                # ISSUE-032: warn if wallet file exists but has no usable wallet data
+                logger.warning(
+                    '_load_wallets: wallet file exists but contains no wallets '
+                    '(key missing or empty list) — using hardcoded fallback'
+                )
         except Exception as e:
             logger.warning('_load_wallets: failed to read smart_money_wallets.json: %s', e)
 
