@@ -9,6 +9,7 @@ Files:
   logs/scored_predictions.jsonl — one entry per resolved prediction
 """
 
+import sys
 import json
 import logging
 from datetime import datetime, timezone
@@ -16,9 +17,21 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-_LOGS_DIR = Path(__file__).parent / "logs"
-_PRED_FILE = _LOGS_DIR / "predictions.jsonl"
-_SCORED_FILE = _LOGS_DIR / "scored_predictions.jsonl"
+
+def _get_brier_paths():
+    """
+    Lazy path resolution — called at function scope, not import scope.
+    Resolves env-config paths each time it's called so RUPPERT_ENV changes
+    after import are respected (important for test isolation).
+    Returns (logs_dir, pred_file, scored_file).
+    """
+    workspace_root = Path(__file__).resolve().parent.parent.parent
+    if str(workspace_root) not in sys.path:
+        sys.path.insert(0, str(workspace_root))
+    from agents.ruppert.env_config import get_paths
+    paths = get_paths()
+    logs_dir = paths['logs']
+    return logs_dir, logs_dir / "predictions.jsonl", logs_dir / "scored_predictions.jsonl"
 
 
 def log_prediction(domain: str, ticker: str, predicted_prob: float,
@@ -38,7 +51,8 @@ def log_prediction(domain: str, ticker: str, predicted_prob: float,
         extra:          Optional additional fields to log
     """
     try:
-        _LOGS_DIR.mkdir(exist_ok=True)
+        _logs_dir, _pred_file, _scored_file = _get_brier_paths()
+        _logs_dir.mkdir(exist_ok=True)
         entry = {
             "ts":             datetime.now(timezone.utc).isoformat(),
             "domain":         domain,
@@ -52,7 +66,7 @@ def log_prediction(domain: str, ticker: str, predicted_prob: float,
         }
         if extra:
             entry.update(extra)
-        with open(_PRED_FILE, "a", encoding="utf-8") as f:
+        with open(_pred_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
         logger.debug(f"[Brier] Logged prediction: {ticker} domain={domain} prob={predicted_prob:.2%}")
     except Exception as e:
@@ -69,11 +83,12 @@ def score_prediction(ticker: str, outcome: int):
         outcome: 1 if our side won (profitable), 0 if lost
     """
     try:
+        _logs_dir, _pred_file, _scored_file = _get_brier_paths()
         # Find the matching prediction
-        if not _PRED_FILE.exists():
+        if not _pred_file.exists():
             return
         prediction = None
-        lines = _PRED_FILE.read_text(encoding="utf-8").strip().splitlines()
+        lines = _pred_file.read_text(encoding="utf-8").strip().splitlines()
         for line in reversed(lines):
             try:
                 entry = json.loads(line)
@@ -87,6 +102,28 @@ def score_prediction(ticker: str, outcome: int):
             logger.debug(f"[Brier] No unscored prediction found for {ticker}")
             return
 
+        # Dedup: skip if (ticker, date) already appears in scored file.
+        # date is derived from the prediction's ts field (entry time), not score time.
+        # Dedup keys on existence only — null-outcome records in scored file still block re-scoring.
+        prediction_date = str(prediction.get("ts", ""))[:10]  # "YYYY-MM-DD" from ISO timestamp (entry date)
+        if _scored_file.exists():
+            for existing_line in _scored_file.read_text(encoding="utf-8").strip().splitlines():
+                try:
+                    existing_rec = json.loads(existing_line)
+                    # ISSUE-101 fix: use prediction entry date (ts[:10]) on both sides.
+                    # resolved_at is set at score-time and can differ from entry date for
+                    # afternoon PDT positions that settle past midnight UTC.
+                    existing_entry_date = str(existing_rec.get("ts", ""))[:10]
+                    if (existing_rec.get("ticker") == ticker
+                            and existing_entry_date == prediction_date):
+                        logger.debug(
+                            f"[Brier] Duplicate score suppressed for {ticker} "
+                            f"on {prediction_date} -- already in scored file"
+                        )
+                        return
+                except Exception:
+                    continue
+
         predicted_prob = prediction.get("predicted_prob", 0.5)
         brier_score = round((outcome - predicted_prob) ** 2, 4)
 
@@ -97,8 +134,8 @@ def score_prediction(ticker: str, outcome: int):
             "resolved_at":   datetime.now(timezone.utc).isoformat(),
         }
 
-        _LOGS_DIR.mkdir(exist_ok=True)
-        with open(_SCORED_FILE, "a", encoding="utf-8") as f:
+        _logs_dir.mkdir(exist_ok=True)
+        with open(_scored_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(scored_entry) + "\n")
 
         logger.info(
@@ -123,10 +160,11 @@ def get_domain_brier_summary() -> dict:
     """
     THRESHOLD = 30
     summary = {}
-    if not _SCORED_FILE.exists():
+    _logs_dir, _pred_file, _scored_file = _get_brier_paths()
+    if not _scored_file.exists():
         return summary
     try:
-        lines = _SCORED_FILE.read_text(encoding="utf-8").strip().splitlines()
+        lines = _scored_file.read_text(encoding="utf-8").strip().splitlines()
         domain_data: dict = {}
         for line in lines:
             try:
