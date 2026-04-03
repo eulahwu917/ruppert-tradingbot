@@ -9,6 +9,7 @@ DS — 2026-03-31
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timezone
 from typing import Optional
@@ -245,8 +246,15 @@ def get_smart_money_signal(wallet_addresses: list[str], keyword: str) -> dict:
 
             for pos in positions:
                 title = pos.get("title", "")
-                if keyword_lower not in title.lower():
-                    continue
+                title_lower_pos = title.lower()
+                # ISSUE-116: Apply word-boundary matching for short keywords (e.g. "eth", "btc")
+                # to avoid false positives against substrings like "steth", "etherfi".
+                if len(keyword_lower) <= 4:
+                    if not re.search(r'\b' + re.escape(keyword_lower) + r'\b', title_lower_pos):
+                        continue
+                else:
+                    if keyword_lower not in title_lower_pos:
+                        continue
 
                 markets_seen.add(title)
                 outcome = (pos.get("outcome") or "").upper()
@@ -275,17 +283,36 @@ def get_smart_money_signal(wallet_addresses: list[str], keyword: str) -> dict:
 # (e.g. "BTC" markets use "Bitcoin" not "BTC" in the question text).
 _ASSET_ALIASES: dict[str, list[str]] = {
     "BTC":  ["btc", "bitcoin"],
-    "ETH":  ["eth"],        # "eth" is a substring of "ethereum" — filter works
+    "ETH":  ["eth", "ethereum"],
     "XRP":  ["xrp", "ripple"],
     "DOGE": ["doge", "dogecoin"],
     "SOL":  ["sol", "solana"],
 }
 
+# ISSUE-116: Short tickers that need word-boundary enforcement to avoid
+# false-positive substring matches (e.g. "eth" in "steth", "etherfi", "ethena").
+_ALIASES_REQUIRING_WORD_BOUNDARY: set[str] = {"eth", "sol", "xrp", "btc", "doge"}
+
 
 def _asset_in_title(asset: str, title_lower: str) -> bool:
-    """Return True if any known alias for asset appears in title_lower."""
+    """Return True if any known alias for asset appears in title_lower.
+
+    Short tickers (eth, sol, xrp, btc, doge) use word-boundary regex matching to
+    avoid false positives (e.g. "eth" matching "steth", "etherfi", "ethena").
+    Longer aliases (bitcoin, ethereum, dogecoin, ripple, solana) use plain
+    substring matching — they are unique enough to be unambiguous.
+    """
     aliases = _ASSET_ALIASES.get(asset.upper(), [asset.lower()])
-    return any(alias in title_lower for alias in aliases)
+    for alias in aliases:
+        if alias in _ALIASES_REQUIRING_WORD_BOUNDARY:
+            # Word-boundary match: alias must not be surrounded by word characters
+            if re.search(r'\b' + re.escape(alias) + r'\b', title_lower):
+                return True
+        else:
+            # Longer aliases are safe for plain substring match
+            if alias in title_lower:
+                return True
+    return False
 
 
 # Crypto asset → search term mapping.
