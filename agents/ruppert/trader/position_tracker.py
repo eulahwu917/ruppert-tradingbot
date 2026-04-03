@@ -89,6 +89,12 @@ _exits_in_flight: set[tuple] = set()
 _EXIT_COOLDOWN_TTL = 300  # 5 minutes
 _recently_exited: dict[tuple, float] = {}
 
+# Write-off log dedup: only log once per ticker per write-off window bucket.
+# Prevents ~1000s of identical "daily write-off — skipping sell" lines per contract.
+# Key: (ticker, side, mins_bucket) where mins_bucket = int(_mins_left).
+# Cleared in remove_position() when the position is finally removed.
+_write_off_logged: set[tuple] = set()
+
 
 _MONTH_MAP = {
     'JAN': 1, 'FEB': 2, 'MAR': 3, 'APR': 4, 'MAY': 5, 'JUN': 6,
@@ -280,6 +286,9 @@ def remove_position(ticker: str, side: str):
     # Discarding inside remove_position() broke the in-flight guard by clearing it
     # before execute_exit()'s finally block ran. The finally block in execute_exit()
     # is the sole place responsible for clearing _exits_in_flight.
+    # Clear write-off dedup entries for this position so they don't accumulate.
+    for _wo_k in [k for k in _write_off_logged if k[0] == ticker and k[1] == side]:
+        _write_off_logged.discard(_wo_k)
     _persist()
 
 
@@ -542,10 +551,13 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
                             # ── LEVEL 1: Write-off ─────────────────────────────────────────
                             # Bid at 1c near settlement → let expire; not worth selling
                             if yes_bid <= 1 and _time_remaining < _write_off_time:
-                                log_activity(
-                                    f'[WS Exit] {ticker} daily write-off '
-                                    f'(bid={yes_bid}c, T-{_mins_left:.0f}min) — skipping sell'
-                                )
+                                _wo_key = (ticker, side, int(_mins_left))
+                                if _wo_key not in _write_off_logged:
+                                    _write_off_logged.add(_wo_key)
+                                    log_activity(
+                                        f'[WS Exit] {ticker} daily write-off '
+                                        f'(bid={yes_bid}c, T-{_mins_left:.0f}min) — skipping sell'
+                                    )
                                 continue  # do NOT exit — let it expire to 0
 
                             # ── LEVEL 2: Catastrophic stop (no time check) ─────────────────
