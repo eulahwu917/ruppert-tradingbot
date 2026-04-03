@@ -447,6 +447,9 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     from agents.ruppert.data_scientist.capital import get_capital
     from agents.ruppert.data_scientist.logger import get_daily_exposure
     capital = get_capital()
+    # NOTE: DAILY_CAP_RATIO (0.70) is 10x the old CRYPTO_DAILY_CAP_PCT (0.07).
+    # At $2k capital this allows ~$1,200/day through the WS hourly path vs ~$120 before.
+    # Monitor daily exposure closely for first 3 live days after trading resumes.
     daily_cap = capital * getattr(config, 'DAILY_CAP_RATIO', 0.70)
     current_exposure = get_daily_exposure()
 
@@ -666,7 +669,7 @@ async def _safe_eval_15m(
         try:
             from agents.ruppert.trader.crypto_15m import evaluate_crypto_15m_entry
         except ImportError as e:
-            logger.error('[WS Feed] crypto_15m import failed — window NOT marked evaluated so REST fallback can recover: %s', e)
+            logger.error('[WS Feed] crypto_15m import failed — window IS marked evaluated, REST fallback also blocked: %s', e)
             _import_ok = False
 
         if _import_ok:
@@ -683,6 +686,10 @@ async def _safe_eval_hourly(ticker: str, yes_ask: int, yes_bid: int, close_time:
     try:
         # push_alert() and position_tracker.add_position() are fully synchronous
         # (verified 2026-04-03) — safe to run entire function in executor.
+        # WARNING: log_trade() runs in a thread executor here while scan cycles also write
+        # to the same JSONL trade files. logger.py does not use file-level locking.
+        # This is acceptable for DEMO (dry-run) but must be addressed before LIVE.
+        # See DS audit note: ds-sprint1-batch1-audit-2026-04-03.md
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(
             None,
