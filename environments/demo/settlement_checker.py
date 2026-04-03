@@ -132,13 +132,13 @@ def compute_pnl(pos, result, side):
     side_won = (side == 'yes' and result == 'yes') or (side == 'no' and result == 'no')
 
     if side_won:
-        exit_price = 99
+        exit_price = 100
         # P&L = (exit - entry) per contract, in dollars
-        pnl = (99 - entry_price) * contracts / 100
+        pnl = (100 - entry_price) * contracts / 100
     else:
         exit_price = 1
-        # Loss = cost basis
-        pnl = -size_dollars
+        # Loss = entry cost basis (contract-based math, consistent with win formula)
+        pnl = -(entry_price * contracts / 100)
 
     return round(pnl, 2), exit_price, entry_price
 
@@ -169,12 +169,22 @@ def check_settlements():
             skipped_count += 1
             continue
 
-        # Fetch market from Kalshi
-        try:
-            market = client.get_market(ticker)
-        except Exception as e:
-            print(f"  [ERROR] API error for {ticker}: {e}")
-            error_count += 1
+        # Fetch market from Kalshi (with retry on transient errors)
+        MAX_RETRIES = 3
+        market = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                market = client.get_market(ticker)
+                break
+            except Exception as e:
+                if attempt < MAX_RETRIES - 1:
+                    wait = 2 ** attempt  # attempt=0 → 1s, attempt=1 → 2s
+                    print(f"  [WARN] API error for {ticker} (attempt {attempt+1}/{MAX_RETRIES}): {e} — retrying in {wait}s")
+                    time.sleep(wait)
+                else:
+                    print(f"  [ERROR] API error for {ticker} after {MAX_RETRIES} attempts: {e} — skipping")
+                    error_count += 1
+        if market is None:
             continue
 
         if not market:

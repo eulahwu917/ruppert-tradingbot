@@ -13,6 +13,7 @@ import sys
 import json
 import os
 import uuid
+import time
 from pathlib import Path
 from datetime import date, datetime, timedelta, timezone
 
@@ -166,11 +167,21 @@ def check_settlements(client):
         if target_date and target_date > today:
             continue
 
-        # Fetch market from Kalshi
-        try:
-            market = client.get_market(ticker)
-        except Exception as e:
-            print(f"  [Settlement Checker] API error for {ticker}: {e}")
+        # Fetch market from Kalshi (with retry on transient errors)
+        MAX_RETRIES = 3
+        market = None
+        for attempt in range(MAX_RETRIES):
+            try:
+                market = client.get_market(ticker)
+                break
+            except Exception as e:
+                if attempt < MAX_RETRIES - 1:
+                    wait = 2 ** attempt  # attempt=0 → 1s, attempt=1 → 2s
+                    print(f"  [Settlement Checker] API error for {ticker} (attempt {attempt+1}/{MAX_RETRIES}): {e} — retrying in {wait}s")
+                    time.sleep(wait)
+                else:
+                    print(f"  [Settlement Checker] API error for {ticker} after {MAX_RETRIES} attempts: {e} — skipping")
+        if market is None:
             continue
 
         if not market:
@@ -222,15 +233,15 @@ def check_settlements(client):
         # Determine exit_price and P&L
         if side == 'yes':
             if result == 'yes':
-                exit_price = 99
-                pnl = (99 - entry_price) * contracts / 100
+                exit_price = 100
+                pnl = (100 - entry_price) * contracts / 100
             else:  # result == 'no'
                 exit_price = 1
                 pnl = -(entry_price * contracts / 100)
         else:  # side == 'no'
             if result == 'no':
-                exit_price = 99
-                pnl = (99 - entry_price) * contracts / 100
+                exit_price = 100
+                pnl = (100 - entry_price) * contracts / 100
             else:  # result == 'yes'
                 exit_price = 1
                 pnl = -(entry_price * contracts / 100)
@@ -649,6 +660,7 @@ def run_monitor():
                 # Compute realized P&L for pnl_cache
                 ep = normalize_entry_price(pos)
                 exit_pnl = round((cur_price - ep) * pos_contracts / 100, 2)
+                exit_opp['pnl'] = exit_pnl  # ISSUE-030: add pnl field after computation (NameError-safe)
 
                 if _dry_run:
                     log_trade(exit_opp, exit_opp['size_dollars'], pos_contracts, {'dry_run': True})
