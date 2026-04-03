@@ -430,7 +430,8 @@ def run_position_check(client, state):
                            'yes_price': price if side=='yes' else 100-price,
                            'market_prob': price/100, 'noaa_prob': None, 'edge': None,
                            'size_dollars': round(contracts*price/100, 2), 'contracts': contracts,
-                           'source': 'weather', 'timestamp': ts(), 'date': str(date.today())}
+                           'source': 'weather', 'timestamp': ts(), 'date': str(date.today()),
+                           'pnl': pnl}
                     if state.dry_run:
                         log_trade(opp, opp['size_dollars'], contracts, {'dry_run': True})
                         log_activity(f'[AUTO-EXIT] {ticker} {side.upper()} @ {price}c P&L=${pnl:+.2f}')

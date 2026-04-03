@@ -76,6 +76,8 @@ TICKER_MODULE_MAP = {
     'KXBTCD':    'crypto_threshold_daily_btc',
     'KXETHD':    'crypto_threshold_daily_eth',
     'KXSOLD':    'crypto_threshold_daily_sol',
+    'KXXRPD':    'crypto_threshold_daily_xrp',
+    'KXDOGED':   'crypto_threshold_daily_doge',
 
     # ── Crypto band daily (range prediction) ─────────────────────────────────
     'KXBTC':     'crypto_band_daily_btc',  'KXETH':  'crypto_band_daily_eth',
@@ -331,9 +333,11 @@ def check_daily_cap_violations(trades_today: list[dict]) -> list[dict]:
         'crypto_band_daily_xrp':      'CRYPTO_1H_BAND_DAILY_CAP_PCT',
         'crypto_band_daily_doge':     'CRYPTO_1H_BAND_DAILY_CAP_PCT',
         'crypto_band_daily_sol':      'CRYPTO_1H_BAND_DAILY_CAP_PCT',
-        'crypto_threshold_daily_btc': 'CRYPTO_1H_DIR_DAILY_CAP_PCT',
-        'crypto_threshold_daily_eth': 'CRYPTO_1H_DIR_DAILY_CAP_PCT',
-        'crypto_threshold_daily_sol': 'CRYPTO_1H_DIR_DAILY_CAP_PCT',
+        'crypto_threshold_daily_btc':  'CRYPTO_1H_DIR_DAILY_CAP_PCT',
+        'crypto_threshold_daily_eth':  'CRYPTO_1H_DIR_DAILY_CAP_PCT',
+        'crypto_threshold_daily_sol':  'CRYPTO_1H_DIR_DAILY_CAP_PCT',
+        'crypto_threshold_daily_xrp':  'CRYPTO_1H_DIR_DAILY_CAP_PCT',
+        'crypto_threshold_daily_doge': 'CRYPTO_1H_DIR_DAILY_CAP_PCT',
         'crypto_dir_15m_btc':         'CRYPTO_15M_DIR_DAILY_CAP_PCT',
         'crypto_dir_15m_eth':         'CRYPTO_15M_DIR_DAILY_CAP_PCT',
         'crypto_dir_15m_sol':         'CRYPTO_15M_DIR_DAILY_CAP_PCT',
