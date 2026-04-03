@@ -5,6 +5,7 @@ Trades KXBTC / KXETH / KXSOL / KXXRP / KXDOGE band markets on Kalshi.
 Formerly embedded in main.py as run_crypto_scan().
 """
 
+import logging
 import math
 import sys
 import requests
@@ -32,6 +33,8 @@ from agents.ruppert.strategist.strategy import (
 from agents.ruppert.data_analyst.polymarket_client import get_crypto_daily_consensus
 from agents.ruppert.env_config import get_paths as _get_bd_paths
 import config
+
+logger = logging.getLogger(__name__)
 
 _BD_LOGS_DIR = _get_bd_paths()['logs']
 _BD_LOGS_DIR.mkdir(exist_ok=True)
@@ -309,8 +312,8 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                         'volume_24h':   _bp_result.get('volume_24h'),
                         'fetched_at':   datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
                     }
-            except Exception:
-                pass
+            except Exception as _bp_err:
+                logger.warning('[crypto_band_daily] Polymarket band shadow fetch failed for %s: %s', _bp_asset, _bp_err)
         # ── End Polymarket shadow ──
 
         # Daily cap check before executing

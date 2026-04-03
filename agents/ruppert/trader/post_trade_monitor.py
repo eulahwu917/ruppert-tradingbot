@@ -534,9 +534,7 @@ def check_crypto_position(pos, market):
 def check_alert_only_position(pos, market):
     """Check econ/geo/fed exit conditions — alert only, no auto-exit."""
     side = pos.get('side', 'no')
-    entry_price = pos.get('entry_price') or pos.get('market_prob', 0.5) * 100
-    if isinstance(entry_price, float) and 0 < entry_price < 1:
-        entry_price = round((1 - entry_price) * 100) if side == 'no' else round(entry_price * 100)
+    entry_price = normalize_entry_price(pos)
 
     no_ask = market.get('no_ask') or 50
     yes_ask = market.get('yes_ask') or 50
@@ -661,6 +659,8 @@ def run_monitor():
                 ep = normalize_entry_price(pos)
                 exit_pnl = round((cur_price - ep) * pos_contracts / 100, 2)
                 exit_opp['pnl'] = exit_pnl  # ISSUE-030: add pnl field after computation (NameError-safe)
+                exit_opp['edge'] = pos.get('edge')
+                exit_opp['confidence'] = pos.get('confidence')
 
                 if _dry_run:
                     log_trade(exit_opp, exit_opp['size_dollars'], pos_contracts, {'dry_run': True})

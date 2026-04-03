@@ -325,6 +325,14 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
         return  # Unknown asset
 
     current_price = signal['price']
+    # TODO ISSUE-062: current_price comes from get_*_signal() via crypto_client.py cache.
+    # It may be stale by seconds to minutes relative to the live WS tick that triggered this call.
+    # market_cache stores live Kalshi bid/ask but not spot (fiat) price — no get_spot_price() method.
+    # A non-blocking spot price improvement requires crypto_client.py to expose a module-level
+    # last_known_price dict that ws_feed.py's WS handler updates on each tick. That refactor is
+    # deferred. For now, the stale-price risk is accepted: edge errors are bounded by the
+    # crypto_client polling interval (typically 30-60s). Monitor in production; file ISSUE-062b
+    # if slippage from stale price causes systematic entry errors.
 
     # Parse strike from ticker (e.g., KXBTC-26MAR28-B87500 → 87500)
     parts = ticker.split('-')
@@ -413,7 +421,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
                     model_prob=round(model_prob, 4), confidence=confidence,
                 )
             except Exception as _ld_err:
-                logger.debug('[WS-CRYPTO] _log_threshold_skip failed: %s', _ld_err)
+                logger.warning('[WS-CRYPTO] _log_threshold_skip failed: %s', _ld_err)
 
     def _log_band_skip(reason_str):
         """Log a SKIP decision for band_daily (between) contracts."""
@@ -430,7 +438,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
                     decision='SKIP', skip_reason=reason_str,
                 )
             except Exception as _ld_err:
-                logger.debug('[WS-CRYPTO] _log_band_skip failed: %s', _ld_err)
+                logger.warning('[WS-CRYPTO] _log_band_skip failed: %s', _ld_err)
 
     def _log_skip(reason_str):
         """Dispatch SKIP log to the right module based on strike_type."""

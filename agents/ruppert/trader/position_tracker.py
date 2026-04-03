@@ -26,6 +26,8 @@ if str(_WORKSPACE_ROOT) not in sys.path:
 
 from agents.ruppert.env_config import get_paths as _get_paths, require_live_enabled, get_current_env  # noqa: E402
 import config
+# _log_exit/_log_settle are the public log_exit/log_settle functions from logger.py (aliased).
+# They include dedup fingerprint checking. ISSUE-023 confirmed resolved in Sprint 3.
 from agents.ruppert.data_scientist.logger import (
     log_activity, normalize_entry_price, _append_jsonl, log_exit as _log_exit, log_settle as _log_settle,
 )
@@ -440,7 +442,7 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
                 # Step 1: Compute entry-aware guard threshold
                 # entry_secs_in_window: seconds from window open to entry
                 # Default 120 (2 min) for legacy positions — preserves current behavior
-                entry_secs = pos.get('entry_secs_in_window', 120)
+                entry_secs = pos.get('entry_secs_in_window', getattr(config, 'STOP_LEGACY_ENTRY_SECS_DEFAULT', 120))
 
                 _STOP_BRACKET_LATE  = getattr(config, 'STOP_BRACKET_LATE',  480)
                 _STOP_BRACKET_MID   = getattr(config, 'STOP_BRACKET_MID',   300)

@@ -26,7 +26,6 @@ for _p in (_WORKSPACE_ROOT, _DEMO_DIR):
         sys.path.insert(0, str(_p))
 
 from agents.ruppert.env_config import get_paths as _get_paths  # noqa: E402
-from agents.ruppert.data_scientist.logger import log_activity   # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -51,11 +50,48 @@ _TEMP_BOUNDS = {
 
 
 def _push_alert(message: str):
-    """Log a health check alert via the standard activity logger (ALERT_CANDIDATE)."""
+    """Write health check alert directly to pending_alerts.json."""
+    alert = {
+        "level": "warning",
+        "message": message,
+        "source": "data_health_check",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    alerts_path = _LOGS_DIR / "truth" / "pending_alerts.json"
     try:
-        log_activity(f"[ALERT_CANDIDATE] [HealthCheck] {message}")
+        import portalocker
+        with open(alerts_path, 'r+', encoding='utf-8') as f:
+            portalocker.lock(f, portalocker.LOCK_EX)
+            try:
+                try:
+                    existing = json.loads(f.read())
+                    if not isinstance(existing, list):
+                        existing = []
+                except Exception:
+                    existing = []
+                existing.append(alert)
+                f.seek(0)
+                f.truncate()
+                f.write(json.dumps(existing, indent=2))
+            finally:
+                portalocker.unlock(f)
+    except ImportError:
+        # portalocker not installed — best-effort write without file lock
+        try:
+            existing = json.loads(alerts_path.read_text(encoding='utf-8')) if alerts_path.exists() else []
+            if not isinstance(existing, list):
+                existing = []
+        except Exception:
+            existing = []
+        existing.append(alert)
+        alerts_path.parent.mkdir(parents=True, exist_ok=True)
+        alerts_path.write_text(json.dumps(existing, indent=2), encoding='utf-8')
+    except FileNotFoundError:
+        # File doesn't exist yet — create it
+        alerts_path.parent.mkdir(parents=True, exist_ok=True)
+        alerts_path.write_text(json.dumps([alert], indent=2), encoding='utf-8')
     except Exception as e:
-        logger.error(f"Failed to push alert: {e}")
+        logger.error(f"Failed to push alert to pending_alerts.json: {e}")
 
 
 def check_nws(results: dict):

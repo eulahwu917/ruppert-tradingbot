@@ -994,8 +994,8 @@ def evaluate_crypto_15m_entry(
     try:
         _poly_result  = get_crypto_consensus(asset)
         _poly_fetched = _time.time()
-    except Exception:
-        pass
+    except Exception as _poly_err:
+        logger.warning('[crypto_15m] Polymarket shadow fetch failed: %s', _poly_err)
 
     _STALE_SECS = 600
     if _poly_result and _poly_fetched and (_time.time() - _poly_fetched) <= _STALE_SECS:

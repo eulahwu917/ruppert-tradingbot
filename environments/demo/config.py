@@ -223,6 +223,11 @@ STOP_GUARD_MID_PRIMARY     = 300   # entry 3–5 min into window
 STOP_GUARD_LATE_PRIMARY    = 180   # entry 5–8 min into window
 STOP_GUARD_SECONDARY       = 90    # entry 8+ min into window
 
+# Default for legacy positions loaded at startup that lack entry_secs_in_window.
+# 120s (2 min) falls in the EARLY bracket (<3 min), triggering STOP_GUARD_EARLY_PRIMARY (480s).
+# This is the most conservative guard — correct for positions where entry timing is unknown.
+STOP_LEGACY_ENTRY_SECS_DEFAULT = 120
+
 # Price thresholds (as fraction of entry price)
 STOP_PRICE_CATASTROPHIC  = 0.20   # Tier 1: bid below 20% of entry
 STOP_PRICE_SEVERE        = 0.30   # Tier 2: bid below 30% of entry

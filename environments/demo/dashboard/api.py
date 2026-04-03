@@ -1127,7 +1127,7 @@ def get_pnl_history():
 
     from datetime import date as _date
     _today = _date.today()
-    pnl_by_day: dict = {}  # ISSUE-063: per-day P&L accumulator (BOT-only closed trades)
+
 
     # ── Settled / manually exited positions ─────────────────────────────────
     # Use pnl field from settle/exit records directly — no API calls needed.
@@ -1223,10 +1223,7 @@ def get_pnl_history():
                         module_stats[_bucket3]['trade_count_year'] += 1
                 if is_manual: closed_by_src_period['manual']['all'] += pnl
                 else:         closed_by_src_period['bot']['all']    += pnl
-                # ISSUE-063: accumulate per-day P&L for BOT-only trades (for chart points)
-                if not is_manual and sdate:
-                    d_str = sdate.isoformat()
-                    pnl_by_day[d_str] = pnl_by_day.get(d_str, 0.0) + pnl
+
         except Exception as e:
             _logger.error("[dashboard:get_pnl_history/settled] %s", e, exc_info=True)
 
@@ -1381,19 +1378,6 @@ def get_pnl_history():
 
     total_pnl = closed_by_source['bot'] + open_by_source['bot']
 
-    # ISSUE-063: Build chart time-series from actual per-day trade log data (BOT-only closed P&L)
-    from datetime import date as date_cls
-    today = str(date_cls.today())
-    # pnl_by_day was accumulated in the settled_tickers loop above
-    points = [{"date": d, "pnl": round(v, 2)} for d, v in sorted(pnl_by_day.items())]
-    # Append/replace today's point with combined closed+open total
-    if today not in pnl_by_day:
-        points.append({"date": today, "pnl": round(total_pnl, 2)})
-    else:
-        for p in points:
-            if p["date"] == today:
-                p["pnl"] = round(total_pnl, 2)
-
     # Deployed costs for % calculation — exclude settled AND manually exited positions
     all_t = read_all_trades()
     exited2 = {t.get('ticker') for t in all_t if t.get('action') == 'exit'}
@@ -1453,7 +1437,6 @@ def get_pnl_history():
         "total_trades": closed_count_by_source['bot'],   # BOT-only trade count
         "bot_trades":  closed_count_by_source['bot'],
         "man_trades":  closed_count_by_source['manual'],
-        "points": points,
         "total":  round(total_pnl, 2),
         # Cost basis for closed positions (sum of original entry costs in dollars).
         # Use these as the denominator for P&L % — NOT bot_deployed/man_deployed,

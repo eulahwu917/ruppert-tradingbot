@@ -25,6 +25,57 @@ Entries marked Fixed+QA-passed older than 60 days → archive to `memory/audit-l
 
 ---
 
+## 2026-04-03 Sprint 1 Fixes
+
+## 2026-04-03 Sprint 4 Fixes
+
+SPRINT4-001 | KXSOL15M missing from CRYPTO_15M_SERIES in ws_feed — SOL misrouted to hourly evaluator | Fixed (e051551) Trader+Strategist-reviewed
+SPRINT4-087 | OBI EWM direction inverted — overweighting old data (25% of signal wrong) | Fixed (e051551) Strategist-reviewed
+SPRINT4-035 | Coinbase fail-open — basis filter silently skipped on API unavailable | Fixed (e051551) Trader-reviewed
+SPRINT4-073 | Exception swallows in eval loop — silent crashes | Fixed (e051551) Trader-reviewed
+
+---
+
+## 2026-04-03 Sprint 3 Fixes
+
+SPRINT3-077 | Multi-process JSONL writes without file lock | Fixed (019d14d) DS+Trader-reviewed
+SPRINT3-023 | Exit records bypass log_trade() — missing schema + no dedup fingerprint | Fixed (019d14d) DS+Trader-reviewed
+SPRINT3-025 | Double-settlement race — WS tracker + settlement checker both write settle records | Fixed (019d14d) DS+Trader-reviewed
+SPRINT3-028 | Phantom settlement inferred from yes_bid≥99 without status check | Fixed (019d14d) DS-reviewed
+SPRINT3-033 | position_monitor fanout — one exit triggers full rescan | Fixed (2c078c4) Trader-reviewed
+SPRINT3-094 | position_monitor places orders without CB check | Fixed (2c078c4) Trader-reviewed
+
+---
+
+## 2026-04-03 Sprint 2 Fixes
+
+SPRINT2-024 | state.json non-atomic write — crash corrupts traded_tickers | Fixed (ff9be04) DS+Trader-reviewed
+SPRINT2-052 | No process lock on scan cycles — overlapping Task Scheduler invocations | Fixed (ff9be04) DS+Trader-reviewed
+SPRINT2-031 | Cycle auto-exits don't call remove_position() — WS double-exits | Fixed (ff9be04) DS+Trader-reviewed
+SPRINT2-029 | Failed orders logged as real buy — phantom cap deployment | Fixed (d286b28) DS-reviewed
+SPRINT2-099 | Failed order size logged as strategy_size not $0 | Fixed (d286b28) DS-reviewed
+SPRINT2-078 | Trader.__init__ crashes on API error — kills entire scan cycle | Fixed (d286b28) DS+Trader-reviewed
+SPRINT2-055 | Settled positions resurrected by post-scan audit every cycle | Fixed (45d3a9b) DS-reviewed
+SPRINT2-056 | _cleanup_duplicates() deletes exit records on trade_id collision | Fixed (45d3a9b) DS-reviewed
+SPRINT2-051 | get_capital() silent $10k fallback — no alert | Fixed (45d3a9b) DS-reviewed
+
+---
+
+## 2026-04-03 Sprint 1 Fixes
+
+SPRINT1-070 | WS feed hourly evaluator capped at 7% instead of 70% — WS band/threshold trades hard-blocked | Fixed (ceba350) DS-reviewed
+SPRINT1-015 | WS 15m eval no dedup guard — burst ticks fire concurrent duplicate orders | Fixed (ceba350) DS-reviewed
+SPRINT1-060 | WS eval + REST fallback both fire same window — duplicate orders | Fixed (ceba350) DS-reviewed
+SPRINT1-014 | Blocking I/O in async WS handler — event loop freeze → disconnects | Fixed (ceba350) DS-reviewed
+SPRINT1-061 | _rest_refresh_stale() blocks event loop every 5 min | Fixed (ceba350) DS-reviewed
+SPRINT1-049 | Watchdog spawns duplicate ws_feed without killing hung process | Fixed (ceba350) DS-reviewed
+SPRINT1-002 | No asyncio.Lock on _exits_in_flight — concurrent tasks pass dedup → double-exits | Fixed (664d81e) DS-reviewed
+SPRINT1-003 | execute_exit() swallows API failure → position stays in tracker → infinite retry | Fixed (664d81e) DS-reviewed
+SPRINT1-107 | _tracked dict mutated across asyncio tasks → stale pos refs in execute_exit() | Fixed (664d81e) DS-reviewed
+DS-NEW-001  | Abandoned positions (3-strike path) wrote no JSONL exit record — audit gap | Fixed (4a92830) DS-verified
+
+---
+
 ## 2026-03-29 Runtime Issues (post-audit, evening — 15m optimization)
 
 RUNTIME-2026-03-29-010 | LATE_WINDOW skips 59% of all 15m decisions — WS reconnect cold-start gap + slow fallback poll | Fixed (df9c857 — STRAT-15M-1/2/3/4: REST bootstrap on reconnect, 30s poll, extended entry cutoff, aligned settlement gate) QA-passed
@@ -547,3 +598,63 @@ RESEARCH-2026-04-02-H | Mathematical insight shared with David: WR alone doesn't
 - 7-day validation window: April 2–9
 - All systems: WS + Dashboard running on latest code
 - Open items: see memory/2026-04-02.md
+
+---
+
+## 2026-04-02 Evening Audit + Fix Session (18:00–19:52 PDT)
+
+### Root Cause Investigation
+
+CEO investigated catastrophic daily module losses (-$3,219: threshold_daily_btc -$1,474, band_daily_btc -$671, threshold_daily_eth -$558, band_daily_eth -$515). 91 buys, 6% WR. BTC dump on US tariff announcement. Full findings verified by Strategist + DS.
+
+RUNTIME-2026-04-02-001 | WS feed bypasses circuit breaker entirely — `evaluate_crypto_entry()` had no CB check; scheduled `crypto_1d` scans were CB-blocked at 06:30 + 10:30 but WS kept entering all day | Fixed (1e8c91c — per-module CB gate added to WS entry path; exits unaffected) QA-passed
+
+RUNTIME-2026-04-02-002 | Polymarket BTC market discovery returning None — 4 bugs: wrong search keywords ("bitcoin up" vs "bitcoin above"), asset filter dropping all "Bitcoin" titles (only matched "btc"), scoring not preferring today's expiry, ETH keywords inconsistent | Fixed (746e551) QA-passed
+
+RUNTIME-2026-04-02-003 | position_tracker log spam — write-off skip message logged on every WS tick for dying contracts; 1,348 spam lines today | Fixed (8f87dd7 — per-minute dedup guard) QA-passed
+
+RUNTIME-2026-04-02-004 | Band daily sigma hardcoded to 18h — next-day contracts (~41h to settlement) used wrong sigma in band_prob(), producing false positive edge | Fixed (d2fc10b — sigma_m computed per-market from actual _hours_left) QA-passed
+
+RUNTIME-2026-04-02-005 | Threshold daily strike selection OTM drift — select_best_strike() picked most OTM contract (lowest ask = best apparent edge) because P_above is a single scalar; entered $67,499 YES when BTC at $66,800 | Fixed (d2fc10b — CRYPTO_1D_MAX_STRIKE_DISTANCE_PCT=0.02 gate added) QA-passed
+
+RUNTIME-2026-04-02-006 | Daily modules have zero decisions logging — decisions_1d.jsonl and decisions_band.jsonl never written from WS entry path; both were wired only to evaluate_crypto_1d_entry() which didn't run | Fixed (4b6dc60 — _log_decision() and _log_band_decision() wired into ws_feed.py evaluate_crypto_entry()) QA-passed
+
+RUNTIME-2026-04-02-007 | CB global state stale after trade log mutations — dedup/cleanup scripts didn't call update_global_state() afterward, leaving CB showing $0 for hours | Fixed (4b6dc60 — update_global_state() finalizer added to clean_break.py, pnl_correction.py, migrate_module_taxonomy.py, pnl_correction_module_id.py) QA-passed
+
+RUNTIME-2026-04-02-008 | Polymarket return dicts missing end_date field | Fixed (d2fc10b — added to _fetch_crypto_consensus() and _fetch_crypto_daily_consensus()) QA-passed
+
+RUNTIME-2026-04-02-009 | get_gdelt_events imported in geopolitical_scanner.py but not implemented in geo_client.py — latent import crash | Fixed (e5367b2 — real GDELT DOC API stub added with graceful error handling) QA-passed
+
+RUNTIME-2026-04-02-010 | 4 stale test failures — tests pointing at relocated main.py + asserting removed ticker-unlock behavior | Fixed (5a85f8b — tests updated to match current code; 25/25 now passing) QA-passed
+
+### Research Findings (documented, no immediate action)
+
+RESEARCH-2026-04-02-I | S1 signal has no strike-relative positioning — uses prior-day close-to-close momentum, unaware of whether strike is OTM. Edge gate doesn't protect because P_above is scalar not per-strike. Partially mitigated by strike distance gate (RUNTIME-005). Long-term fix: per-strike lognormal (like band_daily) after 30+ trades. | Deferred (April 9 checkpoint)
+
+RESEARCH-2026-04-02-J | Polymarket wiring would have reduced today's losses 15-25%, not eliminated them — at $66,900-$67,200 strikes Polymarket was 50-80% YES. Only higher strikes ($68k+, 13.5% YES) would have been fully blocked. | Informational
+
+RESEARCH-2026-04-02-K | CB morning trips ($3,078-$5,543) were inflated by poisoned trade log being read live — CB reads trade log on every call; poisoned records inflated losses and blocked 4 scheduled cycles during peak hours. Post-cleanup CB state verified correct at -$3,088. | Documented (DS MEMORY.md updated with standing rule: always call update_global_state() after trade log mutations)
+
+RESEARCH-2026-04-02-L | Binance is geo-blocked (HTTP 451) from US IPs — bot transparently routes funding rate calls to OKX instead. Previously undocumented. | Documented (agents/ruppert/docs/apis/binance.md)
+
+RESEARCH-2026-04-02-M | Polymarket settlement is noon ET (16:00 UTC), Kalshi settlement is 10pm ET — different settlement times for the same underlying. Important for cross-venue signal interpretation. | Documented (agents/ruppert/docs/apis/polymarket.md + kalshi.md)
+
+### New Infrastructure
+
+- API reference docs created: `agents/ruppert/docs/apis/` — 9 files covering Polymarket, Kalshi, OKX, Binance, Kraken, Open-Meteo, NOAA/NWS/GHCND, FRED, GDELT/TheNewsAPI
+
+### Commits (evening session)
+- 1e8c91c — Add CB gate to WS feed entry path
+- 746e551 — Fix Polymarket BTC/ETH market discovery (keyword + asset filter + scoring)
+- 8f87dd7 — Fix log spam: position_tracker write-off dedup
+- d2fc10b — Batch A: polymarket end_date, band sigma per-market, strike distance gate
+- 4b6dc60 — Batch B: decisions logging wired to WS path, CB cleanup finalizer
+- e5367b2 — Batch C: add get_gdelt_events stub to geo_client (prevent import crash)
+- 5a85f8b — Fix pre-existing test failures — update stale tests to match current code
+
+### EOD State (19:52 PDT)
+- Capital: ~$10,690 (still settling)
+- Repo: fully pushed, clean working tree, 25/25 tests passing
+- WS restarted on latest code (all 7 commits live)
+- Open: model_prob >= 0.40 filter (wait for April 9 data); 4 pre-existing pytest warnings (non-fatal)
+- Next checkpoint: April 9 — Q4 WR review, MIN_CONFIDENCE gate decision

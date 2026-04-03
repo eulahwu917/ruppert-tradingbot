@@ -33,6 +33,10 @@ _Owned by: Data Scientist agent. Updated after synthesis issues, data health fin
 - Bot P&L without Mar 13 bug: ~+$81 (consistent with Opus figure of +$84.52)
 - Always verify settle records are included when computing P&L — easy to miss
 
+## Standing Rule: Trade Log Cleanup → Must Follow with CB State Refresh
+**Established: 2026-04-02 (CB Poisoned Data Cleanup task)**
+The global circuit breaker (`check_global_net_loss()`) reads `trades_YYYY-MM-DD.jsonl` live on every call — it does NOT rely on `circuit_breaker_state.json` for its decision. The `global` key in the state file is only a cached snapshot from the last `update_global_state()` call. This means: any time the trade log is modified — deduplication, archiving, correction inserts, or record removal — the CB state cache will be stale until explicitly refreshed. **Standing rule: after ANY trade log cleanup or modification, immediately call `update_global_state(capital)` with the current capital figure to bring the cached state in sync.** Without this, the stale `global` key will show an incorrect net loss figure (e.g., $0.0 instead of the true net loss), which can mislead anyone reading the state file directly (dashboards, auditors, health checks). This does not affect the CB trip decision itself (which is live), but it does affect state file accuracy and any system that reads the cached figure.
+
 ---
 
 ## 2026-03-31 Session Update

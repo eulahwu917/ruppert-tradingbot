@@ -46,6 +46,17 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 - **Log atomicity (ISSUE-014):** logger.py has no file locking — acceptable for DEMO, must fix before LIVE
 - **Pipeline violations noted:** Dev committed without waiting for DS sign-off (Batch 2, DS-NEW-001) — process to be reinforced
 
+### P1 Sprints Progress (2026-04-03)
+- **Sprint P1-1** ✅ COMPLETE — Signal Integrity (8 issues): ISSUE-096, 032, 129, 114, 069, 116, 104, 105 — commits b171271, c03e5b1, a441a6d
+- **Sprint P1-2** ✅ COMPLETE — Settlement + Capital Accuracy (5 issues): ISSUE-026, 027, 110, 030, 102 — commits d3584bf, 641e2d3
+- **Sprint P1-3** ✅ COMPLETE — Analytics + Calibration (6 issues): ISSUE-005, 041, 004, 101, 103, 046 — commits 2e870f6, 1ebee0a, 9a1d78e
+- **Sprint P1-4** ✅ COMPLETE — Dashboard Fixes (7 issues): ISSUE-018, 019, 063, 064, 065, 066, 072 — commit d02db9f
+  - Note: ISSUE-063 (P&L chart) was already resolved by design — chart was intentionally removed. Backend change is harmless dead code. Will clean up in P1-5.
+- **Sprint P1-5** — Exit Records + Monitoring (8 issues) — IN PROGRESS
+- **Sprint P1-6** — Daily Module Pre-Re-Enable (5 issues) — parallel track, pending Strategist shadow analysis
+- **Adversarial reviewer** added permanently to pipeline — catches spec bugs every round
+- **Pipeline improvement:** System Map audit deferred to after all P1-P3 sprints complete (not after P1)
+
 ### P0 Mini-Sprint — COMPLETE (2026-04-03)
 5 additional P0 issues found during P1 domain reviews and fixed immediately:
 - ISSUE-034: position_monitor WS_ENABLED crash — 07d3eba

@@ -158,15 +158,15 @@ def _settle_single_ticker(ticker: str, result: str, pos: Optional[dict] = None):
     # Compute P&L based on settlement
     if side == 'yes':
         if result == 'yes':
-            exit_price = 99
-            pnl = (99 - entry_price) * contracts / 100
+            exit_price = 100
+            pnl = (100 - entry_price) * contracts / 100
         else:
             exit_price = 1
             pnl = -(entry_price * contracts / 100)
     else:  # side == 'no'
         if result == 'no':
-            exit_price = 99
-            pnl = (99 - entry_price) * contracts / 100
+            exit_price = 100
+            pnl = (100 - entry_price) * contracts / 100
         else:
             exit_price = 1
             pnl = -(entry_price * contracts / 100)
