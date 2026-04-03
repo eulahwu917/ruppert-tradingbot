@@ -756,9 +756,13 @@ def compute_closed_pnl_from_logs() -> float:
         _pnl_mtime_cache['value'] = result
         return result
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(f'[Logger] compute_closed_pnl_from_logs() failed: {e}')
-        return 0.0
+        # Invalidate mtime cache so the next call retries from scratch instead of
+        # short-circuiting on the stale (possibly None or wrong) cached mtime.
+        _pnl_mtime_cache['mtime'] = None
+        _pnl_mtime_cache['value'] = None
+        raise RuntimeError(
+            f'[Logger] compute_closed_pnl_from_logs() failed — cannot compute capital: {e}'
+        ) from e
 
 
 def get_daily_summary():

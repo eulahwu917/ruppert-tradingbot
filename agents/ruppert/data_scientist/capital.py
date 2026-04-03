@@ -73,10 +73,15 @@ def get_capital() -> float:
         # Do NOT use pnl_cache.json here: it lags behind trade logs until synthesizer runs,
         # causing Account Value to diverge from the dashboard Closed P&L panel.
         from agents.ruppert.data_scientist.logger import compute_closed_pnl_from_logs
-        closed_pnl = compute_closed_pnl_from_logs()
+        try:
+            closed_pnl = compute_closed_pnl_from_logs()
+        except RuntimeError:
+            raise  # do NOT swallow — capital is unknown; let callers handle it
         return round(total + closed_pnl, 2)
 
     except Exception as e:
+        if isinstance(e, RuntimeError):
+            raise  # from compute_closed_pnl_from_logs() — capital unknown, do not swallow
         logger.warning(f"[Capital] get_capital() failed: {e} — using ${_DEFAULT_CAPITAL:.0f} default")
         try:
             _should_alert = True
@@ -132,10 +137,11 @@ def get_pnl() -> dict:
     No disk cache — single source of truth.
     """
     result = {'closed': 0.0, 'open': 0.0, 'total': 0.0}
+    from agents.ruppert.data_scientist.logger import compute_closed_pnl_from_logs
     try:
-        from agents.ruppert.data_scientist.logger import compute_closed_pnl_from_logs
         result['closed'] = compute_closed_pnl_from_logs()
         result['total'] = result['closed'] + result['open']
-    except Exception as e:
-        logger.warning(f"[Capital] get_pnl() failed: {e}")
+    except RuntimeError:
+        logger.error('[Capital] get_pnl() — P&L compute failed, propagating')
+        raise  # caller must handle — do not return zeroed dict silently
     return result
