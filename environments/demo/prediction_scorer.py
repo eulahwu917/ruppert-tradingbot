@@ -12,7 +12,10 @@ Usage:
 """
 import sys
 import json
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Ensure workspace root is on sys.path
 _WORKSPACE_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -104,14 +107,22 @@ def score_new_settlements():
     processed = _load_processed_keys()
     all_trades = _load_all_trades()
 
-    # Index buy records by (ticker, date) for lookup
+    # Primary index: (ticker, date) — exact match for same-day trades
     buy_index: dict[tuple, dict] = {}
+    # Fallback index: (ticker, side) — for multi-day positions where settle date != buy date.
+    # Keyed on side to prevent returning the wrong buy record when a ticker is re-traded from
+    # the opposite side on a different date. If (ticker, side) doesn't match, return None —
+    # do NOT fall through to a stale or wrong-side buy record.
+    buy_index_by_ticker_side: dict[tuple, dict] = {}
     for rec in all_trades:
         action = rec.get('action', '')
         if action in ('buy', 'open'):
-            key = (rec.get('ticker', ''), rec.get('date', ''))
-            if key not in buy_index:
-                buy_index[key] = rec
+            primary_key = (rec.get('ticker', ''), rec.get('date', ''))
+            if primary_key not in buy_index:
+                buy_index[primary_key] = rec
+            ts_key = (rec.get('ticker', ''), rec.get('side', 'yes'))
+            if ts_key not in buy_index_by_ticker_side:
+                buy_index_by_ticker_side[ts_key] = rec
 
     # Find new settle/exit records
     new_scored = []
@@ -127,20 +138,35 @@ def score_new_settlements():
         if key in processed:
             continue
 
-        # Look up original buy record
-        buy_rec = buy_index.get(key, {})
+        # Look up original buy record — primary by (ticker, date), fallback by (ticker, side)
+        settle_side = rec.get('side', 'yes')
+        buy_rec = buy_index.get(key) or buy_index_by_ticker_side.get((ticker, settle_side))
+        # If neither lookup succeeds, buy_rec is None.
+        # Warn on fallback paths.
+        if not buy_index.get(key):
+            if buy_rec:
+                logger.warning(
+                    f"[Scorer] {ticker}: date mismatch -- using (ticker, side) fallback "
+                    f"buy record (buy date={buy_rec.get('date', '?')}, settle date={trade_date})"
+                )
+            else:
+                logger.warning(
+                    f"[Scorer] {ticker}: no matching buy record found for "
+                    f"(ticker={ticker}, side={settle_side}) -- predicted_prob will be null"
+                )
 
-        module = rec.get('module') or buy_rec.get('module', '')
+        module = rec.get('module') or (buy_rec.get('module', '') if buy_rec else '')
         city = None
         if module == 'weather':
-            city = _extract_city(ticker, rec.get('title') or buy_rec.get('title', ''))
+            city = _extract_city(ticker, rec.get('title') or (buy_rec.get('title', '') if buy_rec else ''))
 
-        # Extract predicted probability: prefer noaa_prob from buy record, fall back to model_prob
-        predicted_prob = buy_rec.get('noaa_prob')
+        # Extract predicted probability: prefer noaa_prob from buy record, fall back to model_prob.
+        # If buy_rec is None (no matching buy found), predicted_prob stays None — do NOT corrupt.
+        predicted_prob = buy_rec.get('noaa_prob') if buy_rec else None
         if predicted_prob is None:
-            predicted_prob = buy_rec.get('model_prob')
+            predicted_prob = buy_rec.get('model_prob') if buy_rec else None
         if predicted_prob is None:
-            predicted_prob = buy_rec.get('market_prob')
+            predicted_prob = buy_rec.get('market_prob') if buy_rec else None
 
         # Derive outcome (int 0/1) from settlement_result
         _settlement_result = rec.get('settlement_result')
@@ -160,7 +186,7 @@ def score_new_settlements():
         # predicted_prob must represent the bettor's win probability for Brier to be meaningful.
         # NOTE: If predicted_prob is None, only _outcome is flipped. Brier stays None (correct).
         # NOTE: edge is NOT flipped — it is already signed from the bettor's perspective.
-        side = rec.get('side') or buy_rec.get('side', 'yes')
+        side = rec.get('side') or (buy_rec.get('side', 'yes') if buy_rec else 'yes')
         if side == 'no' and _outcome is not None:
             _outcome = 1 - _outcome
             if predicted_prob is not None:
@@ -177,8 +203,8 @@ def score_new_settlements():
             "predicted_prob":  round(float(predicted_prob), 4) if predicted_prob is not None else None,
             "outcome":         _outcome,
             "brier_score":     _brier,
-            "edge":            round(float(buy_rec.get('edge', 0)), 4) if buy_rec.get('edge') is not None else None,
-            "confidence":      round(float(buy_rec.get('confidence', 0)), 4) if buy_rec.get('confidence') is not None else None,
+            "edge":            round(float(buy_rec.get('edge', 0)), 4) if buy_rec and buy_rec.get('edge') is not None else None,
+            "confidence":      round(float(buy_rec.get('confidence', 0)), 4) if buy_rec and buy_rec.get('confidence') is not None else None,
             "date":            trade_date,
             "settlement_date": rec.get('date', trade_date),
             "pnl":             round(float(rec.get('pnl', 0)), 2) if rec.get('pnl') is not None else None,
