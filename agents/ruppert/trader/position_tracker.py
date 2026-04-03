@@ -825,6 +825,28 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
                         push_alert('error', f'EXIT ABANDONED after 3 failures: {ticker} {side.upper()}', ticker=ticker)
                     except Exception as _alert_err:
                         logger.error('[WS Exit] push_alert failed on abandonment: %s', _alert_err)
+                    try:
+                        _abandon_log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
+                        abandon_record = {
+                            'trade_id': str(uuid.uuid4()),
+                            'timestamp': datetime.now().isoformat(),
+                            'date': str(date.today()),
+                            'ticker': ticker,
+                            'title': title,
+                            'side': side,
+                            'action': 'exit',
+                            'action_detail': 'ABANDONED after 3 exit failures — no fill confirmed',
+                            'source': 'ws_position_tracker',
+                            'module': module,
+                            'entry_price': entry_price,
+                            'exit_price': current_bid,
+                            'contracts': quantity,
+                            'pnl': round(pnl, 2),
+                        }
+                        with open(_abandon_log_path, 'a', encoding='utf-8') as f:
+                            f.write(json.dumps(abandon_record) + '\n')
+                    except Exception as _abandon_log_err:
+                        logger.error('[WS Exit] Failed to write abandonment record for %s: %s', ticker, _abandon_log_err)
                     remove_position(ticker, side)
                     _recently_exited[key] = time.time()
                 return
