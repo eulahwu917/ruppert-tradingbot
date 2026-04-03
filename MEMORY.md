@@ -1,6 +1,100 @@
 # MEMORY.md — Ruppert Long-Term Memory
 _Main session only. Never load in group chats or shared contexts._
 
+## Behavioral Note (2026-04-02)
+David explicitly asked: be honest, push back when you disagree. Don't just agree to agree. This applies to technical decisions, sequencing, priorities — everything.
+
+---
+
+## Major Session: 2026-04-02 Evening → 2026-04-03 Morning
+
+### System Map Built (v1.1)
+- **Location:** `agents/ruppert/docs/SYSTEM_MAP.md` (committed `4378c11`)
+- Built from 6 research agents + 10 independent audit passes (avg 8.1/10 confidence)
+- **Obsidian copy:** `2026-04-03 Ruppert System Map v1.1.md`
+- This is the definitive reference for how the system works — always read before making architectural decisions
+
+### Exhaustive Bug Hunt Complete
+- **118 unique issues** found across entire codebase
+- Consolidated: `memory/agents/master-issues-CONSOLIDATED-2026-04-02.md`
+- Prioritized: `memory/agents/master-issues-PRIORITIZED-2026-04-02.md`
+- **Obsidian copies:** `2026-04-03 Ruppert Bug Report - Consolidated 118 Issues.md` and `2026-04-03 Ruppert Bug Report - Prioritized P0-P4.md`
+
+### Fix Plan — 5 Sprints Approved by David
+- **Full plan:** `memory/2026-04-03-fix-plan.md`
+- **Obsidian copy:** `2026-04-03 Ruppert Fix Plan - 5 Sprints.md`
+- **Changelog:** `memory/agents/fix-changelog.md` (update after every commit with issue ID)
+
+**Sprint order:**
+1. ✅ COMPLETE — 15m feed stability + duplicate order prevention (9 issues + DS-NEW-001)
+2. ✅ COMPLETE — Capital and position state accuracy (8 issues + ISSUE-099)
+3. ✅ COMPLETE — Settlement and double-exit prevention (6 issues)
+4. ✅ COMPLETE — 15m signal correctness (4 issues)
+5. ✅ COMPLETE — Circuit breaker coverage + timezone + NO-side P&L fix (5 issues) — commits d0f4436, b376074
+
+**Rules:**
+- Every fix gets a plain English spec reviewed by David before Dev touches code
+- Commit messages must include issue ID: `fix: ISSUE-XXX description`
+- After every sprint, log changes in fix-changelog.md
+- QA updates SYSTEM_MAP.md after each sprint
+
+### Sprint 1 — COMPLETE (2026-04-03 morning)
+- **9 issues fixed + DS-NEW-001 patch** across 4 commits: `ceba350`, `664d81e`, `2d26cb8`, `4a92830`
+- All issues marked ✅ in `memory/agents/master-issues-PRIORITIZED-2026-04-02.md`
+- Full changelog: `memory/agents/fix-changelog.md`
+- **Process change (David):** DA is data-fetching only. All spec reviews → DS going forward.
+- **Log atomicity (ISSUE-014):** logger.py has no file locking — acceptable for DEMO, must fix before LIVE
+- **Pipeline violations noted:** Dev committed without waiting for DS sign-off (Batch 2, DS-NEW-001) — process to be reinforced
+
+### P0 Mini-Sprint — COMPLETE (2026-04-03)
+5 additional P0 issues found during P1 domain reviews and fixed immediately:
+- ISSUE-034: position_monitor WS_ENABLED crash — 07d3eba
+- ISSUE-117: vol_ratio=0 fires full Kelly — 07d3eba
+- ISSUE-007: compute_closed_pnl_from_logs silent $0 — c69dee2
+- ISSUE-006: NO-side Brier inverted — 7fb4d19
+- ISSUE-040: optimizer domain name mismatch — 058589b
+- Adversarial reviewer introduced to pipeline — catches spec bugs before Dev builds
+- ISSUE-104 closed as invalid (Python short-circuit protects it, not a real bug)
+
+### All P0 Sprints Complete (2026-04-03)
+- All 5 sprints done. 29 P0 issues fixed across 10+ commits.
+- Trading remains halted pending System Map update + P1 scoping.
+- **Next:** System Map update (Trader + DS authors, QA verifies), then P1 domain reviews.
+
+### Sprint 5 — COMPLETE (2026-04-03)
+- **5 issues fixed** — commits d0f4436, b376074
+- ISSUE-076: CB file lock (portalocker) on all read-modify-write ops
+- ISSUE-047: Per-asset CB trip logging confirmed + added
+- ISSUE-044: _today_pdt() helper in ws_feed.py + position_tracker.py
+- ISSUE-043: EXIT_GAIN_PCT raises ImportError if missing (no silent 0.70 fallback)
+- ISSUE-042: NO-side flip removed from add_position(); Design D stops gated to YES only; side=key[1] in check_exits()
+- ISSUE-042 Part B: DS inserted 125 exit_correction records; capital corrected
+- Post-correction capital (clean, after dupe removal): **$10,347.42**
+- Module P&L (Apr 2-3): 15m directional +$13,475 total; daily band/threshold -$13,128 total — nearly flat overall
+- Daily modules (esp. crypto_threshold_daily_btc at 3.4% WR) are bleeding. Needs P1 review.
+
+### Known Active Issues (as of 2026-04-03 — post all P0 sprints)
+- All P0 issues resolved ✅
+- Trading halted (WS feed killed 12:06 PDT Apr 3 — was running through halt)
+- Daily modules severely underperforming — assess in P1
+
+### David's Strategic Decisions (authoritative, 2026-04-03)
+- **Priority order:** crypto_dir_15m first → crypto daily → then live
+- **System Map naming:** "System Map" (not Data Dictionary, not Code Map)
+- **Fix process:** Spec in plain English → David reviews → Dev implements → QA verifies
+- **Going live requires:** P0 + P1 + P2 all clean
+- **Daily modules:** Left running despite tariff volatility losses (David's call, 2026-04-03)
+
+### Trading Halted (2026-04-03 08:56 PDT)
+- All trading halted by David while Sprint fixes are in progress
+- WS feed killed, all Task Scheduler tasks disabled
+- Tasks to re-enable when ready: Ruppert-WS-Watchdog, Ruppert-WS-Persistent, Ruppert-Crypto-930AM, Ruppert-MidnightRestart, RuppertDashboard
+- Do NOT re-enable until Sprint 1 is complete and QA passes
+
+### Dashboard Fix (2026-04-02)
+- Module P&L breakdown fixed — was showing ~$710 phantom losses (commit `ed34247`)
+- Uses canonical `compute_closed_pnl_from_logs()` path now
+
 ---
 
 ## Access Restrictions
