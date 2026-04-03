@@ -885,6 +885,9 @@ def check_exit_price_discrepancies(trades: list[dict], tracked: dict) -> list[di
 # ─────────────────────────────── Cleanup actions ─────────────────────────────
 
 
+_PROTECTED_ACTIONS = {'exit', 'settle', 'correction', 'exit_correction', 'failed_order', 'abandoned'}
+
+
 def _cleanup_duplicates(path: Path, dupe_ids: list[str]) -> int:
     """Remove duplicate trade entries (keep first occurrence). Returns count removed."""
     trades = _read_trades_file(path)
@@ -893,6 +896,13 @@ def _cleanup_duplicates(path: Path, dupe_ids: list[str]) -> int:
     removed = 0
     for t in trades:
         tid = t.get('trade_id') or t.get('id')
+        action = t.get('action', 'buy')
+        # ISSUE-056: never dedup protected records (exit, settle, correction, etc.)
+        if action in _PROTECTED_ACTIONS:
+            if tid and tid in seen:
+                log_activity(f'[DataAgent] Preserved protected record (action={action}, trade_id={tid}) — not deduped')
+            cleaned.append(t)
+            continue
         if tid in dupe_ids and tid in seen:
             removed += 1
             continue
@@ -991,6 +1001,30 @@ def _register_missing_positions(missing_tickers: list, open_positions: list) -> 
                         '[DataAgent] Skipping reconstruction for %s — entry_price is null, cannot compute exit thresholds',
                         ticker,
                     )
+                    continue
+
+                # ISSUE-055: skip if a close record (exit/settle) exists for this position today
+                def _has_close_record(_ticker: str, _side: str) -> bool:
+                    """Return True if a settle or exit record exists for (_ticker, _side) today."""
+                    today_log = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
+                    if not today_log.exists():
+                        return False
+                    try:
+                        for _line in today_log.read_text(encoding='utf-8').splitlines():
+                            try:
+                                _rec = json.loads(_line.strip())
+                                if (_rec.get('ticker') == _ticker and
+                                        _rec.get('side') == _side and
+                                        _rec.get('action') in ('exit', 'settle')):
+                                    return True
+                            except Exception:
+                                continue
+                    except Exception:
+                        pass
+                    return False
+
+                if _has_close_record(ticker, side):
+                    logger.debug('[DataAgent] Skipping add_position for %s %s — close record exists', ticker, side)
                     continue
 
                 position_tracker.add_position(ticker, quantity, side, entry_price, module, title)

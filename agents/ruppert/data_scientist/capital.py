@@ -12,6 +12,7 @@ import os
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 
 # Resolve workspace root and add to path for env_config
@@ -28,6 +29,8 @@ _env_paths = _get_paths()
 _LOGS_DIR = _env_paths['logs']
 _DEPOSITS_FILE = _LOGS_DIR / "demo_deposits.jsonl"
 _DEFAULT_CAPITAL = 10000.0  # Fresh start 2026-03-26
+_CAPITAL_FALLBACK_ALERT_FILE = _LOGS_DIR / 'capital_fallback_last_alert.json'
+_CAPITAL_FALLBACK_ALERT_COOLDOWN_SECS = 4 * 3600  # 4 hours
 
 
 def get_capital() -> float:
@@ -75,6 +78,23 @@ def get_capital() -> float:
 
     except Exception as e:
         logger.warning(f"[Capital] get_capital() failed: {e} — using ${_DEFAULT_CAPITAL:.0f} default")
+        try:
+            _should_alert = True
+            if _CAPITAL_FALLBACK_ALERT_FILE.exists():
+                _last = json.loads(_CAPITAL_FALLBACK_ALERT_FILE.read_text(encoding='utf-8'))
+                _elapsed = time.time() - _last.get('ts', 0)
+                if _elapsed < _CAPITAL_FALLBACK_ALERT_COOLDOWN_SECS:
+                    _should_alert = False
+            if _should_alert:
+                from agents.ruppert.data_scientist.logger import send_telegram as _send_tg, log_activity as _log_act
+                _err_str = str(e)[:500]
+                _send_tg(f'🚨 CAPITAL ERROR: get_capital() failed — using ${_DEFAULT_CAPITAL:.0f} fallback. All sizing may be wrong. Reason: {_err_str}')
+                _log_act(f'[Capital] FALLBACK ALERT: get_capital() failed — using ${_DEFAULT_CAPITAL:.0f} default. Reason: {_err_str}')
+                _CAPITAL_FALLBACK_ALERT_FILE.write_text(
+                    json.dumps({'ts': time.time(), 'reason': _err_str}), encoding='utf-8'
+                )
+        except Exception as _alert_err:
+            logger.warning(f'[Capital] Could not send fallback alert: {_alert_err}')
         return _DEFAULT_CAPITAL
 
 
