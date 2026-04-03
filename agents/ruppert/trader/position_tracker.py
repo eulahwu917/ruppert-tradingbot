@@ -24,7 +24,9 @@ if str(_WORKSPACE_ROOT) not in sys.path:
 
 from agents.ruppert.env_config import get_paths as _get_paths, require_live_enabled, get_current_env  # noqa: E402
 import config
-from agents.ruppert.data_scientist.logger import log_activity, normalize_entry_price
+from agents.ruppert.data_scientist.logger import (
+    log_activity, normalize_entry_price, _append_jsonl, log_exit as _log_exit, log_settle as _log_settle,
+)
 from agents.ruppert.trader import circuit_breaker as _circuit_breaker
 
 logger = logging.getLogger(__name__)
@@ -749,31 +751,16 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
             # due to the NO-side flip in add_position — 15m passes correct NO price but
             # flip converts e.g. 3c → 97c, inflating the calculated loss).
             pnl = -(size_dollars if size_dollars is not None else entry_price * quantity / 100)
-            log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
-            exit_record = {
-                'trade_id': str(uuid.uuid4()),
-                'timestamp': datetime.now().isoformat(),
-                'date': str(date.today()),
-                'ticker': ticker,
-                'title': title,
-                'side': side,
-                'action': 'exit',
-                'action_detail': f'SETTLE_LOSS yes_won @ 0c',
-                'source': 'ws_position_tracker',
-                'module': module,
-                'entry_price': entry_price,
-                'exit_price': 0,
-                'contracts': quantity,
-                'pnl': round(pnl, 2),
+            settle_opp = {
+                'ticker': ticker, 'title': title, 'side': side, 'action': 'settle',
+                'source': 'ws_position_tracker', 'module': module,
+                'entry_price': entry_price, 'contracts': quantity, 'pnl': round(pnl, 2),
+                'timestamp': datetime.now().isoformat(), 'date': str(date.today()),
             }
-            try:
-                with open(log_path, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(exit_record) + '\n')
-            except Exception as e:
-                logger.error('[WS Exit] SETTLE_LOSS log write failed for %s: %s', ticker, e)
-            log_activity(
-                f'[WS EXIT] {ticker} {side.upper()} SETTLE_LOSS | YES won | P&L=${pnl:+.2f}'
-            )
+            _log_settle(settle_opp, round(pnl, 2), quantity, {'result': 'yes'},
+                        exit_price=0,
+                        settlement_result='yes',
+                        action_detail='SETTLE_LOSS yes_won @ 0c')
             print(
                 f'  [WS EXIT] {ticker} {side.upper()} SETTLE_LOSS | YES won | P&L=${pnl:+.2f}'
             )
@@ -843,8 +830,7 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
                             'contracts': quantity,
                             'pnl': round(pnl, 2),
                         }
-                        with open(_abandon_log_path, 'a', encoding='utf-8') as f:
-                            f.write(json.dumps(abandon_record) + '\n')
+                        _append_jsonl(_abandon_log_path, abandon_record)
                     except Exception as _abandon_log_err:
                         logger.error('[WS Exit] Failed to write abandonment record for %s: %s', ticker, _abandon_log_err)
                     remove_position(ticker, side)
@@ -858,30 +844,15 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
         exit_price_logged = current_bid if side == 'yes' else (100 - current_bid)
 
         action_detail_price = current_bid if side == 'yes' else (100 - current_bid)
-        exit_record = {
-            'trade_id': str(uuid.uuid4()),
-            'timestamp': datetime.now().isoformat(),
-            'date': str(date.today()),
-            'ticker': ticker,
-            'title': title,
-            'side': side,
-            'action': 'exit',
-            'action_detail': f'WS_EXIT {rule} @ {action_detail_price}c (yes_bid={current_bid}c)',
-            'source': 'ws_position_tracker',
-            'module': module,
-            'entry_price': entry_price,
-            'exit_price': exit_price_logged,
-            'contracts': quantity,
-            'pnl': round(pnl, 2),
+        exit_opp = {
+            'ticker': ticker, 'title': title, 'side': side, 'action': 'exit',
+            'source': 'ws_position_tracker', 'module': module,
+            'entry_price': entry_price, 'contracts': quantity, 'pnl': round(pnl, 2),
+            'timestamp': datetime.now().isoformat(), 'date': str(date.today()),
         }
-
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(exit_record) + '\n')
-        except Exception as e:
-            logger.error('[WS Exit] Log write failed for %s: %s', ticker, e)
-
-        log_activity(f'[WS EXIT] {ticker} {side.upper()} @ {current_bid}c | {rule} | P&L=${pnl:+.2f}')
+        _log_exit(exit_opp, round(pnl, 2), quantity, {'rule': rule},
+                  exit_price=exit_price_logged,
+                  action_detail=f'WS_EXIT {rule} @ {action_detail_price}c (yes_bid={current_bid}c)')
         print(f'  [WS EXIT] {ticker} {side.upper()} @ {current_bid}c | {rule} | P&L=${pnl:+.2f}')
 
         # ── Daily module CB update ────────────────────────────────────────
@@ -893,6 +864,28 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
         _recently_exited[(ticker, side)] = time.time()  # cooldown: prevent re-fire for TTL window
     finally:
         _exits_in_flight.discard(key)
+
+
+def _settle_record_exists(ticker: str, side: str) -> bool:
+    """Return True if a settle or exit record already exists for (ticker, side) today or yesterday."""
+    for day_offset in (0, 1):  # today and yesterday (midnight boundary edge case)
+        check_date = date.today() - timedelta(days=day_offset)
+        log_path = TRADES_DIR / f'trades_{check_date.isoformat()}.jsonl'
+        if not log_path.exists():
+            continue
+        try:
+            for line in log_path.read_text(encoding='utf-8').splitlines():
+                try:
+                    rec = json.loads(line.strip())
+                    if (rec.get('ticker') == ticker and
+                            rec.get('side') == side and
+                            rec.get('action') in ('exit', 'settle')):
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            pass
+    return False
 
 
 async def check_expired_positions():
@@ -933,6 +926,16 @@ async def check_expired_positions():
             logger.warning('[PositionTracker] check_expired: REST failed for %s: %s', ticker, e)
             continue
 
+        # ISSUE-025: guard against double-settlement (settlement_checker may have already written)
+        if _settle_record_exists(ticker, side):
+            logger.info(
+                '[PositionTracker] check_expired: settle record already exists for %s %s — removing from tracker (no duplicate write)',
+                ticker, side
+            )
+            keys_to_remove.append(key)
+            _recently_exited[key] = time.time()
+            continue  # skip writing, just clean up tracker
+
         # Calculate realized P&L from settlement
         entry_price = pos['entry_price']
         quantity = pos['quantity']
@@ -955,34 +958,17 @@ async def check_expired_positions():
                 settlement_price = 0
                 pnl = -pos.get('size_dollars', entry_price * quantity / 100)
 
-        # Log settlement trade
-        log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
-        settle_record = {
-            'trade_id': str(uuid.uuid4()),
-            'timestamp': datetime.now().isoformat(),
-            'date': str(date.today()),
-            'ticker': ticker,
-            'title': pos.get('title', ''),
-            'side': side,
-            'action': 'settle',
-            'action_detail': f'EXPIRY result={result} settlement={settlement_price}c',
-            'source': 'ws_position_tracker',
-            'module': module,
-            'settlement_result': result,
-            'entry_price': entry_price,
-            'exit_price': settlement_price,
-            'contracts': quantity,
-            'pnl': round(pnl, 2),
+        # Log settlement trade via logger.log_settle() for schema enrichment + dedup
+        settle_opp = {
+            'ticker': ticker, 'title': pos.get('title', ''), 'side': side, 'action': 'settle',
+            'source': 'ws_position_tracker', 'module': module,
+            'entry_price': entry_price, 'contracts': quantity, 'pnl': round(pnl, 2),
+            'timestamp': datetime.now().isoformat(), 'date': str(date.today()),
         }
-        try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(settle_record) + '\n')
-        except Exception as e:
-            logger.error('[PositionTracker] check_expired: log write failed for %s: %s', ticker, e)
-
-        log_activity(
-            f'[SETTLE] {ticker} {side.upper()} expired | result={result} | P&L=${pnl:+.2f}'
-        )
+        _log_settle(settle_opp, round(pnl, 2), quantity, {'result': result},
+                    exit_price=settlement_price,
+                    settlement_result=result,
+                    action_detail=f'EXPIRY result={result} settlement={settlement_price}c')
         logger.info(
             '[PositionTracker] Expired %s %s: result=%s, P&L=$%.2f',
             ticker, side, result, pnl

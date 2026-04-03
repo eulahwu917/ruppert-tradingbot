@@ -4,12 +4,15 @@ Logs all bot activity, trades, and outcomes to files.
 """
 import glob
 import json
+import logging
 import os
 import sys
 import uuid
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
+
+logger = logging.getLogger(__name__)
 
 # Resolve workspace root and add to path for env_config
 _AGENTS_ROOT = Path(__file__).parent.parent.parent  # workspace/agents
@@ -75,6 +78,31 @@ def _activity_log_path():
     return os.path.join(LOG_DIR, f"activity_{_pdt_today().isoformat()}.log")
 
 
+_portalocker_warned = False
+
+def _append_jsonl(log_path, record: dict) -> None:
+    """Atomically append a single JSON record to a JSONL file.
+    Uses portalocker for cross-process safety on Windows.
+    Falls back to plain append if portalocker unavailable.
+    """
+    global _portalocker_warned
+    line = json.dumps(record) + '\n'
+    try:
+        import portalocker
+        with open(log_path, 'a', encoding='utf-8') as f:
+            portalocker.lock(f, portalocker.LOCK_EX)
+            try:
+                f.write(line)
+            finally:
+                portalocker.unlock(f)
+    except ImportError:
+        if not _portalocker_warned:
+            _portalocker_warned = True
+            logger.warning('[Logger] portalocker not available — falling back to plain file append (no cross-process lock)')
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(line)
+
+
 def _build_ensemble_components(opportunity: dict) -> dict | None:
     """Extract per-model probabilities and divergence from opportunity dict."""
     models_used = opportunity.get('models_used')
@@ -94,12 +122,15 @@ def _build_ensemble_components(opportunity: dict) -> dict | None:
     }
 
 
-def build_trade_entry(opportunity, size, contracts, order_result):
+def build_trade_entry(opportunity, size, contracts, order_result, **extra_fields):
     """Build a standardized trade entry dict with all required fields.
 
     Enforces schema consistency for every trade written to JSONL logs.
     Adds a unique trade_id (uuid4) and ensures source, module, action,
     timestamp, and date are always present.
+
+    extra_fields: any key/value pairs are merged into the entry after standard
+    fields are set (overrides built-in values for exit_price, settlement_result, etc.).
     """
     # Infer module from source and ticker if not explicitly set
     source = opportunity.get('source', 'bot')
@@ -136,7 +167,7 @@ def build_trade_entry(opportunity, size, contracts, order_result):
         except (TypeError, ValueError):
             entry_price_val = None
 
-    return {
+    entry = {
         'trade_id':     str(uuid.uuid4()),
         'timestamp':    opportunity.get('timestamp') or datetime.now().isoformat(),
         'date':         opportunity.get('date') or date.today().isoformat(),
@@ -172,6 +203,10 @@ def build_trade_entry(opportunity, size, contracts, order_result):
         # ── Model probability (crypto_15m; None for other modules) ────────
         'model_prob':            opportunity.get('model_prob'),
     }
+    # Merge extra fields (for exit_price, settlement_result, action_detail overrides, etc.)
+    for k, v in extra_fields.items():
+        entry[k] = v
+    return entry
 
 
 # Session-level dedup set: (ticker, side, date, entry_price, contracts)
@@ -202,9 +237,71 @@ def log_trade(opportunity, size, contracts, order_result):
         return
     _logged_trade_fingerprints.add(fingerprint)
 
-    with open(_today_log_path(), 'a', encoding='utf-8') as f:
-        f.write(json.dumps(entry) + '\n')
+    _append_jsonl(_today_log_path(), entry)
     print(f"[Log] Trade logged: {entry['trade_id'][:8]}.. {entry['ticker']} {entry['side'].upper()} ${size:.2f}")
+
+
+# Exit/settle dedup set — separate from buy fingerprints.
+# Resets on process restart by design — within-session guard only.
+_logged_exit_fingerprints: set[str] = set()
+
+
+def log_exit(opportunity: dict, pnl: float, contracts: int, order_result: dict,
+             exit_price: float = None, action_detail: str = None) -> None:
+    """Log an exit record. Uses separate dedup fingerprint from buy records."""
+    global _logged_exit_fingerprints
+    try:
+        _extra = {}
+        if exit_price is not None:
+            _extra['exit_price'] = exit_price
+        if action_detail is not None:
+            _extra['action_detail'] = action_detail
+
+        entry = build_trade_entry(opportunity, pnl, contracts, order_result, **_extra)
+
+        # Exit dedup: key on (ticker, side, date, action, exit_price) — not same as buy key
+        _fp_key = f"{entry.get('ticker')}::{entry.get('side')}::{entry.get('date')}::exit::{exit_price}"
+        if _fp_key in _logged_exit_fingerprints:
+            logger.warning('[Logger] Duplicate exit suppressed: %s', _fp_key)
+            return
+        _logged_exit_fingerprints.add(_fp_key)
+        entry['_exit_fp'] = _fp_key
+
+        log_path = _today_log_path()
+        _append_jsonl(log_path, entry)
+        log_activity(f"[EXIT] {entry.get('ticker')} {entry.get('side','').upper()} | P&L=${pnl:+.2f}")
+    except Exception as e:
+        logger.error('[Logger] log_exit() failed: %s', e)
+
+
+def log_settle(opportunity: dict, pnl: float, contracts: int, order_result: dict,
+               exit_price: float = None, settlement_result: str = None,
+               action_detail: str = None) -> None:
+    """Log a settle record. Uses separate dedup fingerprint from buy records."""
+    global _logged_exit_fingerprints
+    try:
+        _extra = {}
+        if exit_price is not None:
+            _extra['exit_price'] = exit_price
+        if settlement_result is not None:
+            _extra['settlement_result'] = settlement_result
+        if action_detail is not None:
+            _extra['action_detail'] = action_detail
+
+        entry = build_trade_entry(opportunity, pnl, contracts, order_result, **_extra)
+
+        _fp_key = f"{entry.get('ticker')}::{entry.get('side')}::{entry.get('date')}::settle::{settlement_result}"
+        if _fp_key in _logged_exit_fingerprints:
+            logger.warning('[Logger] Duplicate settle suppressed: %s', _fp_key)
+            return
+        _logged_exit_fingerprints.add(_fp_key)
+        entry['_exit_fp'] = _fp_key
+
+        log_path = _today_log_path()
+        _append_jsonl(log_path, entry)
+        log_activity(f"[SETTLE] {entry.get('ticker')} {entry.get('side','').upper()} {settlement_result} | P&L=${pnl:+.2f}")
+    except Exception as e:
+        logger.error('[Logger] log_settle() failed: %s', e)
 
 
 def log_opportunity(opportunity):

@@ -33,6 +33,7 @@ sys.stderr.reconfigure(encoding='utf-8')
 
 from agents.ruppert.env_config import get_paths as _get_paths, is_live_enabled as _is_live_enabled
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
+from agents.ruppert.data_scientist.logger import _append_jsonl
 from scripts.event_logger import log_event
 from terminal_signal_logger import backfill_outcome
 
@@ -186,28 +187,28 @@ def check_settlements():
         status = market.get('status', '')
         yes_bid = market.get('yes_bid', 50)
 
-        if result in ('yes', 'no'):
-            pass  # resolved via result field
-        elif status in ('settled', 'finalized'):
-            # Infer result from yes_bid
-            result = 'yes' if (yes_bid or 0) >= 99 else 'no'
-        elif (yes_bid or 0) >= 99:
-            result = 'yes'
-        elif (yes_bid or 0) <= 1:
-            result = 'no'
-        else:
-            # Check if market is active but close_time has passed (expiring today)
-            close_time = market.get('close_time', '')
-            if close_time and status == 'active':
-                try:
-                    ct = datetime.fromisoformat(close_time.replace('Z', '+00:00'))
-                    if ct < datetime.now(timezone.utc):
-                        # Market expired but not yet settled — will settle overnight
-                        print(f"  [PENDING] {ticker}: expired but not yet settled")
-                except Exception:
-                    pass
-            # Not yet resolved
-            continue
+        if result not in ('yes', 'no'):
+            if status in ('settled', 'finalized'):
+                # Status confirms settlement — infer from bid only when unambiguous
+                if (yes_bid or 0) >= 99:
+                    result = 'yes'
+                elif (yes_bid or 0) <= 1:
+                    result = 'no'
+                else:
+                    # Finalized but bid is ambiguous (e.g. 50c) — cannot safely infer
+                    print(f"  [WARN] {ticker}: status={status} but yes_bid={yes_bid} is ambiguous — skipping")
+                    continue
+            else:
+                # Check if market is active but close_time has passed (expiring today)
+                close_time = market.get('close_time', '')
+                if close_time and status == 'active':
+                    try:
+                        ct = datetime.fromisoformat(close_time.replace('Z', '+00:00'))
+                        if ct < datetime.now(timezone.utc):
+                            print(f"  [PENDING] {ticker}: expired but not yet settled")
+                    except Exception:
+                        pass
+                continue  # Not resolved — skip
 
         # Compute P&L
         pnl, exit_price, entry_price = compute_pnl(pos, result, side)
@@ -253,8 +254,7 @@ def check_settlements():
         # Write to today's log file (not entry date's) so get_daily_exposure() can find it
         log_path = TRADES_DIR / f'trades_{today_date}.jsonl'
         try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(settle_record) + '\n')
+            _append_jsonl(log_path, settle_record)
         except Exception as e:
             print(f"  [ERROR] Write failed for {ticker}: {e}")
             error_count += 1
