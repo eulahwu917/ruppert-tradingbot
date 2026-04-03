@@ -42,6 +42,60 @@ MATCH_KEYWORDS = {
 
 GEO_LOG = os.path.join(os.path.dirname(__file__), 'logs', 'geo_client.jsonl')
 
+# ── GDELT config ─────────────────────────────────────────────────────────────
+_GDELT_DOC_BASE = 'https://api.gdeltproject.org/api/v2/doc/doc'
+_GDELT_TIMEOUT = 15
+
+
+class _GdeltRequestFailed(Exception):
+    """Raised when GDELT API returns a non-retryable error (4xx/5xx)."""
+    pass
+
+
+def get_gdelt_events(query: str, timespan: str = '24h', max_records: int = 10) -> list[dict]:
+    """
+    Fetch recent news articles from GDELT DOC API for a keyword query.
+    Returns list of dicts: [{url, title, seendate, domain, severity, event_type, country}]
+    Raises _GdeltRequestFailed on non-retryable HTTP errors (429/5xx).
+    Returns [] on network/parse errors (never raises those).
+    """
+    try:
+        resp = requests.get(
+            _GDELT_DOC_BASE,
+            params={
+                'query': query,
+                'mode': 'artlist',
+                'maxrecords': max_records,
+                'format': 'json',
+            },
+            timeout=_GDELT_TIMEOUT,
+        )
+        if resp.status_code in (429, 500, 502, 503, 504):
+            raise _GdeltRequestFailed(f"GDELT API error {resp.status_code}")
+        resp.raise_for_status()
+        data = resp.json()
+        articles = data.get('articles') or []
+        result = []
+        for art in articles:
+            title = art.get('title', '')
+            parsed = _parse_event(title)
+            result.append({
+                'url': art.get('url', ''),
+                'title': title,
+                'seendate': art.get('seendate', ''),
+                'domain': art.get('domain', ''),
+                'event_type': parsed['event_type'],
+                'country': parsed['country'],
+                'severity': parsed['severity'],
+            })
+        return result
+    except _GdeltRequestFailed:
+        raise
+    except Exception as e:
+        log_activity(f"[GeoClient] GDELT fetch error on '{query}': {e}")
+        return []
+
+
 # ── TheNewsAPI config ────────────────────────────────────────────────────────
 _THENEWSAPI_KEY = 'RGPtfv3i6ni4bucrlfpUrMuDUMmRuvi9fGubxwmt'
 _THENEWSAPI_BASE = 'https://api.thenewsapi.com/v1/news/all'
