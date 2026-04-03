@@ -61,7 +61,7 @@ logger = logging.getLogger(__name__)
 
 # ─────────────────────────────── Constants ────────────────────────────────────
 
-WS_ENABLED = True                    # Toggle WebSocket mode
+WS_ENABLED = False                   # WS mode retired 2026-03-31 — polling only
 WS_EVENT_LOOP_DURATION = 840         # 14 minutes (Task Scheduler runs every 30 min)
 POLL_BACKSTOP_INTERVAL = 300         # 5 min polling backstop inside WS loop
 

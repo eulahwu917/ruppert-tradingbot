@@ -234,8 +234,10 @@ def calculate_position_size(edge: float, win_prob: float, capital: float,
     kelly_size = kf * f * capital
 
     # Vol adjustment: high vol → smaller position
-    if vol_ratio > 0:
-        kelly_size *= (1.0 / vol_ratio)
+    # Guard: vol_ratio=0 means missing vol data — skip the trade entirely
+    if vol_ratio <= 0:
+        return 0.0  # missing vol data — do not trade
+    kelly_size *= (1.0 / vol_ratio)
 
     # Hard cap: 1% of capital per trade (reads from config.MAX_POSITION_PCT)
     position_cap = capital * getattr(_cfg, 'MAX_POSITION_PCT', 0.01)
