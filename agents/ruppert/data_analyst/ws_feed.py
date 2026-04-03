@@ -64,7 +64,7 @@ _kalshi_client_instance = None
 ACTIVE_SERIES_PREFIXES = set(getattr(config, 'WS_ACTIVE_SERIES', []))
 
 # 15-min crypto direction series (subset of active series)
-CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M']
+CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M']
 
 # Crypto hourly band prefixes
 CRYPTO_HOURLY_PREFIXES = ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE', 'KXSOL')
@@ -675,8 +675,13 @@ async def _safe_eval_15m(
         if _import_ok:
             try:
                 evaluate_crypto_15m_entry(ticker, yes_ask, yes_bid, close_time, open_time, book_depth_usd, dollar_oi)
-            except Exception as e:
-                logger.warning('[WS Feed] 15m eval error: %s', e)
+            except Exception as _eval_err:
+                logger.error('[WS Feed] 15m eval CRASHED for %s: %s', ticker, _eval_err, exc_info=True)
+                try:
+                    from agents.ruppert.trader.utils import push_alert
+                    push_alert('error', f'15m eval crashed for {ticker}: {_eval_err}', ticker=ticker)
+                except Exception:
+                    pass  # alert failure must not prevent cleanup
     except Exception as e:
         logger.warning('[WS Feed] _safe_eval_15m error for %s: %s', ticker, e)
 

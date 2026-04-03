@@ -304,9 +304,17 @@ def fetch_orderbook_imbalance(symbol: str) -> dict:
 
     # Simple EWM with span=60 (alpha = 2/(60+1))
     alpha = 2.0 / 61.0
-    ewm = obi_instant
-    for val in reversed(list(_obi_snapshots[symbol])[:-1]):
-        ewm = alpha * val + (1 - alpha) * ewm
+    snapshots = list(_obi_snapshots[symbol])  # chronological: oldest first
+    if not snapshots:
+        ewm = 0.0
+    else:
+        ewm = snapshots[0]  # seed with OLDEST value
+        for val in snapshots[1:]:  # iterate OLDEST → NEWEST (forward)
+            ewm = alpha * val + (1 - alpha) * ewm
+    # NOTE: EWM direction corrected (ISSUE-087, 2026-04-03). First ~4h of obi_z post-deploy are transitional.
+    if not hasattr(fetch_orderbook_imbalance, '_ewm_correction_logged'):
+        logger.info('[crypto_15m] OBI EWM direction corrected — seed=oldest, iterate forward (ISSUE-087)')
+        fetch_orderbook_imbalance._ewm_correction_logged = True
 
     # Update rolling window and compute z-score
     _update_rolling(_rolling_obi, symbol, ewm)
@@ -438,8 +446,8 @@ def _get_recent_price_delta(symbol: str) -> float:
             delta = (p_now - p_prev) / p_prev if p_prev > 0 else 0.0
             _cache_set(f'price_delta_{symbol}', delta)
             return delta
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning('fetch_price_delta failed for %s: %s', symbol, e)
     return 0.0
 
 
@@ -486,7 +494,8 @@ def fetch_okx_price(symbol: str) -> float | None:
         price = float(data['last'])
         _cache_set(f'okx_price_{symbol}', price)
         return price
-    except Exception:
+    except Exception as e:
+        logger.warning('fetch_okx_price failed for %s: %s', symbol, e)
         return None
 
 
@@ -735,7 +744,14 @@ def check_risk_filters(
     # R10: Coinbase-OKX basis
     coinbase_price = fetch_coinbase_price(asset)
     okx_price = fetch_okx_price(symbol)
-    if coinbase_price and okx_price and okx_price > 0:
+
+    if coinbase_price is None:
+        # Kalshi settles on Coinbase price — can't validate basis without it.
+        # Block entry rather than proceed blind.
+        logger.warning('[crypto_15m] Coinbase price unavailable for %s — blocking entry (COINBASE_UNAVAILABLE)', asset)
+        return {'block': 'COINBASE_UNAVAILABLE', 'okx_volume_pct': okx_volume_pct}
+
+    if okx_price and okx_price > 0:
         basis = abs(coinbase_price - okx_price) / okx_price
         _max_basis = getattr(config, 'CRYPTO_15M_MAX_BASIS_PCT', 0.0015)
         if basis > _max_basis:
