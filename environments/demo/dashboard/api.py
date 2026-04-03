@@ -19,6 +19,9 @@ from pathlib import Path
 from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 from agents.ruppert.data_scientist.logger import classify_module, get_parent_module, compute_closed_pnl_from_logs
 import agents.ruppert.data_analyst.market_cache as market_cache
+import logging as _log
+
+_logger = _log.getLogger(__name__)  # ISSUE-072: module-level logger
 
 app = FastAPI(title="Ruppert Trading Dashboard")
 LOGS_DIR = Path(__file__).parent.parent / "logs"
@@ -28,13 +31,42 @@ _state_cache: dict = {"ts": 0.0, "data": None}
 _pnl_cache: dict = {"ts": 0.0, "data": None}
 _positions_cache: dict = {"ts": 0.0, "data": None}
 
+# ─── Source classification helpers (ISSUE-064: module-scope for reuse) ───────
+_AUTO_PREFIXES   = ('bot', 'weather', 'crypto', 'ws_')
+_MANUAL_PREFIXES = ('economics', 'geo', 'manual')
+
+def _is_auto(source: str) -> bool:
+    """Return True if source is an autonomous/bot source (prefix match)."""
+    return any(
+        source == p or source.startswith(p + '_') or source.startswith(p)
+        for p in _AUTO_PREFIXES
+    )
+
+def _is_manual(source: str) -> bool:
+    """Return True if source is a manual/human source (prefix match)."""
+    return any(
+        source == p or source.startswith(p + '_') or source.startswith(p)
+        for p in _MANUAL_PREFIXES
+    )
+
 
 def _cache_reload_loop() -> None:
     """Background daemon thread: reloads price_cache.json from disk every 60s."""
     import time as _time
     while True:
         _time.sleep(60)
-        market_cache.load()
+        try:
+            market_cache.load()
+        except Exception as e:
+            _logger.error("[dashboard] _cache_reload_loop: market_cache.load() failed — "
+                          "price cache is stale: %s", e, exc_info=True)
+            try:
+                push_alert("price_cache_failure",
+                           f"market_cache.load() failed: {e}",
+                           level="warning")
+            except Exception:
+                pass  # Don't let alert failure kill the loop
+            # Do NOT re-raise — keep the loop alive so it retries next cycle
 
 
 @app.on_event("startup")
@@ -51,8 +83,8 @@ def get_mode() -> str:
     try:
         if MODE_FILE.exists():
             return json.loads(MODE_FILE.read_text(encoding='utf-8')).get('mode', 'demo')
-    except Exception:
-        pass
+    except Exception as e:
+        _logger.warning("[dashboard] Could not read mode.json: %s", e)
     return 'demo'
 
 # NOTE: set_mode() removed in Phase 4 — dashboard is read-only.
@@ -67,7 +99,8 @@ def read_today_trades():
         with open(log_path, encoding='utf-8') as f:
             for line in f:
                 try: trades.append(json.loads(line))
-                except: pass
+                except Exception as e:
+                    _logger.warning("[dashboard] JSON parse error in %s: %s", log_path, e)
     return trades
 
 
@@ -80,7 +113,8 @@ def read_all_trades():
                     t = json.loads(line)
                     t['_date'] = path.stem.replace('trades_', '')
                     all_trades.append(t)
-                except: pass
+                except Exception as e:
+                    _logger.warning("[dashboard] JSON parse error in %s: %s", path, e)
     return all_trades
 
 
@@ -91,7 +125,8 @@ def read_geo_log():
         with open(log_path, encoding='utf-8') as f:
             for line in f:
                 try: entries.append(json.loads(line))
-                except: pass
+                except Exception as e:
+                    _logger.warning("[dashboard] JSON parse error in %s: %s", log_path, e)
     today = str(date.today())
     return [e for e in entries if e.get('date') == today]
 
@@ -125,8 +160,8 @@ def read_crypto_15m_summary() -> dict:
                 ts_val = rec.get('ts', '')
                 if str(ts_val).startswith(today_prefix):
                     entries.append(rec)
-            except Exception:
-                pass
+            except Exception as e:
+                _logger.warning("[dashboard] JSON parse error in %s: %s", log_path, e)
 
     today_evaluations = len(entries)
     today_entries = 0
@@ -413,8 +448,8 @@ def compute_module_closed_stats_from_logs() -> dict:
                         stats[bucket]['closed_pnl_month'] += correction
                     if sdate.year == _today.year:
                         stats[bucket]['closed_pnl_year'] += correction
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.error("[dashboard:compute_module_closed_stats_from_logs] %s", e, exc_info=True)
 
     return stats
 
@@ -495,14 +530,7 @@ def get_account():
     # Bot = weather + crypto (fully autonomous, Ruppert decides)
     # Manual = economics + geo (David approves)
     # Gaming removed entirely
-    AUTO_PREFIXES  = ('bot', 'weather', 'crypto', 'ws_')
-    MANUAL_PREFIXES = ('economics', 'geo', 'manual')
-
-    def _is_auto(source):
-        return any(source == p or source.startswith(p + '_') or source.startswith(p) for p in AUTO_PREFIXES)
-
-    def _is_manual(source):
-        return any(source == p or source.startswith(p + '_') or source.startswith(p) for p in MANUAL_PREFIXES)
+    # _is_auto / _is_manual are now module-level helpers (ISSUE-064)
 
     # Only count OPEN (not-yet-settled) positions in deployed capital
     # A position is "open" only if it has no settle/exit record
@@ -514,7 +542,8 @@ def get_account():
     # Capital source: single source of truth via capital.py
     try:
         STARTING_CAPITAL = get_capital()
-    except Exception:
+    except Exception as e:
+        _logger.warning("[dashboard] get_capital() failed, using fallback $10000: %s", e)
         STARTING_CAPITAL = 10000.0  # Fresh start 2026-03-26
     buying_power = max(STARTING_CAPITAL - total_deployed, 0)
 
@@ -523,8 +552,8 @@ def get_account():
         "buying_power":       round(buying_power, 2),
         "total_deployed":     round(total_deployed, 2),
         "starting_capital":   round(STARTING_CAPITAL, 2),
-        "bot_trade_count":    len([t for t in trades if t.get('source','bot') in AUTO_SOURCES]),
-        "manual_trade_count": len([t for t in trades if t.get('source','bot') in MANUAL_SOURCES]),
+        "bot_trade_count":    len([t for t in trades if _is_auto(t.get('source', 'bot'))]),
+        "manual_trade_count": len([t for t in trades if _is_manual(t.get('source', 'bot'))]),  # ISSUE-018
         "open_trade_count":   len(open_trades),
         "bot_deployed":       round(bot_cost, 2),
         "manual_deployed":    round(manual_cost, 2),
@@ -556,7 +585,8 @@ def get_deposits():
                     d = json.loads(line)
                     deposits.append(d)
                     total += d.get('amount', 0)
-                except: pass
+                except Exception as e:
+                    _logger.warning("[dashboard] JSON parse error in %s: %s", deposits_path, e)
     return {"deposits": deposits, "total": round(total, 2)}
 
 
@@ -737,8 +767,9 @@ def get_active_positions():
             _positions_cache["ts"] = time.time()
             _positions_cache["data"] = positions
             return positions
-        except Exception:
-            pass  # Fall through to log-based approach if Kalshi API fails
+        except Exception as e:
+            _logger.warning("[dashboard] Kalshi API failed for live positions, falling back to logs: %s", e)
+            # Fall through to log-based approach
 
     # DEMO mode (or LIVE fallback): read from trade logs
     # dry_run trades are NOT real Kalshi positions — trade logs are the source of truth
@@ -767,6 +798,7 @@ def get_active_positions():
     total_cost = sum(t.get('size_dollars', 0) for t in open_trades)
     positions  = []
     for t in open_trades:
+        side   = t.get('side', 'no')                           # ISSUE-019: FIRST in loop (before any use of side)
         ticker = t.get('ticker', '')
         raw_title = (t.get('title') or ticker).replace('**', '')
         _band_title = _parse_crypto_band_title(ticker, side)
@@ -779,7 +811,6 @@ def get_active_positions():
             raw_title = _re2.sub(r'\s+\d{4}-\d{2}-\d{2}\b', '', raw_title).strip()
             raw_title = f"{raw_title} {_win_time}"
         title  = raw_title
-        side   = t.get('side', 'no')
         source = t.get('source', 'bot')
         mp     = t.get('market_prob', 0.5) or 0.5
         ep     = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
@@ -885,8 +916,8 @@ def get_position_statuses():
                     'result': '',
                     'last_price': _cached['yes_ask'],
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.debug("[dashboard] Position status check failed for %s: %s", ticker, e)
     return statuses
 
 
@@ -906,7 +937,8 @@ def get_weather_markets():
             markets = []
             for line in cache.read_text(encoding='utf-8').splitlines():
                 try: markets.append(json.loads(line))
-                except: pass
+                except Exception as e:
+                    _logger.warning("[dashboard] Bad line in weather_scan.jsonl: %s", e)
             if markets:
                 return markets
 
@@ -953,8 +985,8 @@ def get_crypto_scan():
                 if _key in _price_data:
                     result[_key] = _price_data[_key]
                     result[_key]["is_stale"] = _cache_age > 300
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning("[dashboard] crypto_prices.json read failed: %s", e)
 
     # ── Smart money signal — read from cache (written by background bot scan) ─
     # Bot scanner writes to logs/crypto_smart_money.json periodically
@@ -964,8 +996,8 @@ def get_crypto_scan():
             sm = json.loads(sm_cache.read_text(encoding='utf-8'))
             result["smart_money"] = sm
             result["signal"] = sm.get("direction", "neutral")
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning("[dashboard] crypto_smart_money.json read failed: %s", e)
     if not result["smart_money"]:
         result["smart_money"] = {"direction": "neutral", "bull_pct": 0.5, "traders_sampled": 0, "note": "Pending first scan"}
 
@@ -983,8 +1015,8 @@ def get_crypto_scan():
                     data = json.load(f)
                     for opp in data.get('opportunities', []):
                         result["opportunities"].append(opp)
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning("[dashboard] crypto_scan_latest.json read failed: %s", e)
 
     # Always supplement with raw Kalshi markets (fast, no edge calc)
     if len(result["opportunities"]) < 3:
@@ -1033,6 +1065,21 @@ def get_pnl_history():
             if tk:
                 close_records_pnl[(tk, sd)] = t  # last-write-wins (latest record)
 
+    # ISSUE-066: Build close records indexed by trade_id for accurate win rate counting.
+    # Deduplicates on trade_id (not ticker), so scale-in/multi-close trades count correctly.
+    # Fallback: (ticker, side) composite key if no trade_id. Skip if neither exists.
+    _close_records_by_id: dict = {}
+    for t in all_trades:
+        if t.get('action') in ('exit', 'settle'):
+            _tid = t.get('trade_id') or t.get('id')
+            if _tid:
+                _close_records_by_id[_tid] = t
+            else:
+                _fb = (t.get('ticker', ''), t.get('side', ''))
+                if _fb[0]:  # only if ticker exists
+                    _close_records_by_id[_fb] = t
+                # else: skip — no usable key
+
     # A position is "closed" ONLY if it has a settle/exit record.
     # Expired tickers without a settle record are still "open" (pending settlement).
     settled_tickers = {}
@@ -1080,6 +1127,7 @@ def get_pnl_history():
 
     from datetime import date as _date
     _today = _date.today()
+    pnl_by_day: dict = {}  # ISSUE-063: per-day P&L accumulator (BOT-only closed trades)
 
     # ── Settled / manually exited positions ─────────────────────────────────
     # Use pnl field from settle/exit records directly — no API calls needed.
@@ -1175,8 +1223,12 @@ def get_pnl_history():
                         module_stats[_bucket3]['trade_count_year'] += 1
                 if is_manual: closed_by_src_period['manual']['all'] += pnl
                 else:         closed_by_src_period['bot']['all']    += pnl
-        except Exception:
-            pass
+                # ISSUE-063: accumulate per-day P&L for BOT-only trades (for chart points)
+                if not is_manual and sdate:
+                    d_str = sdate.isoformat()
+                    pnl_by_day[d_str] = pnl_by_day.get(d_str, 0.0) + pnl
+        except Exception as e:
+            _logger.error("[dashboard:get_pnl_history/settled] %s", e, exc_info=True)
 
     # ── Exit corrections (phantom win adjustments) ──────────────────────────
     # Records with action='exit_correction' carry a pnl_correction field that
@@ -1225,8 +1277,26 @@ def get_pnl_history():
                     closed_by_period['year'] += correction
                     closed_by_src_period['bot']['year'] += correction
                     module_stats[_pmod_c]['closed_pnl_year'] += correction
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.error("[dashboard:get_pnl_history/exit_corrections] %s", e, exc_info=True)
+
+    # ── ISSUE-066: Recompute win-rate counters from trade_id-deduped close records ──
+    # Replaces the ticker-keyed counts from settled_tickers loop (which under-counted).
+    # Expected: total_trades / bot_trades counts will increase vs. before this fix.
+    bot_wins = 0
+    closed_count_by_source = {'bot': 0, 'manual': 0}
+    for _cr in _close_records_by_id.values():
+        _cr_src = _cr.get('source', 'bot')
+        _cr_pnl = _cr.get('pnl')
+        if _cr_pnl is None:
+            continue
+        _cr_pnl = float(_cr_pnl)
+        if _is_manual(_cr_src):
+            closed_count_by_source['manual'] += 1
+        else:
+            closed_count_by_source['bot'] += 1
+            if _cr_pnl > 0:
+                bot_wins += 1
 
     # ── Override closed_pnl_total AND module_stats with canonical source of truth ────
     # compute_module_closed_stats_from_logs() iterates close records directly —
@@ -1306,21 +1376,23 @@ def get_pnl_history():
                 # Accumulate per-module open P&L (uses live prices from orderbook above)
                 mod_open = classify_module(src, ticker)
                 module_open_stats[_stat_bucket(mod_open)]['open_pnl'] += pnl
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.error("[dashboard:get_pnl_history/open_pnl] %s", e, exc_info=True)
 
     total_pnl = closed_by_source['bot'] + open_by_source['bot']
 
-    # Build chart time-series (cumulative per day) — BOT-only closed P&L
+    # ISSUE-063: Build chart time-series from actual per-day trade log data (BOT-only closed P&L)
     from datetime import date as date_cls
     today = str(date_cls.today())
-    points = []
-    bot_closed_pnl = closed_by_source['bot']
-    # Day 1: bot-only closed P&L (settled trades from prior days)
-    if bot_closed_pnl != 0:
-        points.append({"date": "2026-03-10", "pnl": round(bot_closed_pnl, 2)})
-    # Today: total bot (closed + open)
-    points.append({"date": today, "pnl": round(total_pnl, 2)})
+    # pnl_by_day was accumulated in the settled_tickers loop above
+    points = [{"date": d, "pnl": round(v, 2)} for d, v in sorted(pnl_by_day.items())]
+    # Append/replace today's point with combined closed+open total
+    if today not in pnl_by_day:
+        points.append({"date": today, "pnl": round(total_pnl, 2)})
+    else:
+        for p in points:
+            if p["date"] == today:
+                p["pnl"] = round(total_pnl, 2)
 
     # Deployed costs for % calculation — exclude settled AND manually exited positions
     all_t = read_all_trades()
@@ -1332,10 +1404,9 @@ def get_pnl_history():
         if not tk or tk in seen2 or tk in exited2 or t.get('action')=='exit': continue
         seen2.add(tk)
         if not is_settled_ticker(tk): open_t.append(t)
-    BOT_SRC = ('bot','weather','crypto')
-    MAN_SRC = ('economics','geo','manual')
-    bot_dep = sum(t.get('size_dollars',0) for t in open_t if t.get('source','bot') in BOT_SRC)
-    man_dep = sum(t.get('size_dollars',0) for t in open_t if t.get('source','bot') in MAN_SRC)
+    # ISSUE-064: use _is_auto()/_is_manual() prefix matching (handles ws_*, crypto_15m etc.)
+    bot_dep = sum(t.get('size_dollars',0) for t in open_t if _is_auto(t.get('source','bot')))
+    man_dep = sum(t.get('size_dollars',0) for t in open_t if _is_manual(t.get('source','bot')))
 
     # Finalise module stats: compute win rates, round values
     modules_out = {}
@@ -1456,7 +1527,13 @@ def _build_state():
             open_tickers_all[ticker] = t
 
     # ── Open positions list (action=open/buy, not settled/exited) ────────────
-    exited: set = set(exit_records.keys())
+    # ISSUE-065: exited set includes BOTH exit AND settle actions (for filtering open positions).
+    # exit_records dict remains exit-only (used for P&L lookup — do NOT add settle records there).
+    exited: set = {
+        t.get('ticker')
+        for t in all_trades
+        if t.get('action') in ('exit', 'settle') and t.get('ticker')
+    }
     seen2: set = set()
     open_pos_tickers: dict = {}
     for t in all_trades:
@@ -1490,73 +1567,76 @@ def _build_state():
     open_cost_total = 0.0
 
     for ticker, t in open_pos_tickers.items():
-        side      = t.get('side', 'no')
-        source    = t.get('source', 'bot')
-        mp        = t.get('market_prob', 0.5) or 0.5
-        ep        = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
-        cost      = float(t.get('size_dollars') or 0)
-        contracts = t.get('contracts', 0) or 0
-        mod        = classify_module(source, ticker)
-        _ob2 = _stat_bucket(mod)
+        try:
+            side      = t.get('side', 'no')
+            source    = t.get('source', 'bot')
+            mp        = t.get('market_prob', 0.5) or 0.5
+            ep        = int((1 - mp) * 100) if side == 'no' else int(mp * 100)
+            cost      = float(t.get('size_dollars') or 0)
+            contracts = t.get('contracts', 0) or 0
+            mod        = classify_module(source, ticker)
+            _ob2 = _stat_bucket(mod)
 
-        lv = prices.get(ticker)
-        cur_p = None
-        if lv:
-            if side == 'no':
-                cur_p = lv.get('no_bid')
-                if cur_p is None and lv.get('yes_ask') is not None:
-                    cur_p = 100 - lv['yes_ask']
-            else:
-                cur_p = lv.get('yes_bid')
-                if cur_p is None and lv.get('yes_ask') is not None:
-                    cur_p = lv['yes_ask']
+            lv = prices.get(ticker)
+            cur_p = None
+            if lv:
+                if side == 'no':
+                    cur_p = lv.get('no_bid')
+                    if cur_p is None and lv.get('yes_ask') is not None:
+                        cur_p = 100 - lv['yes_ask']
+                else:
+                    cur_p = lv.get('yes_bid')
+                    if cur_p is None and lv.get('yes_ask') is not None:
+                        cur_p = lv['yes_ask']
 
-        pnl     = None
-        pnl_pct = None
-        status  = 'open'
-        if cur_p is not None:
-            pnl = round((cur_p - ep) * contracts / 100, 2)
-            pnl_pct = round(pnl / cost * 100, 2) if cost else 0.0
-            if pnl > 0.01:    status = 'WINNING'
-            elif pnl < -0.01: status = 'LOSING'
-            else:             status = 'EVEN'
-            open_pnl_total += pnl
-            open_cost_total += cost
+            pnl     = None
+            pnl_pct = None
+            status  = 'open'
+            if cur_p is not None:
+                pnl = round((cur_p - ep) * contracts / 100, 2)
+                pnl_pct = round(pnl / cost * 100, 2) if cost else 0.0
+                if pnl > 0.01:    status = 'WINNING'
+                elif pnl < -0.01: status = 'LOSING'
+                else:             status = 'EVEN'
+                open_pnl_total += pnl
+                open_cost_total += cost
 
-        module_open[_ob2]['open_deployed'] += cost
-        module_open[_ob2]['open_trades']   += 1
-        if pnl is not None:
-            module_open[_ob2]['open_pnl'] += pnl
+            module_open[_ob2]['open_deployed'] += cost
+            module_open[_ob2]['open_trades']   += 1
+            if pnl is not None:
+                module_open[_ob2]['open_pnl'] += pnl
 
-        edge_val = t.get('edge')
-        _raw_title = (t.get('title') or ticker).replace('**', '')
-        _band_title = _parse_crypto_band_title(ticker, side)
-        if _band_title:
-            _raw_title = _band_title
-        _win_time2 = _parse_15m_window_time(ticker)
-        if _win_time2:
-            import re as _re3
-            _raw_title = _re3.sub(r'\s+\d{4}-\d{2}-\d{2}\b', '', _raw_title).strip()
-            _raw_title = f"{_raw_title} {_win_time2}"
-        positions.append({
-            'ticker':        ticker,
-            'title':         _raw_title,
-            'side':          _translate_15m_side(ticker, side),
-            'source':        source,
-            'module':        mod,
-            'parent_module': get_parent_module(mod),
-            'entry_price': ep,
-            'cur_price':   cur_p,
-            'pnl':         pnl,
-            'pnl_pct':     pnl_pct,
-            'cost':        round(cost, 2),
-            'contracts':   contracts,
-            'edge':        round(edge_val, 3) if edge_val else None,
-            'noaa_prob':   t.get('noaa_prob'),
-            'market_prob': t.get('market_prob'),
-            'status':      status,
-            'close_time':  t.get('close_time', ''),
-        })
+            edge_val = t.get('edge')
+            _raw_title = (t.get('title') or ticker).replace('**', '')
+            _band_title = _parse_crypto_band_title(ticker, side)
+            if _band_title:
+                _raw_title = _band_title
+            _win_time2 = _parse_15m_window_time(ticker)
+            if _win_time2:
+                import re as _re3
+                _raw_title = _re3.sub(r'\s+\d{4}-\d{2}-\d{2}\b', '', _raw_title).strip()
+                _raw_title = f"{_raw_title} {_win_time2}"
+            positions.append({
+                'ticker':        ticker,
+                'title':         _raw_title,
+                'side':          _translate_15m_side(ticker, side),
+                'source':        source,
+                'module':        mod,
+                'parent_module': get_parent_module(mod),
+                'entry_price': ep,
+                'cur_price':   cur_p,
+                'pnl':         pnl,
+                'pnl_pct':     pnl_pct,
+                'cost':        round(cost, 2),
+                'contracts':   contracts,
+                'edge':        round(edge_val, 3) if edge_val else None,
+                'noaa_prob':   t.get('noaa_prob'),
+                'market_prob': t.get('market_prob'),
+                'status':      status,
+                'close_time':  t.get('close_time', ''),
+            })
+        except Exception as e:
+            _logger.error("[dashboard:_build_state/open_pnl] %s", e, exc_info=True)
 
     # ── Closed P&L (settled/exited positions) ────────────────────────────────
     _today = _date.today()
@@ -1663,8 +1743,8 @@ def _build_state():
                     if not is_manual:
                         mod_cy = classify_module(src, ticker)
                         module_closed[_stat_bucket(mod_cy)]['closed_pnl_year'] += pnl_val
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.error("[dashboard:_build_state/settled] %s", e, exc_info=True)
 
     # ── Exit corrections (phantom win adjustments) ──────────────────────────
     # Records with action='exit_correction' carry a pnl_correction field that
@@ -1718,8 +1798,8 @@ def _build_state():
                 if sdate_c.year == _today.year:
                     closed_pnl_year += correction
                     module_closed[_bc2]['closed_pnl_year'] += correction
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.error("[dashboard:_build_state/exit_corrections] %s", e, exc_info=True)
 
     # ── Override closed_pnl_total AND module_closed with canonical source of truth ────
     # compute_module_closed_stats_from_logs() iterates close records directly —
@@ -1773,8 +1853,8 @@ def _build_state():
     if sm_cache.exists():
         try:
             smart_money = json.loads(sm_cache.read_text(encoding='utf-8'))
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.warning("[dashboard] smart_money cache read failed: %s", e)
 
     # Closed P&L is now computed from settle/exit records directly.
     # No longer overriding with pnl_cache.json (which may be stale).
