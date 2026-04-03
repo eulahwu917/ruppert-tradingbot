@@ -89,6 +89,38 @@ def log_cycle(mode, event, data=None):
         f.write(json.dumps(entry) + '\n')
 
 
+_LOCK_FILE = Path(__file__).parent / 'logs' / 'ruppert_cycle.lock'
+
+def _acquire_cycle_lock(mode: str) -> bool:
+    """Try to acquire cycle lock. Returns True if acquired, False if already running."""
+    import os
+    if _LOCK_FILE.exists():
+        try:
+            locked_pid = int(_LOCK_FILE.read_text(encoding='utf-8').strip())
+            # Check if that process is still alive
+            try:
+                os.kill(locked_pid, 0)  # Signal 0 = existence check, no actual signal
+                print(f'  [Lock] Cycle already running (PID {locked_pid}) — aborting {mode}')
+                log_activity(f'[CycleLock] Aborted {mode}: PID {locked_pid} still running')
+                return False
+            except (ProcessLookupError, PermissionError):
+                # Process is dead — stale lock, remove it
+                print(f'  [Lock] Stale lock (PID {locked_pid} dead) — clearing')
+                _LOCK_FILE.unlink(missing_ok=True)
+        except Exception as _le:
+            print(f'  [Lock] Could not read lock file: {_le} — proceeding without lock')
+            return True
+    _LOCK_FILE.write_text(str(os.getpid()), encoding='utf-8')
+    return True
+
+def _release_cycle_lock():
+    """Release the cycle lock file."""
+    try:
+        _LOCK_FILE.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+
 def save_state(logs_dir, traded_tickers, mode):
     """Write traded_tickers + metadata to logs/state.json for cross-cycle persistence.
     Also logs a STATE_UPDATE event so Data Scientist can synthesize state.
@@ -100,7 +132,9 @@ def save_state(logs_dir, traded_tickers, mode):
             'last_cycle_ts': ts(),
             'last_cycle_mode': mode,
         }
-        _state_path.write_text(json.dumps(_state_data, indent=2), encoding='utf-8')
+        _tmp_path = _state_path.with_suffix('.tmp')
+        _tmp_path.write_text(json.dumps(_state_data, indent=2), encoding='utf-8')
+        _tmp_path.replace(_state_path)
         log_event('STATE_UPDATE', {
             'traded_tickers': sorted(traded_tickers),
             'mode': mode,
@@ -401,11 +435,29 @@ def run_position_check(client, state):
                         log_trade(opp, opp['size_dollars'], contracts, {'dry_run': True})
                         log_activity(f'[AUTO-EXIT] {ticker} {side.upper()} @ {price}c P&L=${pnl:+.2f}')
                         print(f'  [DEMO] AUTO-EXIT logged: {ticker}')
+                        # Notify position tracker — prevent WS from attempting a second exit
+                        # Note: _recently_exited cooldown dict in position_tracker is not updated
+                        # by this cycle path — only _tracked removal is the primary guard.
+                        try:
+                            from agents.ruppert.trader import position_tracker as _pt
+                            _pt.remove_position(ticker, side)
+                            log_activity(f'[PositionCheck] Removed {ticker} {side} from tracker after auto-exit')
+                        except Exception as _pt_err:
+                            log_activity(f'[PositionCheck] WARNING: could not remove {ticker} from tracker: {_pt_err}')
                     else:
                         try:
                             result = client.sell_position(ticker, side, price, contracts)
                             log_trade(opp, opp['size_dollars'], contracts, result)
                             print(f'  [LIVE] AUTO-EXIT executed: {ticker}')
+                            # Notify position tracker — prevent WS from attempting a second exit
+                            # Note: _recently_exited cooldown dict in position_tracker is not updated
+                            # by this cycle path — only _tracked removal is the primary guard.
+                            try:
+                                from agents.ruppert.trader import position_tracker as _pt
+                                _pt.remove_position(ticker, side)
+                                log_activity(f'[PositionCheck] Removed {ticker} {side} from tracker after auto-exit')
+                            except Exception as _pt_err:
+                                log_activity(f'[PositionCheck] WARNING: could not remove {ticker} from tracker: {_pt_err}')
                         except Exception as e:
                             print(f'  EXIT ERROR {ticker}: {e}')
                 finally:
@@ -1187,44 +1239,46 @@ def run_cycle(mode):
     8. Dispatch to mode handler
     9. save_state() + log_cycle('done', summary)
     """
-    print(f"\n{'='*60}")
-    print(f"  RUPPERT CYCLE  mode={mode.upper()}  {ts()}")
-    print(f"{'='*60}")
-    log_cycle(mode, 'start')
-
-    try:
-        rotate_logs()
-    except Exception as e:
-        print(f"[Logger] Log rotation skipped: {e}")
-
-    client = KalshiClient()
-    logs_dir = Path(__file__).parent / 'logs'
-    logs_dir.mkdir(exist_ok=True)
-
-    traded_tickers = load_traded_tickers(logs_dir)
-
-    # Circuit breaker
-    capital = get_capital()
-    cb = check_circuit_breaker(logs_dir, capital)
-    if cb and cb.get('tripped'):
-        save_state(logs_dir, traded_tickers, mode)
-        log_cycle(mode, 'circuit_breaker', cb)
+    if not _acquire_cycle_lock(mode):
         sys.exit(0)
-
-    buying_power = get_buying_power()
-    open_exposure = compute_open_exposure(capital, buying_power)
-
-    state = CycleState(
-        mode=mode,
-        dry_run=config.DRY_RUN,
-        logs_dir=logs_dir,
-        traded_tickers=traded_tickers,
-        open_position_value=open_exposure,
-        capital=capital,
-        buying_power=buying_power,
-    )
-
     try:
+        print(f"\n{'='*60}")
+        print(f"  RUPPERT CYCLE  mode={mode.upper()}  {ts()}")
+        print(f"{'='*60}")
+        log_cycle(mode, 'start')
+
+        try:
+            rotate_logs()
+        except Exception as e:
+            print(f"[Logger] Log rotation skipped: {e}")
+
+        client = KalshiClient()
+        logs_dir = Path(__file__).parent / 'logs'
+        logs_dir.mkdir(exist_ok=True)
+
+        traded_tickers = load_traded_tickers(logs_dir)
+
+        # Circuit breaker
+        capital = get_capital()
+        cb = check_circuit_breaker(logs_dir, capital)
+        if cb and cb.get('tripped'):
+            save_state(logs_dir, traded_tickers, mode)
+            log_cycle(mode, 'circuit_breaker', cb)
+            sys.exit(0)
+
+        buying_power = get_buying_power()
+        open_exposure = compute_open_exposure(capital, buying_power)
+
+        state = CycleState(
+            mode=mode,
+            dry_run=config.DRY_RUN,
+            logs_dir=logs_dir,
+            traded_tickers=traded_tickers,
+            open_position_value=open_exposure,
+            capital=capital,
+            buying_power=buying_power,
+        )
+
         # Only run historical audit on substantive modes — skip for lightweight check/report/weather-only
         if mode in ('full', 'smart', 'econ_prescan'):
             try:
@@ -1283,9 +1337,8 @@ def run_cycle(mode):
 
         log_cycle(mode, 'done', summary)
 
-    except Exception as e:
-        log_cycle(mode, 'error', {'exception': str(e)})
-        raise
+    finally:
+        _release_cycle_lock()
 
 
 if __name__ == '__main__':
