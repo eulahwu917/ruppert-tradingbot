@@ -269,6 +269,7 @@ CRYPTO_1D_MIN_BOOK_DEPTH_USD       = 300    # minimum book depth ($) to allow en
 CRYPTO_1D_HIGH_VOL_BTC             = 0.03   # ATR high-vol threshold for BTC
 CRYPTO_1D_HIGH_VOL_ETH             = 0.04   # ATR high-vol threshold for ETH
 CRYPTO_1D_HIGH_VOL_SOL             = 0.05   # ATR high-vol threshold for SOL
+CRYPTO_1D_MAX_STRIKE_DISTANCE_PCT  = 0.02   # max abs(strike - spot) / spot before skipping
 
 # ── WS-First Architecture ────────────────────────────────────────────────────
 # Active series prefixes — only cache tickers matching these.

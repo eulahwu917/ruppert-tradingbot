@@ -222,7 +222,18 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 except Exception:
                     continue
 
-                prob_model = band_prob(spot, band_mid, half_w, sigma, drift)
+                # Compute per-market hours-left for sigma (fix: use actual contract horizon)
+                _hours_left = 18.0
+                if close:
+                    try:
+                        _ct = datetime.fromisoformat(close.replace('Z', '+00:00'))
+                        _hours_left = max(1.0, (_ct - datetime.now(timezone.utc)).total_seconds() / 3600)
+                    except Exception:
+                        pass
+
+                # Per-market sigma: use actual hours remaining, not hardcoded SERIES_CFG hours
+                sigma_m = daily_vol * math.sqrt(max(1.0, _hours_left) / 24.0)
+                prob_model = band_prob(spot, band_mid, half_w, sigma_m, drift)
                 mkt_yes    = ya / 100
                 edge_no    = mkt_yes - prob_model
                 edge_yes   = prob_model - mkt_yes
@@ -237,7 +248,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                     )
                     _log_band_decision(
                         ticker=ticker, series=series, spot=spot, band_mid=band_mid,
-                        sigma=sigma, prob_model=prob_model, mkt_yes=mkt_yes,
+                        sigma=sigma_m, prob_model=prob_model, mkt_yes=mkt_yes,
                         edge_yes=round(edge_yes, 4), edge_no=round(edge_no, 4),
                         decision='SKIP', skip_reason='edge_below_threshold',
                         poly_daily_yes_price=_bp_skip.get('yes_price'),
@@ -248,19 +259,11 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                 if best_price > 95:
                     _log_band_decision(
                         ticker=ticker, series=series, spot=spot, band_mid=band_mid,
-                        sigma=sigma, prob_model=prob_model, mkt_yes=mkt_yes,
+                        sigma=sigma_m, prob_model=prob_model, mkt_yes=mkt_yes,
                         edge_yes=round(edge_yes, 4), edge_no=round(edge_no, 4),
                         decision='SKIP', skip_reason='price_too_high',
                     )
                     continue
-
-                _hours_left = 18.0
-                if close:
-                    try:
-                        _ct = datetime.fromisoformat(close.replace('Z', '+00:00'))
-                        _hours_left = max(1.0, (_ct - datetime.now(timezone.utc)).total_seconds() / 3600)
-                    except Exception:
-                        pass
 
                 from agents.ruppert.trader.crypto_client import compute_composite_confidence
                 _crypto_confidence = compute_composite_confidence(best_edge, ya, m.get('yes_bid') or ya, _hours_left)
@@ -285,7 +288,7 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                     'module': _band_module,
                     'spot': spot,
                     'band_mid': band_mid,
-                    'sigma': sigma,
+                    'sigma': sigma_m,
                     'edge_yes': round(edge_yes, 4),
                     'edge_no': round(edge_no, 4),
                     'note': f'{series} {direction} | model={prob_model*100:.0f}% mkt={mkt_yes*100:.0f}% edge={best_edge*100:.0f}%',

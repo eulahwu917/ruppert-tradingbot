@@ -661,7 +661,8 @@ def discover_1d_markets(asset: str) -> list:
 # ─────────────────────────── Strike Selection ─────────────────────────────────
 
 def select_best_strike(asset: str, P_above: float, markets: list,
-                       direction: str = 'above') -> dict | None:
+                       direction: str = 'above',
+                       current_price: float = 0.0) -> dict | None:
     """
     Pick the best above/below strike given model P_above estimate.
     Returns best market dict with 'edge' key, or None.
@@ -675,6 +676,7 @@ def select_best_strike(asset: str, P_above: float, markets: list,
         return None
 
     min_edge = getattr(config, 'CRYPTO_1D_MIN_EDGE', 0.08)
+    max_dist_pct = getattr(config, 'CRYPTO_1D_MAX_STRIKE_DISTANCE_PCT', 0.02)
     best = None
     best_edge = -999.0
 
@@ -682,6 +684,20 @@ def select_best_strike(asset: str, P_above: float, markets: list,
         ya = m.get('yes_ask') or 0
         na = m.get('no_ask') or 0
         ticker = m.get('ticker', '')
+
+        # Strike distance gate: skip strikes too far from spot
+        if current_price > 0:
+            try:
+                strike = float(ticker.split('-T')[-1])
+                if abs(strike - current_price) / current_price > max_dist_pct:
+                    logger.debug(
+                        'select_best_strike: skipping %s — strike %.2f too far from spot %.2f (%.2f%%)',
+                        ticker, strike, current_price,
+                        abs(strike - current_price) / current_price * 100,
+                    )
+                    continue
+            except (ValueError, IndexError):
+                pass  # can't parse strike → don't skip
 
         if direction == 'above':
             # Buy YES: edge = model_P_yes - yes_ask/100
@@ -1066,7 +1082,8 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         return _skip(asset, window, 'no_markets_available', signals_dict, **_poly_kwargs())
 
     best = select_best_strike(asset, composite['P_above'], markets,
-                              direction=composite['direction'])
+                              direction=composite['direction'],
+                              current_price=current_price)
 
     if best is None or best.get('edge', -999) < min_edge:
         edge_val = best.get('edge') if best else None

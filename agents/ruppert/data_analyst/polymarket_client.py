@@ -373,6 +373,7 @@ def _fetch_crypto_consensus(asset: str) -> Optional[dict]:
         "yes_price":    best["yes_price"],
         "market_title": best["question"],
         "volume_24h":   best.get("volume_24h", 0.0),
+        "end_date":     best.get("end_date"),
         "source":       "polymarket",
     }
 
@@ -475,6 +476,7 @@ def _fetch_crypto_daily_consensus(asset: str) -> Optional[dict]:
         "yes_price":    best["yes_price"],
         "market_title": best["question"],
         "volume_24h":   best.get("volume_24h", 0.0),
+        "end_date":     best.get("end_date"),
         "source":       "polymarket",
         "horizon":      "daily",
     }
