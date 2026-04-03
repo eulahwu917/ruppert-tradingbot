@@ -31,11 +31,23 @@ class Trader:
     def __init__(self, dry_run=True):
         self.client = KalshiClient()
         self.dry_run = dry_run  # If True, simulate trades without placing
-        self.bankroll = self.client.get_balance()
-        log_activity(f"Trader initialized. Balance: ${self.bankroll:.2f} | Dry run: {dry_run}")
+        try:
+            self.bankroll = self.client.get_balance()
+            log_activity(f"Trader initialized. Balance: ${self.bankroll:.2f} | Dry run: {dry_run}")
+        except Exception as _e:
+            from agents.ruppert.data_scientist.capital import get_capital as _get_capital
+            self.bankroll = _get_capital()
+            log_activity(
+                f"[Trader] WARNING: get_balance() failed ({_e}) — using capital.get_capital() fallback: ${self.bankroll:.2f}"
+            )
 
     def refresh_balance(self):
-        self.bankroll = self.client.get_balance()
+        try:
+            self.bankroll = self.client.get_balance()
+        except Exception as _e:
+            from agents.ruppert.data_scientist.capital import get_capital as _get_capital
+            self.bankroll = _get_capital()
+            log_activity(f'[Trader] WARNING: refresh_balance() failed ({_e}) — using capital.get_capital() fallback')
 
     def execute_opportunity(self, opportunity):
         """
@@ -142,14 +154,14 @@ class Trader:
 
         except Exception as e:
             log_activity(f"  Order failed: {e}")
-            # Log the trade attempt even on failure so the exchange-side fill
-            # is not invisible to the system (exception-safe trade logging).
+            # Log as failed_order — excluded from daily cap calculations (ISSUE-029/099)
             try:
+                opportunity['action'] = 'failed_order'
                 opportunity['scan_contracts'] = contracts
                 opportunity['fill_contracts'] = 0
                 opportunity['scan_price'] = price_cents
                 opportunity['fill_price'] = price_cents
-                log_trade(opportunity, size, 0, {'error': str(e), 'status': 'failed'})
+                log_trade(opportunity, 0.0, 0, {'error': str(e), 'status': 'failed'})
             except Exception as log_err:
                 log_activity(f"  [Trader] WARNING: log_trade also failed after order error: {log_err}")
             return False

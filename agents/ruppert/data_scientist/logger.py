@@ -272,6 +272,8 @@ def get_daily_exposure(module: str = None, asset: str = None) -> float:
                     if action in ('exit', 'settle'):
                         exit_keys.add(key)
                         entries.pop(key, None)  # clear accumulated entry on exit
+                    elif action == 'failed_order':
+                        continue  # ISSUE-029/099: failed orders have zero cost, skip entirely
                     else:
                         if module is not None:
                             entry_module = entry.get('module', '')
