@@ -16,6 +16,8 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
+import pytz
+
 # Resolve workspace root and add to path for env_config
 _AGENTS_ROOT = Path(__file__).parent.parent.parent  # workspace/agents
 _WORKSPACE_ROOT = _AGENTS_ROOT.parent               # workspace/
@@ -38,7 +40,14 @@ TRADES_DIR = _env_paths['trades']  # P0-1 fix: trade files go to logs/trades/
 
 # Exit thresholds — config-driven (fallbacks preserve current behavior)
 EXIT_95C_THRESHOLD = getattr(config, 'EXIT_95C_THRESHOLD', 95)
-EXIT_GAIN_PCT      = getattr(config, 'EXIT_GAIN_PCT', 0.70)
+EXIT_GAIN_PCT      = getattr(config, 'EXIT_GAIN_PCT', None)
+if EXIT_GAIN_PCT is None:
+    raise ImportError('[position_tracker] EXIT_GAIN_PCT not found in config — check config.py')
+
+
+def _today_pdt() -> str:
+    """Return today's date string in PDT/PST (America/Los_Angeles), formatted YYYY-MM-DD."""
+    return datetime.now(pytz.timezone('America/Los_Angeles')).strftime('%Y-%m-%d')
 
 
 # ─────────────────────────────── Daily CB helper ──────────────────────────────
@@ -155,7 +164,6 @@ def _load():
         return
     try:
         data = json.loads(TRACKER_FILE.read_text(encoding='utf-8'))
-        migrated = 0
         for key_str, value in data.items():
             if '::' in key_str:
                 parts = key_str.split('::', 1)
@@ -163,17 +171,7 @@ def _load():
             else:
                 # Legacy key: ticker string only — use side from value
                 key = (key_str, value.get('side', 'yes'))
-            # Migrate legacy NO positions stored with YES-side entry price (< 50).
-            # Pre-2026-03-28 fix: add_position() did not flip NO entry prices.
-            # Convert: if side='no' and entry_price < 50, flip to NO price.
-            if value.get('side') == 'no' and isinstance(value.get('entry_price'), (int, float)):
-                if value['entry_price'] < 50:
-                    value['entry_price'] = 100 - value['entry_price']
-                    migrated += 1
             _tracked[key] = value
-        if migrated:
-            logger.info('[PositionTracker] Migrated %d legacy NO position(s) with flipped entry_price', migrated)
-            _persist()  # Write corrected data back to disk immediately
         logger.info('[PositionTracker] Loaded %d tracked positions from disk', len(_tracked))
     except Exception as e:
         logger.warning('[PositionTracker] Load failed: %s', e)
@@ -227,23 +225,14 @@ def add_position(ticker: str, quantity: int, side: str, entry_price: float,
     entry_price: in cents (e.g. 45 = 45c).
     holding_type: 'long_horizon' skips the 70% gain exit threshold.
     size_dollars: actual dollar cost paid for this leg. If not provided,
-                  computed as entry_price * quantity / 100 BEFORE any NO-side
-                  price flip (so the value reflects true cost even when the
-                  flip transforms entry_price).
+                  computed as entry_price * quantity / 100.
 
     When a position for (ticker, side) already exists, accumulates the new leg:
     total quantity is summed and entry_price is blended (weighted average).
     This preserves all legs for correct P&L and settlement tracking.
     """
-    # Compute size_dollars BEFORE the NO-side price flip so it reflects true cost.
     if size_dollars is None:
         size_dollars = round(entry_price * quantity / 100, 2)
-
-    # P0-4 fix: standardize NO positions to always use NO price.
-    # DRY_RUN sometimes passes YES price for NO side (entry_price < 50 when side='no').
-    # Convert: if side='no' and entry_price looks like YES price (< 50), flip it.
-    if side == 'no' and entry_price < 50:
-        entry_price = 100 - entry_price
 
     key = (ticker, side)
     existing = _tracked.get(key)
@@ -410,6 +399,8 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
         if not pos:
             continue
 
+        side = key[1]
+
         # Cooldown guard: block re-fire on recently exited positions
         if key in _recently_exited:
             logger.warning(
@@ -435,7 +426,10 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
         # ── Design D: Entry-aware layered stop-loss for crypto_dir_15m_ positions ──
         # Three tiers: Catastrophic (20%, no time check), Severe (30%, 5min left),
         # Terminal (40%, 3.5min left). Guard threshold is adaptive to entry timing.
-        if pos.get('module', '').startswith('crypto_dir_15m_') and pos.get('added_at'):
+        # YES-side only: Design D stops compare yes_bid < entry_price * pct.
+        # For NO positions (entry_price=3c), this would effectively never fire —
+        # NO-side exits are handled via the 'lte' threshold checks below.
+        if pos.get('module', '').startswith('crypto_dir_15m_') and pos.get('added_at') and side == 'yes':
             # Skip if this position already has a pending exit order
             if key in _exits_in_flight:
                 pass  # let threshold checks run instead
@@ -747,15 +741,15 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
         # exit_price = 0c (NO value at settlement = 0), P&L is negative.
         # Do NOT submit a sell order — position has already settled to zero.
         if settle_loss:
-            # NO-side loss: use size_dollars as the true cost (entry_price is unreliable
-            # due to the NO-side flip in add_position — 15m passes correct NO price but
-            # flip converts e.g. 3c → 97c, inflating the calculated loss).
+            # NO-side loss: use size_dollars as the true cost for accurate P&L.
+            # entry_price for NO positions is the correct NO price (e.g. 3c).
+            # size_dollars was computed at add_position() time from the actual fill.
             pnl = -(size_dollars if size_dollars is not None else entry_price * quantity / 100)
             settle_opp = {
                 'ticker': ticker, 'title': title, 'side': side, 'action': 'settle',
                 'source': 'ws_position_tracker', 'module': module,
                 'entry_price': entry_price, 'contracts': quantity, 'pnl': round(pnl, 2),
-                'timestamp': datetime.now().isoformat(), 'date': str(date.today()),
+                'timestamp': datetime.now().isoformat(), 'date': _today_pdt(),
             }
             _log_settle(settle_opp, round(pnl, 2), quantity, {'result': 'yes'},
                         exit_price=0,
@@ -813,11 +807,11 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
                     except Exception as _alert_err:
                         logger.error('[WS Exit] push_alert failed on abandonment: %s', _alert_err)
                     try:
-                        _abandon_log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
+                        _abandon_log_path = TRADES_DIR / f'trades_{_today_pdt()}.jsonl'
                         abandon_record = {
                             'trade_id': str(uuid.uuid4()),
                             'timestamp': datetime.now().isoformat(),
-                            'date': str(date.today()),
+                            'date': _today_pdt(),
                             'ticker': ticker,
                             'title': title,
                             'side': side,
@@ -838,7 +832,7 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
                 return
 
         # Log the exit trade — P0-1 fix: write to logs/trades/ not logs/
-        log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
+        log_path = TRADES_DIR / f'trades_{_today_pdt()}.jsonl'
         # For NO positions, exit_price should reflect the NO side price (100 - yes_bid).
         # Entry_price is already stored as the NO price. Exit_price should match the same convention.
         exit_price_logged = current_bid if side == 'yes' else (100 - current_bid)
@@ -848,7 +842,7 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
             'ticker': ticker, 'title': title, 'side': side, 'action': 'exit',
             'source': 'ws_position_tracker', 'module': module,
             'entry_price': entry_price, 'contracts': quantity, 'pnl': round(pnl, 2),
-            'timestamp': datetime.now().isoformat(), 'date': str(date.today()),
+            'timestamp': datetime.now().isoformat(), 'date': _today_pdt(),
         }
         _log_exit(exit_opp, round(pnl, 2), quantity, {'rule': rule},
                   exit_price=exit_price_logged,
@@ -946,9 +940,8 @@ async def check_expired_positions():
             settlement_price = 100 if result == 'yes' else 0
             pnl = (settlement_price - entry_price) * quantity / 100
         else:
-            # NO side: entry_price is unreliable due to the NO-side flip in
-            # add_position() (15m passes correct NO price but flip converts
-            # e.g. 3c → 97c). Use size_dollars for losses, formula for wins.
+            # NO side: entry_price is the correct NO price (e.g. 3c for a contract
+            # bought at 3c NO = 97c YES). P&L formula matches YES convention.
             if result == 'no':
                 # NO won — full payout minus cost
                 settlement_price = 100
@@ -963,7 +956,7 @@ async def check_expired_positions():
             'ticker': ticker, 'title': pos.get('title', ''), 'side': side, 'action': 'settle',
             'source': 'ws_position_tracker', 'module': module,
             'entry_price': entry_price, 'contracts': quantity, 'pnl': round(pnl, 2),
-            'timestamp': datetime.now().isoformat(), 'date': str(date.today()),
+            'timestamp': datetime.now().isoformat(), 'date': _today_pdt(),
         }
         _log_settle(settle_opp, round(pnl, 2), quantity, {'result': result},
                     exit_price=settlement_price,

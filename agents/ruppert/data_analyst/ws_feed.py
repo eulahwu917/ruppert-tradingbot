@@ -23,6 +23,8 @@ import logging
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
 
+import pytz
+
 # Resolve workspace root and add to path for env_config
 _AGENTS_ROOT = Path(__file__).parent.parent.parent  # workspace/agents
 _WORKSPACE_ROOT = _AGENTS_ROOT.parent               # workspace/
@@ -68,6 +70,11 @@ CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M'
 
 # Crypto hourly band prefixes
 CRYPTO_HOURLY_PREFIXES = ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE', 'KXSOL')
+
+def _today_pdt() -> str:
+    """Return today's date string in PDT/PST (America/Los_Angeles), formatted YYYY-MM-DD."""
+    return datetime.now(pytz.timezone('America/Los_Angeles')).strftime('%Y-%m-%d')
+
 
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -560,7 +567,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     opp['contracts'] = contracts
     opp['size_dollars'] = size
     opp['timestamp'] = ts()
-    opp['date'] = str(date.today())
+    opp['date'] = _today_pdt()
     opp['scan_price'] = bet_price
     opp['fill_price'] = bet_price
 
