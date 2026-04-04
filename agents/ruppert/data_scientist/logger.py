@@ -2,13 +2,14 @@
 Trade Logger
 Logs all bot activity, trades, and outcomes to files.
 """
+import collections
 import glob
 import json
 import logging
 import os
 import sys
 import uuid
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -169,7 +170,7 @@ def build_trade_entry(opportunity, size, contracts, order_result, **extra_fields
 
     entry = {
         'trade_id':     str(uuid.uuid4()),
-        'timestamp':    opportunity.get('timestamp') or datetime.now().isoformat(),
+        'timestamp':    opportunity.get('timestamp') or datetime.now(timezone.utc).isoformat(),
         'date':         opportunity.get('date') or date.today().isoformat(),
         'ticker':       opportunity['ticker'],
         'title':        opportunity.get('title', opportunity['ticker']),
@@ -202,6 +203,7 @@ def build_trade_entry(opportunity, size, contracts, order_result, **extra_fields
         'kalshi_spread_cents':   opportunity.get('kalshi_spread_cents'),
         # ── Model probability (crypto_15m; None for other modules) ────────
         'model_prob':            opportunity.get('model_prob'),
+        'win_prob':              opportunity.get('win_prob'),   # ISSUE-124
     }
     # Merge extra fields (for exit_price, settlement_result, action_detail overrides, etc.)
     for k, v in extra_fields.items():
@@ -209,9 +211,11 @@ def build_trade_entry(opportunity, size, contracts, order_result, **extra_fields
     return entry
 
 
-# Session-level dedup set: (ticker, side, date, entry_price, contracts)
+# Session-level dedup: bounded LRU cache — deque tracks order, set provides O(1) lookup.
+# maxlen=2000 ensures we never lose dedup coverage for the last 2000 trade fingerprints.
 # Resets on process restart by design — within-session guard only.
 _logged_trade_fingerprints: set[tuple] = set()
+_logged_trade_fingerprints_deque: collections.deque = collections.deque(maxlen=2000)
 
 
 def log_trade(opportunity, size, contracts, order_result):
@@ -235,15 +239,20 @@ def log_trade(opportunity, size, contracts, order_result):
             *fingerprint
         )
         return
+    # Evict oldest entry from set when deque is at capacity (maintains dedup for last 2000 entries)
+    if len(_logged_trade_fingerprints_deque) == _logged_trade_fingerprints_deque.maxlen:
+        _logged_trade_fingerprints.discard(_logged_trade_fingerprints_deque[0])
+    _logged_trade_fingerprints_deque.append(fingerprint)
     _logged_trade_fingerprints.add(fingerprint)
 
     _append_jsonl(_today_log_path(), entry)
     print(f"[Log] Trade logged: {entry['trade_id'][:8]}.. {entry['ticker']} {entry['side'].upper()} ${size:.2f}")
 
 
-# Exit/settle dedup set — separate from buy fingerprints.
+# Exit/settle dedup: same bounded LRU pattern — separate from buy fingerprints.
 # Resets on process restart by design — within-session guard only.
 _logged_exit_fingerprints: set[str] = set()
+_logged_exit_fingerprints_deque: collections.deque = collections.deque(maxlen=2000)
 
 
 def log_exit(opportunity: dict, pnl: float, contracts: int, order_result: dict,
@@ -264,6 +273,9 @@ def log_exit(opportunity: dict, pnl: float, contracts: int, order_result: dict,
         if _fp_key in _logged_exit_fingerprints:
             logger.warning('[Logger] Duplicate exit suppressed: %s', _fp_key)
             return
+        if len(_logged_exit_fingerprints_deque) == _logged_exit_fingerprints_deque.maxlen:
+            _logged_exit_fingerprints.discard(_logged_exit_fingerprints_deque[0])
+        _logged_exit_fingerprints_deque.append(_fp_key)
         _logged_exit_fingerprints.add(_fp_key)
         entry['_exit_fp'] = _fp_key
 
@@ -294,6 +306,9 @@ def log_settle(opportunity: dict, pnl: float, contracts: int, order_result: dict
         if _fp_key in _logged_exit_fingerprints:
             logger.warning('[Logger] Duplicate settle suppressed: %s', _fp_key)
             return
+        if len(_logged_exit_fingerprints_deque) == _logged_exit_fingerprints_deque.maxlen:
+            _logged_exit_fingerprints.discard(_logged_exit_fingerprints_deque[0])
+        _logged_exit_fingerprints_deque.append(_fp_key)
         _logged_exit_fingerprints.add(_fp_key)
         entry['_exit_fp'] = _fp_key
 
@@ -307,7 +322,7 @@ def log_settle(opportunity: dict, pnl: float, contracts: int, order_result: dict
 def log_opportunity(opportunity):
     """Log a detected opportunity (even if not traded)."""
     entry = {
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': datetime.now(timezone.utc).isoformat(),
         'type': 'opportunity',
         'ticker': opportunity['ticker'],
         'edge': opportunity['edge'],
@@ -319,7 +334,7 @@ def log_opportunity(opportunity):
 
 def log_activity(message):
     """Log general bot activity."""
-    entry = f"[{datetime.now().strftime('%H:%M:%S')}] {message}"
+    entry = f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}Z] {message}"
     print(entry)
     with open(_activity_log_path(), 'a', encoding='utf-8') as f:
         f.write(entry + '\n')

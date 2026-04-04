@@ -123,9 +123,10 @@ def check_task_scheduler():
 def check_capital_sot():
     """Verify capital.py is importable and returns sensible value."""
     try:
+        import config  # function-local import — mirrors pattern used in check_threshold_consistency()
         from agents.ruppert.data_scientist.capital import get_capital
         cap = get_capital()
-        if cap < 1000:
+        if cap < config.MIN_CAPITAL_ALERT:
             issues.append(f"capital.get_capital() returned ${cap:.2f} — suspiciously low")
         else:
             print(f"  capital.get_capital(): ${cap:,.2f}")

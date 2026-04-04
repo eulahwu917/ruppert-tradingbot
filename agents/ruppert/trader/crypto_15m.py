@@ -1025,18 +1025,8 @@ def evaluate_crypto_15m_entry(
 
     P_biased = P_directional * funding_mult
 
-    # Polymarket divergence nudge — use shadow price already fetched above
+    # Polymarket divergence nudge — intentionally disabled (shadow only)
     poly_nudge = 0.0
-    poly_yes = polymarket_yes_price   # was: get_polymarket_yes_prob(asset)
-    kalshi_yes = yes_ask / 100.0
-    _poly_div_threshold = getattr(config, 'CRYPTO_15M_POLY_DIVERGENCE_THRESHOLD', 0.03)
-    _poly_nudge_weight  = getattr(config, 'CRYPTO_15M_POLY_NUDGE_WEIGHT', 0.3)
-    if poly_yes is not None:
-        divergence = poly_yes - kalshi_yes
-        if abs(divergence) > _poly_div_threshold:
-            poly_nudge = _poly_nudge_weight * divergence
-        # poly_nudge stays 0.0 — shadow only, no trade influence
-        poly_nudge = 0.0
 
     P_final = max(0.05, min(0.95, P_biased + poly_nudge))
 

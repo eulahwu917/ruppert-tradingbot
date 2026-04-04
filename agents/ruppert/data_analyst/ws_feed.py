@@ -59,6 +59,17 @@ DRY_RUN = getattr(config, 'DRY_RUN', True)
 _window_evaluated: dict[str, str] = {}
 _window_eval_lock = asyncio.Lock()
 
+# Tracked background tasks — populated by _spawn(), cancelled on WS reconnect (ISSUE-128)
+_bg_tasks: set[asyncio.Task] = set()
+
+
+def _spawn(coro):
+    """Create a tracked background task; auto-removes itself on completion."""
+    t = asyncio.create_task(coro)
+    _bg_tasks.add(t)
+    t.add_done_callback(_bg_tasks.discard)
+    return t
+
 # Lazy KalshiClient instance for REST fallback (avoids re-init per poll cycle)
 _kalshi_client_instance = None
 
@@ -754,7 +765,7 @@ async def handle_message(msg: dict):
     # Check exit triggers for tracked positions (only when both prices are present)
     # Fires as background task to avoid blocking the event loop (PONG responses).
     if yes_bid is not None and yes_ask is not None:
-        asyncio.create_task(_safe_check_exits(ticker, yes_bid, yes_ask, close_time))
+        _spawn(_safe_check_exits(ticker, yes_bid, yes_ask, close_time))
 
     # Route crypto 15m tickers to evaluate entry (background task)
     ticker_upper = ticker.upper()
@@ -764,7 +775,7 @@ async def handle_message(msg: dict):
             ask_size = float(data.get('yes_ask_size_fp') or 0)
             bid_size = float(data.get('yes_bid_size_fp') or 0)
             dollar_oi = float(data.get('dollar_open_interest') or 0)
-            asyncio.create_task(_safe_eval_15m(
+            _spawn(_safe_eval_15m(
                 ticker, ticker_upper, yes_ask, yes_bid, close_time, open_time,
                 ask_size + bid_size, dollar_oi,
             ))
@@ -772,7 +783,7 @@ async def handle_message(msg: dict):
     # Route crypto hourly band tickers (elif guarantees no CRYPTO_15M_SERIES match)
     elif any(ticker_upper.startswith(p) for p in CRYPTO_HOURLY_PREFIXES):
         if yes_ask is not None and yes_bid is not None:
-            asyncio.create_task(_safe_eval_hourly(ticker, yes_ask, yes_bid, close_time))
+            _spawn(_safe_eval_hourly(ticker, yes_ask, yes_bid, close_time))
 
 
 # ─────────────────────────────── REST Stale Heal ────────────────────────────
@@ -924,6 +935,12 @@ async def run_ws_feed():
                             _write_heartbeat()
                             last_purge = now
                 finally:
+                    # Cancel all in-flight per-message background tasks (ISSUE-128)
+                    for _t in list(_bg_tasks):
+                        _t.cancel()
+                    if _bg_tasks:
+                        await asyncio.gather(*list(_bg_tasks), return_exceptions=True)
+                    _bg_tasks.clear()
                     # CANCEL on every exit (disconnect, exception, clean shutdown)
                     fallback_task.cancel()
                     try:

@@ -26,6 +26,7 @@ for _p in (_WORKSPACE_ROOT, _DEMO_DIR):
         sys.path.insert(0, str(_p))
 
 from agents.ruppert.env_config import get_paths as _get_paths  # noqa: E402
+import config  # noqa: E402  (_DEMO_DIR already on sys.path above)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -206,7 +207,7 @@ def check_capital(results: dict):
     try:
         from agents.ruppert.data_scientist.capital import get_capital
         cap = get_capital()
-        if cap < 100:
+        if cap < config.MIN_CAPITAL_ALERT:
             _push_alert(f"Capital anomaly: ${cap:.2f} (too low)")
             results["capital"] = "warn"
         else:

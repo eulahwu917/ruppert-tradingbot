@@ -391,6 +391,7 @@ WEATHER_NWS_CONFIDENCE_PENALTY  = 0.15  # subtract this from confidence when NWS
 
 # ── Capital Fallback ─────────────────────────────────────────────────────────
 CAPITAL_FALLBACK = 10000.0  # fallback capital when API unavailable
+MIN_CAPITAL_ALERT = 1000.0  # alert threshold — capital below this is anomalous
 
 # ── Position Exit Thresholds ─────────────────────────────────────────────────
 EXIT_95C_THRESHOLD = 95     # cents — auto-exit YES position if bid >= this
