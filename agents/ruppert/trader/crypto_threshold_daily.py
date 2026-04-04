@@ -1010,7 +1010,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         capital = get_capital()
     except RuntimeError as e:
         logger.warning("crypto_threshold_daily: get_capital() failed — aborting 1d scan: %s", e)
-        return
+        return _skip(asset, window, 'capital_read_error')
 
     _asset_module = ASSET_MODULE_NAMES_1D.get(asset, 'crypto_threshold_daily_btc')
 
