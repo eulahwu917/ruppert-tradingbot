@@ -49,7 +49,7 @@ def rotate_logs(retention_days: int = LOG_RETENTION_DAYS) -> int:
     Safe: only removes files matching trades_YYYY-MM-DD.jsonl and
     activity_YYYY-MM-DD.log patterns - never touches other files.
     """
-    cutoff = date.today() - timedelta(days=retention_days)
+    cutoff = _pdt_today() - timedelta(days=retention_days)
     patterns = [
         os.path.join(TRADES_DIR, 'trades_*.jsonl'),  # P0-1 fix: trades in logs/trades/
         os.path.join(LOG_DIR, 'activity_*.log'),
@@ -152,7 +152,7 @@ def build_trade_entry(opportunity, size, contracts, order_result, **extra_fields
     entry = {
         'trade_id':     str(uuid.uuid4()),
         'timestamp':    opportunity.get('timestamp') or datetime.now(timezone.utc).isoformat(),
-        'date':         opportunity.get('date') or date.today().isoformat(),
+        'date':         opportunity.get('date') or _pdt_today().isoformat(),
         'ticker':       opportunity['ticker'],
         'title':        opportunity.get('title', opportunity['ticker']),
         'side':         opportunity['side'],
@@ -722,7 +722,7 @@ def get_daily_summary():
 
     buys = [t for t in trades if t.get('action') not in ('exit', 'settle')]
     return {
-        'date': date.today().isoformat(),
+        'date': _pdt_today().isoformat(),
         'trades': len(buys),
         'total_exposure': sum(t.get('size_dollars', 0) for t in buys),
         'markets': list(dict.fromkeys(t['ticker'] for t in buys)),  # deduplicated, order-preserving

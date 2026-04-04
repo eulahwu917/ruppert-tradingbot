@@ -4,7 +4,6 @@ Runs on schedule via Windows Task Scheduler.
 Modes:
   full          — scan + positions + smart money + execute (7am, 3pm)
   check         — positions only (10pm)
-  smart         — smart money refresh only (lightweight)
   crypto_only   — position check + crypto scan only (10am, 6pm)
   crypto_1d     — daily crypto above/below scan only (09:30 ET, 13:30 ET)
   report        — 7am P&L summary + loss detection
@@ -38,11 +37,9 @@ from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 
 
 def _get_local_tz():
-    """Return the local timezone offset as a timezone object. Uses system DST state."""
-    import time as _t
-    _is_dst = _t.localtime().tm_isdst > 0
-    _offset = -7 if _is_dst else -8  # PDT / PST
-    return timezone(timedelta(hours=_offset))
+    """Return the America/Los_Angeles timezone."""
+    from zoneinfo import ZoneInfo
+    return ZoneInfo('America/Los_Angeles')
 
 
 def _normalize_side(s: str) -> str:
@@ -319,11 +316,13 @@ def run_exposure_reconciliation(logs_dir, capital, buying_power):
 
 
 def run_position_check(client, state):
-    """Check all open positions, trigger weather alerts, execute auto-exits.
+    """Check all open positions, trigger weather alerts.
 
     Mutates state.traded_tickers (adds auto-exited tickers).
     Returns list of (action, ticker, side, price, contracts, pnl) tuples for actions taken.
     """
+    # NOTE: auto-exits for positions are handled by position_monitor.py (scheduled).
+    # This function is display-only — actions_taken reflects manual overrides only.
     print("\n[1] Position check...")
     actions_taken = []
     try:
@@ -332,7 +331,7 @@ def run_position_check(client, state):
         _LOOKBACK_DAYS = getattr(config, 'POSITION_CHECK_LOOKBACK_DAYS', 7)
         open_positions_by_ticker: dict = {}
         for _day_offset in range(_LOOKBACK_DAYS, -1, -1):
-            _day_str = (date.today() - timedelta(days=_day_offset)).isoformat()
+            _day_str = (datetime.now(_get_local_tz()).date() - timedelta(days=_day_offset)).isoformat()
             _log = _get_paths_pc()['trades'] / f"trades_{_day_str}.jsonl"
             if not _log.exists():
                 continue
@@ -369,7 +368,11 @@ def run_position_check(client, state):
                 no_ask  = m.get('no_ask', 50) or 50
                 side    = pos.get('side', 'no')
                 entry_p = normalize_entry_price(pos)
-                cur_p   = no_ask if side == 'no' else yes_ask
+                _yb = m.get('yes_bid')
+                _nb = m.get('no_bid')
+                yes_bid = _yb if _yb is not None else yes_ask
+                no_bid  = _nb if _nb is not None else no_ask
+                cur_p   = no_bid if side == 'no' else yes_bid
                 contracts = pos.get('contracts', 0)
                 pnl     = round((cur_p - entry_p) * contracts / 100, 2)
 
@@ -416,8 +419,7 @@ def run_crypto_only_mode(state):
     try:
         _tz_pdt = _get_local_tz()
         _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
-        import time as _time
-        _tz_abbr = 'PDT' if _time.localtime().tm_isdst > 0 else 'PST'
+        _tz_abbr = datetime.now(_tz_pdt).strftime('%Z')
         try:
             _capital  = get_capital()
             _deployed = get_daily_exposure()
@@ -549,8 +551,7 @@ def run_crypto_1d_mode(state):
     try:
         _tz_pdt = _get_local_tz()
         _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
-        import time as _time
-        _tz_abbr = 'PDT' if _time.localtime().tm_isdst > 0 else 'PST'
+        _tz_abbr = datetime.now(_tz_pdt).strftime('%Z')
         try:
             _capital  = get_capital()
             _deployed = get_daily_exposure()
@@ -810,8 +811,7 @@ def run_full_mode(client, state):
     try:
         _tz_pdt = _get_local_tz()
         _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
-        import time as _time
-        _tz_abbr = 'PDT' if _time.localtime().tm_isdst > 0 else 'PST'
+        _tz_abbr = datetime.now(_tz_pdt).strftime('%Z')
 
         # Capital
         try:
@@ -908,7 +908,7 @@ def run_cycle(mode):
         )
 
         # Only run historical audit on substantive modes — skip for lightweight check/report/weather-only
-        if mode in ('full', 'smart'):
+        if mode == 'full':
             try:
                 from agents.ruppert.data_scientist.data_agent import run_historical_audit
                 run_historical_audit(since_date=(date.today() - timedelta(days=30)).isoformat())
@@ -933,12 +933,6 @@ def run_cycle(mode):
             summary = run_crypto_1d_mode(state)
         elif mode == 'full':
             summary = run_full_mode(client, state)
-        elif mode == 'smart':
-            # 'smart' mode: smart money refresh + position check only (no new entries).
-            # Falls back to check_mode until fully implemented to avoid accidental full scan.
-            print("  [Smart] Smart-only mode not yet fully implemented — running check_mode only.")
-            log_activity("[Smart] WARNING: smart mode ran as check_mode (not full scan)")
-            summary = run_check_mode(state)
         else:
             raise ValueError(f'Unknown mode: {mode}')
 
@@ -946,10 +940,7 @@ def run_cycle(mode):
         save_state(logs_dir, state.traded_tickers, mode)
 
         # ── Data Scientist: post-scan audit (non-fatal) ─────────────────────────────
-        # Note: 'smart' mode currently runs as check_mode (position check only).
-        # TODO: implement smart money refresh + light synthesis when ready.
-        # Until then, the data agent audit still runs (line below) as a lightweight signal.
-        if mode in ('full', 'smart', 'crypto_only', 'crypto_1d'):
+        if mode in ('full', 'crypto_only', 'crypto_1d'):
             try:
                 from agents.ruppert.data_scientist.data_agent import run_post_scan_audit
                 _audit = run_post_scan_audit(mode='post_cycle')

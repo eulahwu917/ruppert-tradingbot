@@ -8,7 +8,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 REQUIRED_MODES = ['check', 'crypto_only', 'report']
-FALLTHROUGH_MODES = {'full', 'smart'}
+FALLTHROUGH_MODES = {'full'}
 
 
 def _import_cycle():
@@ -44,7 +44,7 @@ def test_mode_handler_functions_exist():
     assert missing == [], f"Missing mode handler functions: {missing}"
 
 
-# Test 3: run_full_mode exists (covers full + smart)
+# Test 3: run_full_mode exists
 def test_full_mode_handler_exists():
     mod = _import_cycle()
     assert hasattr(mod, 'run_full_mode'), "ruppert_cycle.py must export run_full_mode()"
