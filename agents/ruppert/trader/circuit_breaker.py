@@ -260,7 +260,7 @@ def check_global_net_loss(capital: float) -> dict:
     threshold_pct     = getattr(config, 'LOSS_CIRCUIT_BREAKER_PCT', 0.05)
     threshold_dollars = capital * threshold_pct
 
-    trade_log = _get_paths()['trades'] / f'trades_{date.today().isoformat()}.jsonl'
+    trade_log = _get_paths()['trades'] / f'trades_{_today_pdt()}.jsonl'
     if not trade_log.exists():
         return {'tripped': False, 'reason': 'no_trade_log', 'net_loss_today': 0.0}
 

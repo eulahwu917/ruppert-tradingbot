@@ -60,12 +60,6 @@ def _cache_reload_loop() -> None:
         except Exception as e:
             _logger.error("[dashboard] _cache_reload_loop: market_cache.load() failed — "
                           "price cache is stale: %s", e, exc_info=True)
-            try:
-                push_alert("price_cache_failure",
-                           f"market_cache.load() failed: {e}",
-                           level="warning")
-            except Exception:
-                pass  # Don't let alert failure kill the loop
             # Do NOT re-raise — keep the loop alive so it retries next cycle
 
 

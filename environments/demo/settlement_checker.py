@@ -33,7 +33,7 @@ sys.stderr.reconfigure(encoding='utf-8')
 
 from agents.ruppert.env_config import get_paths as _get_paths, is_live_enabled as _is_live_enabled
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
-from agents.ruppert.data_scientist.logger import _append_jsonl
+from agents.ruppert.data_scientist.logger import _append_jsonl, _pdt_today
 from scripts.event_logger import log_event
 from terminal_signal_logger import backfill_outcome
 
@@ -234,8 +234,8 @@ def check_settlements():
             pass
 
         # Build settle record matching spec schema
-        original_date = pos.get('date', date.today().isoformat())
-        today_date = date.today().isoformat()
+        original_date = pos.get('date', _pdt_today().isoformat())
+        today_date = _pdt_today().isoformat()
         settle_record = {
             "trade_id": str(uuid.uuid4()),
             "timestamp": datetime.now(_PDT).isoformat(),

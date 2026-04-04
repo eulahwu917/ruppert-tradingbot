@@ -881,7 +881,7 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
 def _settle_record_exists(ticker: str, side: str) -> bool:
     """Return True if a settle or exit record already exists for (ticker, side) today or yesterday."""
     for day_offset in (0, 1):  # today and yesterday (midnight boundary edge case)
-        check_date = date.today() - timedelta(days=day_offset)
+        check_date = date.fromisoformat(_today_pdt()) - timedelta(days=day_offset)
         log_path = TRADES_DIR / f'trades_{check_date.isoformat()}.jsonl'
         if not log_path.exists():
             continue

@@ -152,7 +152,7 @@ def _rehydrate_state():
         return
     _state_initialized = True
 
-    today_str = date.today().isoformat()
+    today_str = circuit_breaker._today_pdt()
     _daily_wager_date = today_str
 
     # 1. Daily wager: sum all buys today from trade log
@@ -1229,7 +1229,7 @@ def evaluate_crypto_15m_entry(
             # --- Check 1: Tier 2 daily wager backstop ---
             # PHASE 2 (2026-03-31): Daily caps removed. CB is the daily hard stop.
             # Backstop disabled via config flag. Still tracking _daily_wager for metrics.
-            today_str = date.today().isoformat()
+            today_str = circuit_breaker._today_pdt()
             if _daily_wager_date != today_str:
                 _daily_wager = 0.0
                 _daily_wager_date = today_str
