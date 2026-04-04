@@ -28,12 +28,35 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 ### Fix pipeline (David approved — permanent)
 1. DS/Strategist/Trader specs → 2. Adversarial review → 3. Revise → 4. Dev builds → 5. QA → 6. Commit → 7. System Map + MEMORY.md + daily log + changelog
 
+### Batch 1 adversarial review complete (2026-04-04)
+- **B1-1 (watchdog double-spawn):** PASS — skip dead `import signal`, call site is lines 117-120 not 118-120 (cosmetic)
+- **B1-2 (last-write-wins):** PASS for DEMO — flagged that `run_monitor()` will process multi-buy legs independently (safe DEMO, needs dedup for LIVE)
+- **B1-3 (phantom settlement):** PASS — no corrections, ship as spec'd
+- Full review: memory/batch1-adversarial-2026-04-04.md
+
 ### Key adversarial catches tonight:
 - Sprint 1: release_exit_lock import was missing — would have crashed on first exit
 - Sprint 2: third wrong-N site in post_trade_monitor missed by spec
 - Sprint 4: actions_taken auto-exit proposal was scope creep + double-exit risk → minimal path taken
 - Sprint 5: wrong constant name (CB_DAILY_LOSS_LIMIT_PCT → LOSS_CIRCUIT_BREAKER_PCT)
 - Sprint 5: CME config had plaintext API password — flagged David to rotate
+
+### Batch 1 fixes (2026-04-04) — commit 6b09ebe
+- Watchdog double-spawn (ISSUE-I01): kill_existing_ws_feed() ported to active watchdog — RESOLVED
+- Post_trade_monitor multi-buy overwrite: FIFO list accumulation — RESOLVED
+- Phantom settlement inference: status gate ported from settlement_checker — RESOLVED
+- Trading still halted — docs updates running before restart
+
+### Adversarial framework (David approved, 2026-04-04)
+- ALL agent recommendations go through adversarial review before reaching David
+- Strategist, DS, Trader — all go through the gauntlet
+- No exceptions
+
+### Daily module re-enable checklist (updated 2026-04-04)
+1. Shadow WR > 45% over 50+ clean trades
+2. R9 macro filter (FOMC/CPI/NFP, 2h pre / 1h post, entries only)
+3. R1-equivalent vol gate (catches tariffs + unscheduled events)
+4. All P1 bugs fixed
 
 ### Overnight audit findings (2026-04-04)
 - **6 P1 bugs** found across double-pass audit (7 agents + combined pass + adversarial + synthesis)

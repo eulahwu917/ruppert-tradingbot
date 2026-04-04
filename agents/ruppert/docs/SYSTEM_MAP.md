@@ -1,9 +1,16 @@
 # Ruppert System Map
-_Last updated: 2026-04-04 | v3.2 | 22 corrections from overnight audit (pass 1+2 corroboration). DEMO vs LIVE summary added._
+_Last updated: 2026-04-04 | v3.3 | Batch 1 trading-safety fixes: watchdog double-spawn resolved, multi-buy FIFO, phantom settlement guard ported._
 
 ---
 
 ## Changelog
+
+### v3.3 — 2026-04-04
+- **Batch 1 trading-safety fixes** (commit 6b09ebe) — 3 P1 blockers resolved
+- **B1-1 Watchdog double-spawn (ISSUE-I01) RESOLVED:** `kill_existing_ws_feed()` ported from stale copy to active `scripts/ws_feed_watchdog.py`. Watchdog now kills any existing ws_feed process before spawning a new one. No more competing WS connections at boot.
+- **B1-2 Multi-buy overwrite RESOLVED:** `post_trade_monitor.load_open_positions()` and `check_settlements()` inline loader changed from last-write-wins (`entries_by_key[key] = rec`) to FIFO list accumulation. Multi-leg positions now correctly preserved; earlier legs no longer orphaned. ⚠️ LIVE caveat: `run_monitor()` processes each leg independently — needs dedup for LIVE.
+- **B1-3 Phantom settlement inference RESOLVED:** `post_trade_monitor.check_settlements()` result inference now requires `status in ('settled', 'finalized')` before bid-based inference — matching `settlement_checker.py` pattern (ISSUE-028 fix now ported to both files).
+- DEMO→LIVE blockers P1-1, P1-3, P1-4 marked resolved
 
 ### v3.2 — 2026-04-04
 - **22 corrections** from overnight audit final report (Section 4) — values, function names, issue statuses, gate ordering, module inventory
@@ -167,7 +174,7 @@ External Data Sources
 | `env_config.py` | Infrastructure | Active | Environment isolation. Path dictionary for `demo`/`live`. Live gate requires two conditions. |
 | `config.py` | Infrastructure | Active | All constants. 100+ entries covering sizing, risk, thresholds, circuit breakers, stop-losses, scheduling. |
 | `mode.json` | Infrastructure | Active | Single-field runtime mode switch: `{"mode": "demo"}`. Requires restart to take effect. |
-| `ws_feed_watchdog.py` | Infrastructure | Active (double-spawn issue) | Monitors ws_feed heartbeat. Restarts if stale >180s. Two copies exist (workspace root = active; demo/scripts = stale). |
+| `ws_feed_watchdog.py` | Infrastructure | Active | Monitors ws_feed heartbeat. Restarts if stale >180s. Kills existing ws_feed before spawning (Batch 1 fix). Two copies exist (workspace root = active; demo/scripts = stale). |
 | `dashboard/api.py` | Dashboard | Active | FastAPI on port 8765. Read-only DEMO mode. 30s in-process cache. 16 endpoints. |
 | `brief_generator.py` | Reporting | Active | CEO daily brief. Telegram + markdown report. Two conflicting P&L methods in same output. |
 | `daily_progress_report.py` | Reporting | Deprecated | Shim that delegates to `brief_generator.py`. |
@@ -993,6 +1000,10 @@ Downstream readers must handle missing fields when consuming settle records from
 
 **Sprint 1 P2:** `post_trade_monitor.check_settlements()` now uses `_append_jsonl()` for JSONL writes (was raw `open()`), gaining cross-process file locking.
 
+**Batch 1 (commit 6b09ebe) — Consistent inference logic:** `post_trade_monitor.check_settlements()` result inference now requires `status in ('settled', 'finalized')` before bid-based inference — matching the `settlement_checker.py` pattern (ISSUE-028 fix ported). Both settlement paths now use identical guards against phantom settlements.
+
+**Batch 1 (commit 6b09ebe) — FIFO position loading:** `post_trade_monitor.load_open_positions()` and `check_settlements()` inline loader changed from last-write-wins (`entries_by_key[key] = rec`) to FIFO list accumulation. Multi-leg positions (multiple buys on same ticker/side) now correctly preserved; earlier legs are no longer orphaned by later buys. ⚠️ **LIVE caveat:** `run_monitor()` processes each leg independently — needs dedup logic before LIVE deployment.
+
 **Sprint 3 (ISSUE-025):** `check_expired_positions()` now calls `_settle_record_exists(ticker, side)` (checks today + yesterday's trade log) before writing. If a settle record already exists, position is removed from tracker without writing a duplicate.
 
 After each settlement: calls `backfill_outcome()` and `prediction_scorer.score_new_settlements()`.
@@ -1483,9 +1494,9 @@ Read once at import time by `config.py`. Changes require restart.
 - **Active:** `scripts/ws_feed_watchdog.py` — `CHECK_INTERVAL=60s`, `HEARTBEAT_STALE=180s`
 - **Stale:** `environments/demo/scripts/ws_feed_watchdog.py` — different values (300s/600s) ← **DO NOT USE**
 
-**Restart logic:** Reads `ws_feed_heartbeat.json` every 60s. If stale or missing → 2s delay → spawn new ws_feed process (Windows flags: `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`). Logs to `logs/watchdog.log`.
+**Restart logic:** Reads `ws_feed_heartbeat.json` every 60s. If stale or missing → calls `kill_existing_ws_feed()` to terminate any running ws_feed process → 2s delay → spawn new ws_feed process (Windows flags: `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`). Logs to `logs/watchdog.log`.
 
-**⚠️ Double-spawn issue (UNRESOLVED):** Two Task Scheduler tasks both launch ws_feed at boot. At boot, watchdog may see stale heartbeat (ws_feed just started, hasn't written yet) and spawn a second instance. Two ws_feed processes compete for the same WS connection. The `kill_existing_ws_feed()` fix exists only in the **stale** copy at `environments/demo/scripts/ws_feed_watchdog.py` — it has NOT been ported to the active `scripts/ws_feed_watchdog.py`.
+**~~⚠️ Double-spawn issue~~ ✅ RESOLVED (Batch 1, commit 6b09ebe):** `kill_existing_ws_feed()` ported from stale copy to active `scripts/ws_feed_watchdog.py`. Watchdog now kills any existing ws_feed process before spawning a new one, preventing competing WS connections at boot.
 
 ---
 
@@ -1538,7 +1549,7 @@ Read once at import time by `config.py`. Changes require restart.
 
 | ID | Description | Severity |
 |----|-------------|----------|
-| ISSUE-I01 | Watchdog double-spawn at boot. Two Task Scheduler tasks launch ws_feed. Watchdog may see stale heartbeat and spawn second instance. Two ws_feed processes compete for WS connection. **UNRESOLVED — `kill_existing_ws_feed()` fix exists only in stale copy at `environments/demo/scripts/ws_feed_watchdog.py`, NOT in active `scripts/ws_feed_watchdog.py`.** | High |
+| ISSUE-I01 | ~~Watchdog double-spawn at boot. Two Task Scheduler tasks launch ws_feed. Watchdog may see stale heartbeat and spawn second instance. Two ws_feed processes compete for WS connection.~~ **FIXED Batch 1 (commit 6b09ebe):** `kill_existing_ws_feed()` ported to active `scripts/ws_feed_watchdog.py`. Watchdog now kills existing ws_feed before spawning. ✅ RESOLVED | ~~High~~ **Resolved** |
 | ISSUE-I02 | Stale watchdog copy at `environments/demo/scripts/ws_feed_watchdog.py` with different constants (300s/600s vs 60s/180s). Risk of confusion. | Low |
 | ISSUE-I03 | `mode.json` changes require process restart. No hot-reload. | Low |
 | ISSUE-I04 | ~~`Ruppert-PostTrade-Monitor` (every 30 min) may overlap with WS exit path. Exit locking was asymmetric.~~ **FIXED Sprint 1 P2:** `execute_exit()` in `position_tracker.py` now acquires `acquire_exit_lock()` before proceeding — both WS and post_trade_monitor paths hold the same file lock. Exit locking is now symmetric. | ~~Medium~~ **Resolved** |
@@ -1699,7 +1710,7 @@ _Consolidated list of all known issues across all sections. Severity: Critical /
 | ISSUE-X01 | ~~Double-settle race condition. `check_expired_positions()` and `settlement_checker` can both process same position.~~ **FIXED Sprint 3 (ISSUE-025):** `_settle_record_exists()` guard added. | §3 Exit | ~~High~~ **Resolved** |
 | ISSUE-X03 | ~~Tracker not updated by cycle exits. Cycle-entered positions without `add_position()` get no WS stop-losses or gain exits.~~ **FIXED Sprint 2 (ISSUE-031):** `remove_position()` called in both paths of `run_position_check()`. | §3 Exit | ~~High~~ **Resolved** |
 | ISSUE-X09 | Global CB not updated by WS feed. `update_global_state()` must be called by trading cycle explicitly. CB may lag. | §3 Exit | **High** |
-| ISSUE-I01 | Watchdog double-spawn at boot. Two ws_feed instances compete for WS connection. `kill_existing_ws_feed()` fix exists in stale copy only — NOT ported to active `scripts/ws_feed_watchdog.py`. | §5 Infrastructure | **High — UNRESOLVED** |
+| ISSUE-I01 | ~~Watchdog double-spawn at boot. Two ws_feed instances compete for WS connection.~~ **FIXED Batch 1 (commit 6b09ebe):** `kill_existing_ws_feed()` ported to active watchdog. ✅ RESOLVED | §5 Infrastructure | ~~High~~ **Resolved** |
 | ISSUE-D05 | ~~`AUTO_SOURCES` / `MANUAL_SOURCES` undefined in `get_account()`. May raise `NameError` or wrong trade counts.~~ **FIXED P1-4 (ISSUE-018):** Replaced with `_is_auto()`/`_is_manual()` module-scope helpers. ✅ RESOLVED (P1) | §6 Dashboard | ~~High~~ **Resolved** |
 | ISSUE-D07 | Brief generator uses two conflicting P&L methods. Different fields, different scope. Not explained in output to David. | §6 Dashboard | **High** |
 | ISSUE-E07 | ~~`smart` mode runs `check` mode — no smart logic implemented.~~ **RESOLVED Sprint 4 P2:** Dead `smart` mode fully removed from dispatch, docstring, and audit gates. | §2 Execution | ~~Medium~~ **Resolved** |
@@ -2043,10 +2054,10 @@ The system currently operates in **DEMO mode** (simulated orders, real market da
 | Watchdog | stdout/stderr → DEVNULL | Must redirect to log files |
 
 **Blockers before LIVE (P1):**
-1. **P1-1: Watchdog double-spawn** — active copy missing `kill_existing_ws_feed()`
+1. ~~**P1-1: Watchdog double-spawn** — active copy missing `kill_existing_ws_feed()`~~ ✅ **RESOLVED Batch 1 (commit 6b09ebe)**
 2. **P1-2: `date.today()` pervasive** — 50+ sites use system TZ instead of PDT; circuit breaker silently disabled during UTC/PDT gap
-3. **P1-3: `post_trade_monitor` multi-buy overwrite** — `entries_by_key[key] = rec` clobbers earlier legs
-4. **P1-4: Phantom settlement inference** — result inferred from bid alone without confirmed status
+3. ~~**P1-3: `post_trade_monitor` multi-buy overwrite** — `entries_by_key[key] = rec` clobbers earlier legs~~ ✅ **RESOLVED Batch 1 (commit 6b09ebe)** — FIFO list accumulation. ⚠️ LIVE caveat: `run_monitor()` needs leg dedup.
+4. ~~**P1-4: Phantom settlement inference** — result inferred from bid alone without confirmed status~~ ✅ **RESOLVED Batch 1 (commit 6b09ebe)** — both `post_trade_monitor` and `settlement_checker` now require `status in ('settled', 'finalized')`.
 5. **P1-5: `push_alert()` undefined** — `NameError` swallowed; price cache failure alerts never delivered
 6. **P1-6: R9 macro filter dead code** — `has_macro_event_within()` doesn't exist; documented protection is absent
 
@@ -2060,6 +2071,7 @@ _End of System Map_
 
 ## 10. Revision History
 
+- v3.3 (2026-04-04): **Batch 1 trading-safety fixes (commit 6b09ebe).** 3 P1 DEMO→LIVE blockers resolved. B1-1: `kill_existing_ws_feed()` ported to active watchdog — ISSUE-I01 double-spawn RESOLVED. B1-2: `post_trade_monitor.load_open_positions()` and `check_settlements()` inline loader changed from last-write-wins to FIFO list accumulation — multi-leg positions no longer orphaned (LIVE caveat: `run_monitor()` needs leg dedup). B1-3: `post_trade_monitor.check_settlements()` result inference now requires `status in ('settled', 'finalized')` before bid-based inference — matches `settlement_checker.py` pattern (ISSUE-028 fix ported to both files). DEMO→LIVE blockers P1-1, P1-3, P1-4 marked resolved; P1-2, P1-5, P1-6 remain.
 - v3.2 (2026-04-04): **22 corrections from overnight audit.** Signal weights: noted config vs fallback defaults. Timing gates: 120s/660s/0.08. Risk filters: R2=8c, R3=0.003, R4=0.25; R9 marked STUB. Gate order: CB backstop→#2. `_pdt_today()` name corrected throughout. Settlement checker 2× daily. ISSUE-I01 consistently UNRESOLVED. ISSUE-023 partial resolution noted. Dashboard 16 endpoints. Module inventory: crypto_band_daily/crypto_threshold_daily Disabled. ISSUE-1-07, ISSUE-1-12, ISSUE-E07 marked RESOLVED. API wiring: fetch_coinbase_price() in crypto_15m.py; crypto_band_daily uses Kraken; 5 CRYPTO_15M_SERIES. BACKSTOP_ENABLED=True. DOMAIN_THRESHOLD=10. Exit dedup fingerprint format corrected. KalshiClient get_markets(). config_audit stale task names noted. Added DEMO vs LIVE summary section.
 - v1.0 (2026-04-02): Initial assembly from 6 research agents
 - v1.1 (2026-04-02): Corrections from 10-audit pass (12 factual errors fixed, 12 gaps filled)

@@ -304,6 +304,13 @@ _Every fix must be logged here with issue ID, summary, and commit hash_
 | P2-DP-4 | ruppert_cycle.py | Dead 'smart' mode fully removed from dispatch, docstring, audit gates | 2962743 |
 | P2-DP-5 | logger.py | All date.today() calls replaced with _pdt_today() (3 sites: build_trade_entry, get_daily_summary, rotate_logs) | 2962743 |
 
+### Batch 1-2026-04-04 — Trading Safety P1 fixes (6b09ebe)
+| ID | File | Fix | Commit |
+|----|------|-----|--------|
+| B1-1 | scripts/ws_feed_watchdog.py | kill_existing_ws_feed() ported to active watchdog — kills stale ws_feed before respawning | 6b09ebe |
+| B1-2 | post_trade_monitor.py | load_open_positions() + check_settlements() inline loader: FIFO list accumulation replaces last-write-wins for multi-buy positions | 6b09ebe |
+| B1-3 | post_trade_monitor.py | Phantom settlement fix: result inference now requires status='settled'/'finalized' (ported from settlement_checker.py ISSUE-028 fix) | 6b09ebe |
+
 ### Sprint 5-2026-04-04 — P2: Optimizer, Tests, Cleanup (80b7d02 + d2a3134)
 | ID | File | Fix | Commit |
 |----|------|-----|--------|
