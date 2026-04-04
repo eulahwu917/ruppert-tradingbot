@@ -2,8 +2,9 @@
 crypto_threshold_daily.py — Daily crypto above/below trading module.
 
 Trades KXBTCD (BTC above/below) and KXETHD (ETH above/below) on Kalshi.
-Uses 4 daily-scale signals: 24h momentum, funding rate regime, ATR band
-selector, and OI regime (disk-persisted 24h snapshot).
+Uses 5 daily-scale signals: 24h momentum (S1), funding rate regime (S2), ATR band
+selector (S3), OI regime (S4, disk-persisted 24h snapshot), and Polymarket consensus (S5, 20% weight).
+Note: docstring previously said 4 signals — S5 (Polymarket) was missing.
 
 Entry windows:
   Primary:   09:30–11:30 ET

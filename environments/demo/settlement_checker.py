@@ -12,8 +12,8 @@ Usage:
     python environments/demo/settlement_checker.py
 
 Scheduled via Task Scheduler as Ruppert-SettlementChecker:
-    - 11:00 PM PDT (after all markets close)
-    - 8:00 AM PDT  (catch overnight settlements)
+    - Every 30 minutes, 24/7 (PT30M per Ruppert-SettlementChecker.xml)
+    - Note: docstring previously stated 2x daily (11PM + 8AM) — XML is ground truth.
 """
 import sys
 import json

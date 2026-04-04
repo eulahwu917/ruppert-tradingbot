@@ -5,7 +5,7 @@ in real-time. This runs as a safety net — polling fallback for any missed exit
 
 Unified post-entry position watcher for ALL modules.
 Checks exit conditions based on module type, executes auto-exits or queues alerts.
-Runs every 30 minutes via Task Scheduler (6am-11pm).
+Runs every 15 minutes via Task Scheduler (6am-11pm PDT). Note: PT15M per Ruppert-PostTrade-Monitor.xml.
 
 Usage: python post_trade_monitor.py
 """
