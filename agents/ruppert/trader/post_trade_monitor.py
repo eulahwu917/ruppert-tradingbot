@@ -39,7 +39,7 @@ from scripts.event_logger import log_event
 # DRY_RUN intentionally not captured at module level — read at call time inside run_monitor()
 
 from agents.ruppert.data_analyst.kalshi_client import KalshiClient
-from agents.ruppert.data_scientist.logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock, normalize_entry_price
+from agents.ruppert.data_scientist.logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock, normalize_entry_price, _append_jsonl
 from agents.ruppert.trader import position_tracker
 from agents.ruppert.trader import circuit_breaker
 
@@ -283,8 +283,7 @@ def check_settlements(client):
             "order_result": {"dry_run": True, "status": "settled"},
         }
         try:
-            with open(log_path, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(settle_record) + '\n')
+            _append_jsonl(log_path, settle_record)
         except Exception as e:
             print(f"  [Settlement Checker] JSONL write error for {ticker}: {e}")
             continue

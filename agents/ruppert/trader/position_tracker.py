@@ -30,6 +30,7 @@ import config
 # They include dedup fingerprint checking. ISSUE-023 confirmed resolved in Sprint 3.
 from agents.ruppert.data_scientist.logger import (
     log_activity, normalize_entry_price, _append_jsonl, log_exit as _log_exit, log_settle as _log_settle,
+    acquire_exit_lock, release_exit_lock,
 )
 from agents.ruppert.trader import circuit_breaker as _circuit_breaker
 
@@ -715,10 +716,19 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
     """
     ticker, side = key
 
+    # Cross-process file lock — coordinates with post_trade_monitor
+    if not acquire_exit_lock(ticker, side):
+        logger.warning(
+            '[PositionTracker] Exit file-lock held for %s %s — another process is exiting. Skipping.',
+            ticker, side
+        )
+        return
+
     # Dedup guard: if this (ticker, side) exit is already in-flight, skip.
     # Atomic check-and-set under lock (ISSUE-002).
     async with _exits_lock:
         if key in _exits_in_flight:
+            release_exit_lock(ticker, side)
             logger.warning(
                 '[PositionTracker] Dedup guard: exit for %s %s already in-flight — skipping duplicate',
                 ticker, side
@@ -860,6 +870,7 @@ async def execute_exit(key: tuple, pos: dict, current_bid: int, rule: str,
         _recently_exited[(ticker, side)] = time.time()  # cooldown: prevent re-fire for TTL window
     finally:
         _exits_in_flight.discard(key)
+        release_exit_lock(ticker, side)
 
 
 def _settle_record_exists(ticker: str, side: str) -> bool:
