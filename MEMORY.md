@@ -6,6 +6,34 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 
 ---
 
+## 2026-04-04 — Full Audit Pipeline Complete (12:00-16:40 PDT)
+
+### Audit pipeline ran, System Map at 98%+ confidence
+
+**Phases 0, 1, 2 all complete. Phase 3 pending shadow trades.**
+
+Phase 0 (data): 42 duplicate buy records removed from trades_2026-04-03.jsonl. Capital verified $10,347.42.
+Phase 1 (code): Batch A (date.today survivors in 3 active files) + Batch B (capital error handling in 3 files) + 1 regression fix. All committed: dd6540d, d9e3a89.
+Phase 2 (System Map): 291+ claims enumerated, ~113 adjudicated. 12 corrections applied. System Map v3.6 (5042e11). Docstrings fixed e67dfd8.
+
+**Key System Map corrections (ground truth from XML/code):**
+- settlement_checker: every 30 min 24/7 (not 2x daily)
+- post_trade_monitor: every 15 min 6AM-11PM (not 30 min)
+- _PROTECTED_ACTIONS: 6 members (not 3)
+- pnl_cache.json: never written by synthesizer
+- ISSUE-A02: partially resolved in prediction_scorer.py
+- CRYPTO_15M_SERIES: ws_feed.py still has local copy (P2 open)
+
+**Open P2 items (non-blocking):**
+- ws_feed.py CRYPTO_15M_SERIES import from utils.py
+- crypto_band_daily.py + crypto_threshold_daily.py: remaining date.today() (disabled modules)
+
+**System state: HALTED, code clean, Phase 3 pending shadow trades**
+- Next: David confirms → restart WS feed + watchdog (crypto 15m only)
+- Daily modules: OFF until shadow WR >45% / 50+ trades + R9 + R1 vol gate
+
+---
+
 ## 2026-04-04 — Batches 2-5 Complete (10:00-12:00 PDT)
 
 ### All 4 batches complete — trading ready to restart
