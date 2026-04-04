@@ -57,6 +57,9 @@ DRY_RUN = getattr(config, 'DRY_RUN', True)
 # Per-window evaluation dedup guard
 # Key: "{series}::{window_open_iso}"  Value: ISO timestamp when evaluated
 _window_evaluated: dict[str, str] = {}
+# Per-window retry tracker (one delayed retry on REST None)
+# Key: "{series}::{window_open_iso}"  Value: datetime (UTC-aware) when retry is allowed
+_window_retry_after: dict[str, datetime] = {}
 _window_eval_lock = asyncio.Lock()
 
 # Tracked background tasks — populated by _spawn(), cancelled on WS reconnect (ISSUE-128)
@@ -141,10 +144,16 @@ def _get_kalshi_client():
 
 def _prune_window_guard():
     """Remove dedup entries older than 60 minutes."""
-    cutoff = (datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=1)).isoformat()
-    stale = [k for k, v in _window_evaluated.items() if v < cutoff]
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    stale = [k for k, v in _window_evaluated.items() if v < cutoff_iso]
     for k in stale:
         del _window_evaluated[k]
+    # Also prune _window_retry_after under the same lock context (caller holds lock or
+    # this is called from sync context where asyncio lock is not needed).
+    cutoff_dt = datetime.now(timezone.utc) - timedelta(hours=1)
+    stale_retry = [k for k, v in _window_retry_after.items() if v < cutoff_dt]
+    for k in stale_retry:
+        del _window_retry_after[k]
 
 
 async def _resolve_15m_ticker(series: str, window_open_dt: datetime) -> dict | None:
@@ -249,17 +258,40 @@ async def _check_and_fire_fallback() -> None:
     for series in CRYPTO_15M_SERIES:
         guard_key = f"{series}::{window_open_iso}"
 
-        # Skip if WS already evaluated this window (atomic check+set under lock)
+        # Step 1: Guard check — read _window_evaluated and _window_retry_after under lock.
+        # Do NOT write _window_evaluated yet — defer until after successful eval.
         async with _window_eval_lock:
             if guard_key in _window_evaluated:
                 continue
-            _window_evaluated[guard_key] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+            if guard_key in _window_retry_after:
+                if now_utc < _window_retry_after[guard_key]:
+                    continue  # retry window not yet elapsed — skip this cycle
+                # retry time has elapsed — fall through and attempt fetch again
 
+        # Step 2: Attempt market fetch
         try:
             market = await _fetch_15m_market_price(series, window_open_dt)
-            if not market:
-                continue
+        except Exception as e:
+            logger.warning('[Fallback] fetch error for %s: %s', series, e)
+            continue
 
+        if not market:
+            # REST returned None — handle retry logic
+            async with _window_eval_lock:
+                if guard_key in _window_retry_after:
+                    # Second miss — permanently skip with warning
+                    logger.warning(
+                        '[Fallback] REST returned None twice for %s — permanently skipping window %s',
+                        series, window_open_iso
+                    )
+                    _window_evaluated[guard_key] = datetime.now(timezone.utc).isoformat()
+                    del _window_retry_after[guard_key]
+                else:
+                    # First miss — queue one retry in 30s
+                    _window_retry_after[guard_key] = now_utc + timedelta(seconds=30)
+            continue
+
+        try:
             ticker = market['ticker']
             yes_ask = market['yes_ask']
             yes_bid = market['yes_bid']
@@ -279,6 +311,12 @@ async def _check_and_fire_fallback() -> None:
                 book_depth_usd=book_depth_usd,  # computed from top-3 volumes each side
                 dollar_oi=0.0,                  # REST OI not fetched here — strategy must tolerate 0
             )
+
+            # Step 3: Mark evaluated AFTER successful eval (any non-exception return,
+            # including block results — those are completed evaluations too).
+            async with _window_eval_lock:
+                _window_evaluated[guard_key] = datetime.now(timezone.utc).isoformat()
+                _window_retry_after.pop(guard_key, None)  # cleanup
 
         except Exception as e:
             logger.warning('[Fallback] eval error for %s: %s', series, e)
@@ -688,7 +726,7 @@ async def _safe_eval_15m(
             if _guard_key and _guard_key in _window_evaluated:
                 return  # already evaluated this window — drop silently
             if _guard_key:
-                _window_evaluated[_guard_key] = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+                _window_evaluated[_guard_key] = datetime.now(timezone.utc).isoformat()
             # proceed with evaluation — mark is set inside the lock
 
         _import_ok = True
@@ -988,7 +1026,7 @@ def _write_heartbeat():
         heartbeat_file = _get_paths()['logs'] / 'ws_feed_heartbeat.json'
         heartbeat_file.parent.mkdir(parents=True, exist_ok=True)
         heartbeat_file.write_text(json.dumps({
-            'last_heartbeat': datetime.now().isoformat(),
+            'last_heartbeat': datetime.now(timezone.utc).isoformat(),
             'pid': os.getpid(),
             'status': 'running',
         }), encoding='utf-8')

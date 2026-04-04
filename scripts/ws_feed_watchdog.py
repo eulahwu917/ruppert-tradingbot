@@ -14,7 +14,7 @@ import time
 import json
 import os
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Config
 CHECK_INTERVAL_SECONDS = 60    # 1 minute
@@ -73,7 +73,7 @@ def is_heartbeat_fresh() -> bool:
             return False
 
         last_dt = datetime.fromisoformat(last_ts)
-        stale_threshold = datetime.now() - timedelta(seconds=HEARTBEAT_STALE_SECONDS)
+        stale_threshold = datetime.now(timezone.utc) - timedelta(seconds=HEARTBEAT_STALE_SECONDS)
         return last_dt > stale_threshold
     except Exception as e:
         log(f"Heartbeat check failed: {e}")

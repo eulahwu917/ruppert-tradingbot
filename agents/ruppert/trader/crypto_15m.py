@@ -764,13 +764,22 @@ def check_risk_filters(
     if session_pnl < -_drawdown_pause_pct * capital:
         return {'block': 'DRAWDOWN_PAUSE', 'okx_volume_pct': okx_volume_pct}
 
-    # R9: Macro event (reuse from main cycle if available)
+    # R9: Macro event filter
+    # DEPLOYMENT REQUIREMENT: utils.py must be deployed and importable before this
+    # change goes live. Preferred: deploy both files in the same commit.
     try:
-        from ruppert_cycle import has_macro_event_within
-        if has_macro_event_within(minutes=30):
-            return {'block': 'MACRO_EVENT_RISK', 'okx_volume_pct': okx_volume_pct}
-    except (ImportError, AttributeError):
-        pass  # Not available in all contexts
+        from agents.ruppert.trader.utils import has_macro_event_within
+    except ImportError:
+        import logging as _log
+        _log.getLogger(__name__).error(
+            '[crypto_15m] CRITICAL: Cannot import has_macro_event_within from utils.py. '
+            'R9 macro filter is INACTIVE. Deploy utils.py before this module.'
+        )
+        has_macro_event_within = None
+
+    if has_macro_event_within is not None and has_macro_event_within(minutes_before=120, minutes_after=60):
+        logger.info('[crypto_15m] R9 block: macro event window active')
+        return {'block': 'MACRO_EVENT_RISK', 'okx_volume_pct': okx_volume_pct}
 
     # R10: Coinbase-OKX basis
     coinbase_price = fetch_coinbase_price(asset)
@@ -843,7 +852,7 @@ def is_15m_ticker(ticker: str) -> bool:
 def _parse_asset_from_ticker(ticker: str) -> str | None:
     """Extract asset name from 15-min ticker (KXBTC15M-... → BTC)."""
     series = ticker.split('-')[0].upper()
-    for prefix in ('KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M'):
+    for prefix in CRYPTO_15M_SERIES:
         if series == prefix:
             asset = prefix.replace('KX', '').replace('15M', '')
             return asset

@@ -66,7 +66,7 @@ WS_EVENT_LOOP_DURATION = 840         # 14 minutes (Task Scheduler runs every 30 
 POLL_BACKSTOP_INTERVAL = 300         # 5 min polling backstop inside WS loop
 
 # 15-min crypto direction series
-CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M']
+CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M']
 
 # ─────────────────────────────── Helpers ──────────────────────────────────────
 
@@ -599,22 +599,6 @@ async def run_ws_mode(client: KalshiClient):
     raise RuntimeError("WS mode retired — use ws_feed.py directly")
 
 
-# ─────────────────────────────── Persistent WS Mode ──────────────────────────
-
-PERSISTENT_MARKET_HOUR_START = 6   # 6 AM local
-PERSISTENT_MARKET_HOUR_END   = 23  # 11 PM local
-PERSISTENT_RESUB_INTERVAL    = 900 # re-fetch crypto tickers every 15 min
-
-
-def _in_market_hours() -> bool:
-    """Return True if current local hour is within 6AM–11PM."""
-    return PERSISTENT_MARKET_HOUR_START <= datetime.now().hour < PERSISTENT_MARKET_HOUR_END
-
-
-async def run_persistent_ws_mode():
-    """Persistent WS mode retired 2026-03-31. Use ws_feed.py directly."""
-    raise RuntimeError("WS mode retired — use ws_feed.py directly")
-
 
 # ─────────────────────────────── Polling Mode (Fallback) ──────────────────────
 
@@ -652,20 +636,19 @@ def main():
     args = parser.parse_args()
 
     if args.persistent:
-        # Delegate to ws_feed.py — the new persistent WS-first architecture.
+        # Delegate to ws_feed.py — the WS-first architecture.
         # ws_feed.py handles: market_cache, position_tracker, crypto entry routing.
         try:
             from agents.ruppert.data_analyst.ws_feed import run
-            print("  [Monitor] Delegating to ws_feed.py (WS-first architecture)")
+            logger.info('[Monitor] Starting ws_feed (WS-first architecture) via --persistent')
             run()
             return
-        except ImportError as e:
-            print(f"  [Monitor] ws_feed import failed ({e}) — falling back to legacy persistent mode")
-        if not _in_market_hours():
-            print(f"  [Persistent WS] Outside market hours ({PERSISTENT_MARKET_HOUR_START}:00–{PERSISTENT_MARKET_HOUR_END}:00) — exiting")
-            return
-        asyncio.run(run_persistent_ws_mode())
-        return
+        except Exception as e:
+            logger.error(
+                '[Monitor] ws_feed failed to start (%s: %s) — no fallback available, exiting',
+                type(e).__name__, e
+            )
+            sys.exit(1)
 
     client = KalshiClient()
 
