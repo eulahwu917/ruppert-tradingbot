@@ -1,0 +1,247 @@
+# Master Issues — Prioritized
+_Generated 2026-04-02 from master-issues-CONSOLIDATED-2026-04-02.md_
+_Prioritized for: crypto_dir_15m first, then crypto daily, then live readiness_
+
+---
+
+## Summary
+
+| Priority | Count | Description |
+|----------|-------|-------------|
+| P0 | 34 | Fix immediately — blocks or corrupts 15m trading right now |
+| P1 | 54 | Fix soon — affects daily modules, analytics, data quality |
+| P2 | 14 | Fix before going live — live env issues, risk gaps |
+| P3 | 30 | Fix eventually — disabled modules, cosmetic, dead code |
+| P4 | 3 | Accept / document only — known limitations, no real impact |
+| **Total** | **135** | |
+
+---
+
+## P0 — Fix Immediately
+_These are directly corrupting or blocking crypto_dir_15m trades, exits, sizing, or capital tracking RIGHT NOW_
+
+| ID | Title | Why P0 | File |
+|----|-------|--------|------|
+| ISSUE-070 | ✅ COMPLETE (ceba350) | WS feed uses 7% daily cap vs strategy's 70% — blocks 15m trades | 15m trades hard-blocked at 7% deployment; 90% of valid entry windows suppressed | `ws_feed.py` |
+| ISSUE-001 | ✅ COMPLETE (e051551) | KXSOL15M missing from CRYPTO_15M_SERIES — SOL 15m dead-lettered | All SOL 15m signals silently dropped; SOL never trades | `ws_feed.py` |
+| ISSUE-087 | ✅ COMPLETE (e051551) | OBI EWM is backwards — over-weights old order book data | 15m OBI signal is anti-causal; signal direction may be inverted | `crypto_15m.py` |
+| ISSUE-035 | ✅ COMPLETE (e051551) | Coinbase API failure is fail-open — basis filter silently skipped | Critical entry guard bypassed on any Coinbase hiccup; bad entries allowed | `crypto_15m.py` |
+| ISSUE-015 | ✅ COMPLETE (ceba350) | WS eval has no dedup guard → burst ticks fire concurrent duplicate orders | Multiple concurrent 15m tasks each place real buy orders for same window | `ws_feed.py` |
+| ISSUE-060 | ✅ COMPLETE (ceba350) | 15m WS eval + REST fallback poll can both fire for same window | WS tick and REST poll both pass guard before either updates it → duplicate orders | `ws_feed.py` |
+| ISSUE-014 | ✅ COMPLETE (ceba350) | Sync blocking I/O in async WS handler → event loop blocked → PING timeout → disconnect | Every entry eval blocks the WS event loop; broker disconnects kill the feed | `ws_feed.py`, `position_tracker.py` |
+| ISSUE-061 | ✅ COMPLETE (ceba350) | `_rest_refresh_stale()` makes blocking HTTP calls in async → event loop stall every 5 min | Every 5-min heartbeat stalls event loop; PING frames missed; disconnects | `ws_feed.py` |
+| ISSUE-049 | ✅ COMPLETE (ceba350) | Watchdog spawns new ws_feed without killing hung process → two concurrent instances | Both instances have separate dedup caches; both place exit orders for same position | `ws_feed_watchdog.py` |
+| ISSUE-002 | ✅ COMPLETE (664d81e) | No asyncio.Lock on `_exits_in_flight` — concurrent WS messages pass dedup → double-exits | Two exit orders per position; double-selling live contracts | `position_tracker.py` |
+| ISSUE-003 | ✅ COMPLETE (664d81e) | `execute_exit()` swallows API failure → position stays in `_tracked` → infinite retry storm | Hung exit loops forever; position never clears; event loop starved | `position_tracker.py` |
+| ISSUE-107 | ✅ COMPLETE (664d81e) | `_tracked` dict mutated across asyncio tasks → race during `await` → stale position refs | Exit executes with stale entry price / size; wrong exit math | `position_tracker.py` |
+| ISSUE-042 | ✅ COMPLETE (b376074) `normalize_entry_price()` NO-side flip corrupts positions priced below 50¢ | NO contract at 3¢ has entry logged as 97¢; all P&L and stop math wrong | `position_tracker.py` |
+| ISSUE-043 | ✅ COMPLETE (b376074) `EXIT_GAIN_PCT` defaults differ (0.70 vs 0.90) between strategy.py and position_tracker/config | 15m positions exit too early or too late depending on code path | `position_tracker.py`, `config.py`, `strategy.py` |
+| ISSUE-023 | `position_tracker` bypasses `log_trade()` for exit records — no dedup fingerprint | Double-write dedup can't fire; ~15 schema fields missing from every exit record | `position_tracker.py` |
+| ISSUE-031 | ✅ COMPLETE (ff9be04) | `ruppert_cycle.py` auto-exits don't call `position_tracker.remove_position()` | Tracker retains exited position; WS feed attempts second exit on same position | `ruppert_cycle.py` |
+| ISSUE-024 | ✅ COMPLETE (ff9be04) | `state.json` written non-atomically → crash mid-write corrupts `traded_tickers` | On next startup, bot sees empty traded_tickers and re-enters all open positions | `ruppert_cycle.py` |
+| ISSUE-052 | ✅ COMPLETE (ff9be04) | No process lock on scan cycles → overlapping Task Scheduler invocations | Two concurrent cycles independently pass cap+dedup checks; each places trades | `ruppert_cycle.py` |
+| ISSUE-073 | ✅ COMPLETE (e051551) | 7 exception swallows in scan loops → module crashes are completely silent | 15m evaluation crash produces no log, no Telegram; failure is invisible | `ruppert_cycle.py` |
+| ISSUE-025 | ✅ COMPLETE (019d14d) | Double-settlement race — `settlement_checker` + `position_tracker` both write settle records | Both can independently detect the same settled position; P&L doubled | `settlement_checker.py`, `position_tracker.py` |
+| ISSUE-028 | Settlement inferred from `yes_bid >= 99` without checking market `status` field | Any highly-priced active market triggers phantom settlement write | `settlement_checker.py` |
+| ISSUE-029 | ✅ COMPLETE (d286b28) | Failed orders logged as `action='buy'` with `contracts=0` → phantom open positions forever | Exposure counter counts failed trade's `size_dollars` indefinitely; cap depleted by ghosts | `trader.py`, `ruppert_cycle.py` |
+| ISSUE-099 | ✅ COMPLETE (d286b28) | Failed trade logs `size=strategy_size` (requested, not filled) → phantom capital deployment | Every failed order locks capital indefinitely; combines with ISSUE-029 | `trader.py` |
+| ISSUE-078 | ✅ COMPLETE (d286b28) | `Trader.__init__` calls `get_balance()` with no error handling → transient API error aborts cycle | One 429 or timeout at startup terminates entire scan cycle before any 15m eval | `trader.py` |
+| ISSUE-033 | ✅ COMPLETE (2c078c4) | `position_monitor` AUTO-EXIT triggers full rescan of ALL positions | 10 exits = 10 full rescans; double-settle probability near certainty at scale | `position_monitor.py` |
+| ISSUE-094 | ✅ COMPLETE (2c078c4) | `evaluate_crypto_entry()` in `position_monitor` places orders without circuit breaker check | Runaway entry loop in position_monitor bypasses all CB protections | `position_monitor.py` |
+| ISSUE-077 | ✅ COMPLETE (019d14d) | Multi-process JSONL writes without shared file lock → cross-process double-exits | 3 separate processes each hold their own dedup set; invisible to each other | `logger.py`, `position_tracker.py`, `settlement_checker.py` |
+| ISSUE-076 | ✅ COMPLETE (d0f4436) CB TOCTOU race — no file lock → concurrent callers overwrite CB counts | BTC + ETH can each increment independently; writes collide; breaker never trips | `circuit_breaker.py` |
+| ISSUE-047 | ✅ COMPLETE (d0f4436) Circuit breaker only covers BTC + ETH — SOL, XRP, DOGE unprotected | 15m trades on SOL/XRP/DOGE can run unlimited daily losses without CB trip | `circuit_breaker.py` |
+| ISSUE-044 | ✅ COMPLETE (b376074) Timezone mishandling pervasive — `date.today()` and naive `datetime.now()` throughout | Near UTC midnight (PDT afternoon), CB resets wrong time; expiry filters wrong day; log paths diverge | `circuit_breaker.py`, `ws_feed.py`, `position_tracker.py`, `ruppert_cycle.py` |
+| ISSUE-055 | ✅ COMPLETE (45d3a9b) | Settled positions resurrected — `run_post_scan_audit()` re-adds them to tracker every cycle | Settled positions come back open on every scan; WS attempts to exit them again | `data_agent.py` |
+| ISSUE-056 | ✅ COMPLETE (45d3a9b) | `_cleanup_duplicates()` may delete exit records sharing `trade_id` with buy | Exit record deleted → position appears perpetually open → capital never freed | `data_agent.py` |
+| ISSUE-051 | ✅ COMPLETE (45d3a9b) | Capital tracking fallback silently returns $10,000 default on any failure | All sizing after a capital fetch error computed against $10,000 regardless of balance | `capital.py` |
+| ISSUE-039 | TheNewsAPI key hardcoded in `geo_client.py` — in git history, must rotate | API key exposed in VCS history; security breach regardless of module being disabled | `geo_client.py` |
+
+---
+
+## P1 — Fix Soon
+_Affects crypto_threshold_daily / crypto_band_daily, analytics pipelines, data quality, and audit tooling_
+
+| ID | Title | Why P1 | File |
+|----|-------|--------|------|
+| ISSUE-017 | ✅ COMPLETE (d161a89) NO-side order uses `100 - yes_ask` instead of `no_ask` → wrong fill price | Daily modules place NO orders at wrong price; orders unfilled or wrong cost | `crypto_band_daily.py`, `crypto_threshold_daily.py` |
+| ISSUE-016 | ✅ COMPLETE (d161a89) Band module date filter skips same-day-settling contracts | `crypto_band_daily` may never trade the contracts it's designed for | `crypto_band_daily.py` |
+| ISSUE-053 | ✅ COMPLETE (d161a89) Daily cap race condition — concurrent asset evals both pass cap before either trade logs | BTC + ETH threshold/band trades both deploy in same cycle; effective cap doubled | `crypto_threshold_daily.py`, `crypto_band_daily.py` |
+| ISSUE-057 | ✅ COMPLETE (d161a89) Polymarket 20% weight uses 15m short-window consensus for daily-scale trade | Daily threshold signal polluted by 15m noise; wrong signal timescale | `crypto_threshold_daily.py` |
+| ISSUE-026 | ✅ COMPLETE (d3584bf) `settlement_checker` uses `exit_price = 99` instead of 100 → understates every WIN | Every settled win is 1¢ × contracts short; systematic P&L understatement | `settlement_checker.py` |
+| ISSUE-027 | ✅ COMPLETE (d3584bf) Settlement checker dry-run P&L formula wildly wrong (win vs loss asymmetric) | Paper P&L numbers meaningless; +$9,800 vs -$100 on same trade | `settlement_checker.py` |
+| ISSUE-030 | ✅ COMPLETE (641e2d3) `pnl` field absent from most exits → most P&L silently computed as $0 | Only WS/settlement exits have `pnl`; ruppert_cycle + post_trade_monitor exits show $0 | `ruppert_cycle.py`, `post_trade_monitor.py` |
+| ISSUE-032 | ✅ COMPLETE (a441a6d) Smart money wallets written to wrong path → always using 3-wallet hardcoded fallback | 15m crypto_client signal degraded; wallet data never read from updated source | `crypto_client.py` |
+| ISSUE-005 | ✅ COMPLETE (2e870f6) Optimizer globs `logs/` instead of `logs/trades/` → sees zero live trades | Every optimizer output (domain stats, cap utilization) is all-zeros | `optimizer.py` |
+| ISSUE-040 | ✅ COMPLETE (058589b) Scorer writes `domain: "crypto_dir_15m_btc"`, optimizer's `detect_module()` returns `"crypto"` | Per-domain threshold optimization completely blind; all thresholds stay at global default | `prediction_scorer.py`, `optimizer.py` |
+| ISSUE-041 | ✅ COMPLETE (2e870f6) `analyze_daily_cap_utilization()` double-counts every closed trade | Cap utilization appears 2× actual; false signals that cap is being exhausted | `optimizer.py` |
+| ISSUE-046 | ✅ COMPLETE (9a1d78e) `analyze_exit_timing()` reads `exit_timestamp` field that doesn't exist | Hold time analysis always returns empty; exit timing optimization impossible | `optimizer.py` |
+| ISSUE-006 | ✅ COMPLETE (7fb4d19) `prediction_scorer` doesn't flip outcome for NO-side trades | Every NO-side Brier score and win rate is inverted; calibration data backwards | `prediction_scorer.py` |
+| ISSUE-004 | ✅ COMPLETE (1ebee0a) `brier_tracker.py` writes predictions to hardcoded path | In production, predictions go to wrong directory; Brier scoring pipeline broken | `brier_tracker.py` |
+| ISSUE-050 | `prediction_scorer` only uses first buy leg's probability for scale-in trades | Multi-leg positions scored on first entry only; Brier bias for scale-ins | `prediction_scorer.py` |
+| ISSUE-006 | ✅ COMPLETE (7fb4d19) NO-side Brier scores inverted | Already listed above | `prediction_scorer.py` |
+| ISSUE-007 | ✅ COMPLETE (c69dee2) `compute_closed_pnl_from_logs()` silently returns $0 on any exception | Dashboard shows $0 capital on any path failure; no error surfaced | `logger.py` |
+| ISSUE-018 | ✅ COMPLETE (d02db9f) `/api/account` crashes with NameError on every call | Account page permanently broken; `AUTO_SOURCES`/`MANUAL_SOURCES` undefined | `dashboard/api.py` |
+| ISSUE-019 | ✅ COMPLETE (d02db9f) `/api/positions/active` crashes — `side` used before assigned | Active positions endpoint permanently broken | `dashboard/api.py` |
+| ISSUE-063 | ✅ COMPLETE (d02db9f) P&L chart hardcodes `"2026-03-10"` as historical data point | Dashboard P&L history chart is fabricated; misleads performance review | `dashboard/api.py` |
+| ISSUE-064 | ✅ COMPLETE (d02db9f) `BOT_SRC` tuple missing `ws_*` source labels → deployed capital understated | WS-originated trades invisible to capital tracker; deployed capital always low | `dashboard/api.py` |
+| ISSUE-065 | ✅ COMPLETE (d02db9f) Settled positions appear as open — dashboard misses `action='settle'` | Settled positions show as open in dashboard indefinitely | `dashboard/api.py`, `settlement_checker.py` |
+| ISSUE-066 | ✅ COMPLETE (d02db9f) `closed_win_rate` uses ticker-dedup instead of trade_id | Win/loss counts collapse multiple same-ticker trades; rate wrong | `dashboard/api.py` |
+| ISSUE-072 | ✅ COMPLETE (d02db9f) 19 exception swallows in dashboard API → all errors silently hidden | Dashboard returns wrong data with no indication anything failed | `dashboard/api.py` |
+| ISSUE-036 | `data_integrity_check.py` checks `logs/` not `logs/trades/` → never validated since migration | Audit tool returns false "OK" on every run; gives false confidence | `data_integrity_check.py` |
+| ISSUE-037 | `code_audit.py` scans `audit/` instead of `demo/` → misses every production module | Code audit tool sees no production code; entirely useless | `code_audit.py` |
+| ISSUE-038 | `qa_self_test.py` has hardcoded absolute Windows path → breaks everywhere else | QA tests cannot run in CI or on any other machine | `qa_self_test.py` |
+| ISSUE-100 | `qa_self_test.py` deprecated file check scans wrong directory → always passes falsely | QA passes on deprecated-file check even when they exist | `qa_self_test.py` |
+| ISSUE-034 | ✅ COMPLETE (07d3eba) `position_monitor WS_ENABLED=True` raises RuntimeError immediately | Enabling WS mode crashes monitor before polling fallback can run | `position_monitor.py` |
+| ISSUE-045 | ✅ COMPLETE (8a32658) Legacy positions assigned `entry_secs_in_window=120` → always most conservative stop tier | Positions missing this field get tightest stops regardless of actual entry time | `position_tracker.py` |
+| ISSUE-048 | `crypto_long` routing conflict → `data_agent` auto-fix loop writes records repeatedly | Data agent keeps rewriting module labels; corrupts trade log analytics | `data_agent.py`, `logger.py` |
+| ISSUE-055 | Ghost positions resurrected | Already listed in P0 above | — |
+| ISSUE-075 | `data_agent.py` audit files written non-atomically → concurrent audit runs corrupt output | Overlapping scan cycles produce interleaved audit records | `data_agent.py` |
+| ISSUE-086 | `exit_correction` records excluded from Today/7-day P&L | Brief generator reads `pnl` but not `pnl_correction`; correction entries invisible | `brief_generator.py` |
+| ISSUE-095 | Two conflicting P&L totals in daily progress report — unlabeled | Cannot tell which number is authoritative; both shown without labels | `daily_progress_report.py` |
+| ISSUE-074 | ✅ COMPLETE (8a32658) `post_trade_monitor` + `crypto_long_horizon` exits missing `edge`/`confidence` | Average edge on exits computed as 0; optimizer sees no signal from these exits | `post_trade_monitor.py`, `crypto_long_horizon.py` |
+| ISSUE-079 | ✅ COMPLETE (8a32658) `check_alert_only_position` broken entry_price normalization | Zero entry_price falls through to wrong P&L calculation path | `post_trade_monitor.py` |
+| ISSUE-098 | ✅ COMPLETE (8a32658) NO-side win P&L overstated by ~2.4× via `normalize_entry_price()` in position_monitor | P&L reporting for NO wins inflated; paper performance looks better than real | `position_monitor.py` |
+| ISSUE-088 | `_resolve_condition_to_market` uncached → up to 300 sequential Gamma API calls | Polymarket resolution causes 300-call blocking storm per cycle | `polymarket_client.py` |
+| ISSUE-089 | ✅ COMPLETE (d161a89) Polymarket `yes_price` semantic mismatch — "above $X" ≠ "bullish" | Polymarket signal misinterpreted; inflates consensus toward YES entries | `crypto_threshold_daily.py` |
+| ISSUE-116 | ✅ COMPLETE (c03e5b1) Polymarket ETH alias substring matches EtherFi/Ethena/stETH | Wrong Polymarket market pulled for ETH signal | `polymarket_client.py` |
+| ISSUE-059 | Demo orderbook enrichment loop has no 429 backoff | Rate limit cascades; all subsequent market enrichments fail in same cycle | `demo/kalshi_client.py` |
+| ISSUE-062 | ✅ PARTIAL (8a32658) Stale spot price in edge calculation — cached vs live WS tick | TODO comment added; full fix deferred to ISSUE-062b (requires crypto_client refactor) | `ws_feed.py` |
+| ISSUE-096 | ✅ COMPLETE (a441a6d) WS reconnect uses flat 5-second retry forever — no exponential backoff | During outage, hammers server at 12 connections/min; worsens recovery time | `ws_feed.py` |
+| ISSUE-069 | ✅ COMPLETE (c03e5b1) `crypto_15m.py` fallback `getattr()` defaults use Phase 1 weights | Config import failure silently reverts to wrong signal weights | `crypto_15m.py` |
+| ISSUE-114 | ✅ COMPLETE (c03e5b1) Signal weights in `crypto_15m` not asserted to sum to 1.0 | Config override producing weights ≠ 1.0 produces wrong composite signal silently | `crypto_15m.py` |
+| ISSUE-129 | ✅ COMPLETE (b171271) OI delta near-zero float not guarded → astronomical z-score spike | Near-zero OI delta produces extreme z-score; overweights OI signal on sparse markets | `crypto_15m.py` |
+| ISSUE-104 | ✅ COMPLETE (b171271) `_module_cap_missing` unassigned when `module=None` → latent NameError in strategy | Module=None edge case raises NameError; aborts sizing for that trade | `strategy.py` |
+| ISSUE-105 | ✅ COMPLETE (a441a6d) Window cap counter overcharged when position trimmed below 1 contract cost | Cap appears more utilized than actual; valid trades blocked | `strategy.py` |
+| ISSUE-117 | ✅ COMPLETE (07d3eba) `vol_ratio=0` bypasses vol shrinkage → full unscaled Kelly instead of $0 | Missing vol data produces full Kelly position instead of zero size | `strategy.py` |
+| ISSUE-101 | ✅ COMPLETE (1ebee0a) `brier_tracker.score_prediction()` allows duplicate entries | Same prediction scored multiple times; Brier sample count inflated | `brier_tracker.py` |
+| ISSUE-102 | ✅ COMPLETE (641e2d3) `TICKER_MODULE_MAP` missing `KXBTCD` prefix | Threshold daily BTC tickers misclassified; module analytics wrong | `logger.py` / `data_agent.py` |
+| ISSUE-103 | ✅ COMPLETE (9a1d78e) Multi-day positions: scorer writes `null predicted_prob` when buy date ≠ settle date | Overnight positions corrupt calibration pipeline | `prediction_scorer.py` |
+| ISSUE-108 | ✅ COMPLETE (8a32658) Logger import failures logged at DEBUG only → shadow log silently disabled | Shadow logging failure invisible at INFO level; data loss undetected | `crypto_15m.py`, `crypto_band_daily.py`, `ws_feed.py` |
+| ISSUE-110 | ✅ COMPLETE (d3584bf) Settlement checker has no retry on Kalshi API error → position silently skipped | Failed settlement check skips position until next 24h pass | `settlement_checker.py` |
+| ISSUE-121 | ✅ COMPLETE (8a32658) `data_health_check._push_alert()` writes to log instead of `pending_alerts.json` | Health check alerts never reach the alert consumer | `data_health_check.py` |
+
+---
+
+## P2 — Fix Before Going Live
+_⚠️ Live environment archived 2026-04-03 — will be rebuilt from scratch later._
+_Autoresearch archived 2026-04-03 — will be replaced with new backtest engine._
+_ISSUE-090 and ISSUE-119 remain active (demo-relevant config issues)._
+
+| ID | Title | Why P2 | File |
+|----|-------|--------|------|
+| ISSUE-090 | `CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED=False` — no daily dollar ceiling for 15m module | 96 windows × 5 assets can consume entire daily budget without any 15m-level ceiling | `config.py` |
+| ISSUE-119 | Missing `{MODULE}_DAILY_CAP_PCT` constant → new modules fail-open | Any module added without its cap constant can consume entire 70% global budget | `strategy.py`, `config.py` |
+
+### Archived / Deferred (2026-04-03)
+_These issues are removed from the active list. Live env will be rebuilt from scratch; autoresearch replaced with new backtest engine._
+
+| ID | Title | Status |
+|----|-------|--------|
+| ISSUE-020 | Live codebase pre-Phase-6 | DEFERRED — live env archived |
+| ISSUE-011 | Live kalshi_client Pydantic crash | DEFERRED — live env archived |
+| ISSUE-013 | Live API zero exception handling | DEFERRED — live env archived |
+| ISSUE-022 | --live flag bypasses dry_run | DEFERRED — live env archived |
+| ISSUE-093 | Live position_monitor no DRY_RUN guard | DEFERRED — live env archived |
+| ISSUE-021 | Live logger $400 hardcoded fallback | DEFERRED — live env archived |
+| ISSUE-012 | Live place_order same-second collision | DEFERRED — live env archived |
+| ISSUE-084 | Autoresearch Bonferroni backwards | DEFERRED — autoresearch archived |
+| ISSUE-085 | Autoresearch auto-accepts first experiment | DEFERRED — autoresearch archived |
+| ISSUE-111 | Autoresearch IS/OOS split shifts | DEFERRED — autoresearch archived |
+| ISSUE-112 | Autoresearch OOS drawdown hardcoded $400 | DEFERRED — autoresearch archived |
+| ISSUE-113 | Autoresearch accuracy backtest wrong formula | DEFERRED — autoresearch archived |
+
+---
+
+## P3 — Fix Eventually / Nice to Have
+_Disabled modules, edge cases, dead code, cosmetics_
+
+| ID | Title | Note | File |
+|----|-------|------|------|
+| ISSUE-008 | Weather bias double-applied in edge calculation | Weather module disabled | `edge_detector.py` |
+| ISSUE-009 | CPI model uses stale previous month's reading with no freshness check | Econ module disabled | `economics_scanner.py` |
+| ISSUE-010 | Econ release calendar hardcoded March/April 2026 — empty after April 10 | Econ module disabled | `economics_scanner.py` |
+| ISSUE-054 | `run_post_scan_audit()` corrupts T-type weather trades | Weather module disabled | `data_agent.py` |
+| ISSUE-058 | Demo FED_MIN_CONFIDENCE=0.25 vs live 0.55 → inflates paper P&L | Fed module disabled | `demo/fed_client.py` |
+| ISSUE-067 | BLS API M13/S01 sort above monthly data → annual average as latest CPI | Econ module disabled | `economics_scanner.py` |
+| ISSUE-068 | CPI scanner only matches "rise more than"/"above" patterns | Econ module disabled | `economics_scanner.py` |
+| ISSUE-071 | 6 agent modules add workspace root to sys.path but not agents directory | Breaks direct invocation / CI only | Multiple |
+| ISSUE-080 | KXHIGHLA NWS grid stale — wrong grid points for LA forecast | Weather module disabled | `noaa_client.py` |
+| ISSUE-081 | Dallas NWS uses KDAL (Love Field) but Kalshi settles on KDFW (DFW) | Weather module disabled | `noaa_client.py` |
+| ISSUE-082 | GDELT `timespan` parameter silently ignored → months-old articles | Geo module disabled | `geo_client.py` |
+| ISSUE-083 | `GEO_DAILY_CAP_PCT` commented out but 4% hardcoded fallback in scanner | Geo module disabled | `config.py`, `geopolitical_scanner.py` |
+| ISSUE-091 | `get_nws_forecast_high()` returns ambient temp on fallback path | Weather module disabled | `openmeteo_client.py`, `noaa_client.py` |
+| ISSUE-092 | `fetch_fear_greed()` no error handling → aborts long-horizon scan | crypto_long_horizon not active | `crypto_long_horizon.py` |
+| ISSUE-097 | Long-horizon Kelly formula has extra `market_prob` denominator → 5–10× oversize | crypto_long_horizon not active | `crypto_long_horizon.py` |
+| ISSUE-106 | KXPCE* tickers fall to `module=other` — PCE trades untracked by module analytics | Econ module disabled | Module classifier |
+| ISSUE-109 | `logger._logged_trade_fingerprints` set never pruned → memory leak long-running | Low risk at current scale | `logger.py` |
+| ISSUE-115 | `poly_nudge` computed then unconditionally zeroed — dead code | Misleading but harmless | `crypto_15m.py` |
+| ISSUE-120 | GHCND bias computed at city-center but forecast at airport → miscalibrated edge | Weather module disabled | `ghcnd_client.py` |
+| ISSUE-122 | Capital threshold inconsistency: $100 in data_health_check vs $1,000 in config_audit | Minor monitoring discrepancy | `data_health_check.py`, `config_audit.py` |
+| ISSUE-124 | `win_prob` stripped by `build_trade_entry()` — never logged | Historical win probability unrecoverable; nice-to-have analytics | `logger.py` |
+| ISSUE-125 | `timestamp` has 3+ different formats across modules | Parsing inconsistency; low immediate impact | Multiple |
+| ISSUE-127 | 10 magic numbers should be moved to config | Code hygiene | Multiple |
+| ISSUE-128 | Background `create_task` tasks not tracked or cancelled on reconnect | Latent resource leak; low current risk | `ws_feed.py` |
+| ISSUE-130 | MACD EMA cold-start — noisy for first ~26 bars after restart | Known limitation; low frequency impact | `crypto_15m.py` |
+| ISSUE-131 | CME OAuth error logs full response body → may expose auth fields | Fed module disabled; log hygiene | `fed_client.py` |
+| ISSUE-132 | Ensemble median off-by-one for even member counts | Weather disabled; sub-degree impact | `openmeteo_client.py` |
+| ISSUE-133 | Hard cap at 16 forecast days silently drops 2–3 week contracts | Weather disabled | `openmeteo_client.py` |
+| ISSUE-135 | `pnl_correction.py` script lives inside `logs/trades/` data directory | Data cleanup risk; move to scripts/ | `logs/trades/pnl_correction.py` |
+| ISSUE-136 | Inverted spread treated as "liquid" → bad data gets full position size | Edge case; feed errors uncommon | `strategy.py` |
+
+---
+
+## P4 — Accept / Document Only
+_Known limitations; fix risk outweighs benefit_
+
+| ID | Title | Note | File |
+|----|-------|------|------|
+| ISSUE-123 | `vol_ratio` always 1.0 — vol adjustment in `should_enter()` is dead code | No signal sets vol_ratio; document as pending future feature | `strategy.py` |
+| ISSUE-126 | 8 dead config constants defined but never referenced | Clean when doing a config overhaul; zero current impact | `config.py` |
+| ISSUE-134 | 3 `open()` calls without `encoding='utf-8'` | Non-UTF-8 platform edge case; Windows UTF-8 default correct here | `qa_health_check.py`, `clean_break.py` |
+
+---
+
+## Quick Dev Directives (P0 Groupings for Sprint Planning)
+
+### Sprint 1: 15m Feed & Order Integrity (Fix first — stops duplicate orders and feed drops)
+- ISSUE-070 (7% cap vs 70%)
+- ISSUE-015 + ISSUE-060 (WS eval dedup)
+- ISSUE-014 + ISSUE-061 (async blocking in WS)
+- ISSUE-049 (watchdog kills hung process before spawn)
+- ISSUE-002 + ISSUE-003 + ISSUE-107 (position_tracker async safety)
+
+### Sprint 2: Position State & Capital Integrity (Prevents ghost positions and wrong sizing)
+- ISSUE-024 (atomic state.json write)
+- ISSUE-052 (process lock)
+- ISSUE-029 + ISSUE-099 (failed order logging)
+- ISSUE-078 (Trader init balance error handling)
+- ISSUE-031 (ruppert_cycle exit calls remove_position)
+- ISSUE-055 + ISSUE-056 (data_agent ghost resurrection / exit deletion)
+- ISSUE-051 (capital fallback $10k)
+
+### Sprint 3: Settlement & Double-Exit Prevention
+- ISSUE-025 + ISSUE-028 (settlement races and phantom settlement)
+- ISSUE-033 + ISSUE-094 (position_monitor fanout and CB bypass)
+- ISSUE-077 (cross-process file lock on JSONL)
+- ISSUE-023 (exit records via log_trade())
+
+### Sprint 4: Signal Correctness for 15m
+- ISSUE-001 (SOL missing from series)
+- ISSUE-087 (OBI EWM backwards)
+- ISSUE-035 (Coinbase fail-open)
+- ISSUE-073 (exception swallows in scan loops)
+- ISSUE-076 (CB TOCTOU race)
+
+### Sprint 5: CB Coverage + Timezone
+- ISSUE-047 (CB covers all 5 assets)
+- ISSUE-044 (timezone pervasive fix)
+- ISSUE-043 (EXIT_GAIN_PCT reconcile)
+- ISSUE-042 (normalize_entry_price NO below 50¢)
+- ISSUE-039 (rotate TheNewsAPI key immediately)
+
+
+
+
+
+

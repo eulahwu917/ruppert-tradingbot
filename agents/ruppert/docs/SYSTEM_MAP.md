@@ -1,9 +1,13 @@
 # Ruppert System Map
-_Last updated: 2026-04-03 | v2.0 | All P0 + P1 sprints (P1-1 through P1-6) applied_
+_Last updated: 2026-04-03 | v2.1 | All P0 + P1 sprints applied; live env + autoresearch archived_
 
 ---
 
 ## Changelog
+
+### v2.1 — 2026-04-03
+- Removed live environment section (environments/live/ archived — will be rebuilt from scratch)
+- Removed autoresearch section (archived — will be replaced with new backtest engine)
 
 ### v2.0 — 2026-04-03
 - Applied 40+ corrections from P1 domain audits (DS, Trader, Strategist) verified by QA
@@ -132,6 +136,8 @@ External Data Sources
 | `dashboard/api.py` | Dashboard | Active | FastAPI on port 8765. Read-only DEMO mode. 30s in-process cache. 19 endpoints. |
 | `brief_generator.py` | Reporting | Active | CEO daily brief. Telegram + markdown report. Two conflicting P&L methods in same output. |
 | `daily_progress_report.py` | Reporting | Deprecated | Shim that delegates to `brief_generator.py`. |
+
+> **Note (2026-04-03):** `environments/live/` has been archived and will be rebuilt from scratch before going live. `autoresearch.py` has been archived and will be replaced with a new backtest engine.
 
 ---
 
@@ -1113,7 +1119,7 @@ for each settle/exit record:
   'weather': {
     'count': int,         # scored predictions
     'brier_mean': float,  # mean Brier score
-    'threshold_pct': int, # count/30 * 100 (progress to 30-trade auto-research threshold)
+    'threshold_pct': int, # count/30 * 100 (archived — autoresearch pipeline removed)
   }
 }
 ```
@@ -1872,3 +1878,4 @@ _End of System Map_
 - v1.3 (2026-04-03): Trader domain updated for Sprints 1-5. Changes: NO-side entry_price flip removed from `add_position()` and `_load()` — price now stored as-is (ISSUE-042); `EXIT_GAIN_PCT` now required (ImportError if missing, ISSUE-043); Design D stops gated to `side='yes'` only, `side` resolved at top of `check_exits()` loop (ISSUE-042); `_exits_lock` asyncio.Lock for atomic exit dedup (ISSUE-002); 3-strike exit abandon with JSONL audit record (ISSUE-003, DS-NEW-001); stale position ref snapshots before await (ISSUE-107); CB file-locked via portalocker on all read-modify-write ops (ISSUE-076); CB WARNING log on trip with asset name (ISSUE-047); WS eval dedup via `_window_eval_lock` in `_safe_eval_15m()` and `_check_and_fire_fallback()` (ISSUE-015, ISSUE-060); blocking I/O moved to `run_in_executor` in `_safe_eval_hourly()` and `_rest_refresh_stale()` (ISSUE-014, ISSUE-061); exposure cap corrected to `DAILY_CAP_RATIO` (ISSUE-070); KXSOL15M added to WS series (ISSUE-001); OBI EWM direction corrected (ISSUE-087); 5 additional known issues marked resolved (ISSUE-X04, ISSUE-X05, ISSUE-1-07, and re-confirmed ISSUE-X01, ISSUE-X03).
 - v1.4 (2026-04-03): QA corrections. §2.7: ISSUE-E01 marked Resolved (Sprint 2, ISSUE-029/099, commit d286b28 — failed orders now use `action='failed_order'`). §5.4: Watchdog double-spawn marked Resolved (Sprint 1, ISSUE-049, commit ceba350 — `kill_existing_ws_feed()` called before every spawn). §7 index entry for ISSUE-I01 updated with commit reference.
 - v2.0 (2026-04-03): Applied 40+ corrections from P1 domain audits (DS, Trader, Strategist) verified by QA. All QA-verified P1 known issues marked ✅ RESOLVED. Key changes: settlement exit_price 99→100 (ISSUE-026/027/098); optimizer glob path fixed (ISSUE-005); WS reconnect changed to exponential backoff (ISSUE-096); S5 Polymarket switched to daily function + bounds gate (ISSUE-057/089); daily module cap lock via portalocker (ISSUE-053); exit records gain edge+confidence fields (ISSUE-074); dashboard issues D01/D02/D03/D05 resolved; brier_tracker dynamic paths (ISSUE-004); KXXRPD/KXDOGED added to TICKER_MODULE_MAP (ISSUE-102); signal weight validation at startup (ISSUE-114/069); OI delta near-zero guard (ISSUE-129); normalize_entry_price() in post_trade_monitor (ISSUE-079).
+- v2.1 (2026-04-03): Archived environments/live/ (will be rebuilt from scratch before going live). Archived autoresearch.py (will be replaced with new backtest engine). Removed active-component descriptions for both; added archive note in module inventory.
