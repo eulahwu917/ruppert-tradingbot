@@ -1,9 +1,30 @@
 # Ruppert System Map
-_Last updated: 2026-04-03 | v2.1 | All P0 + P1 sprints applied; live env + autoresearch archived_
+_Last updated: 2026-04-04 | v3.1 | Sprint 1-5 hardening: exit locking, CB per-module-prefix thresholds, CB backstop gate, daily module disable guards, TZ fixes, optimizer cleanup, dead remnant removal._
 
 ---
 
 ## Changelog
+
+### v3.1 — 2026-04-04
+- **Exit safety:** `execute_exit()` now acquires file-based lock (`acquire_exit_lock`) coordinating with `post_trade_monitor`; `check_settlements()` uses `_append_jsonl()` for JSONL writes
+- **Circuit breaker:** `increment_consecutive_losses()` threshold N now resolved by module prefix (15m→N=3, daily→N=5) instead of fallback chain; same in `post_trade_monitor.update_1h_circuit_breaker()`
+- **CB backstop gate:** `should_enter()` in `strategy.py` now includes defensive CB check (catches modules that forget their own CB check)
+- **Daily module disable guards:** `crypto_band_daily` and `crypto_threshold_daily` raise `RuntimeError` if their `ENABLED` flag is `False`; new config constants `CRYPTO_BAND_DAILY_ENABLED`, `CRYPTO_THRESHOLD_DAILY_ENABLED`
+- **Config robustness:** `load_config()` has try/except with FATAL message on FileNotFoundError/JSONDecodeError; `_MODE_FILE` uses three-tier workspace shim resolution
+- **Timezone:** `_get_local_tz()` now uses `zoneinfo.ZoneInfo('America/Los_Angeles')` (was hardcoded UTC offset); `logger.py` all `date.today()` calls replaced with `_pdt_today()` (3 sites)
+- **Display/reporting:** `run_position_check()` P&L uses bid price (not ask) with is-not-None fallback; docstring corrected (display-only, no auto-exits); dead 'smart' mode fully removed
+- **Optimizer:** `detect_module()` deleted — replaced with `classify_module()` from `logger.py`; `DAILY_CAP` now uses `LOSS_CIRCUIT_BREAKER_PCT` (0.05)
+- **Dead code cleanup:** CME secrets deleted; `qa_health_check.py` dead weather/NOAA/FRED sections removed (crash fix); `data_health_check.py` dead checks removed; 10 files cleaned of remaining dead module remnants
+- **Tests:** `crypto_1d` and `report` mode added to `REQUIRED_MODES` in both test files
+
+### v3.0 — 2026-04-03
+- **Major cleanup:** Removed all weather, geopolitical, economics, fed, and sports modules (commit 503dc64 — 57 files, 10,580 lines removed)
+- Updated architecture to reflect crypto-only system: only crypto_dir_15m, crypto_band_daily, crypto_threshold_daily remain as entry modules
+- Removed dead references: NOAA, Open-Meteo, FRED, CME FedWatch, TheNewsAPI, Kraken, Binance, noaa_prob, weather_only/econ_prescan modes
+- Added API Wiring section (§9) documenting Kalshi, Polymarket, Coinbase, OKX, and WebSocket integrations
+- Updated task scheduler, dashboard endpoints, config constants, and known issues to reflect crypto-only state
+- Added Live Environment stub and autoresearch archive notes
+- Bumped to v3.0
 
 ### v2.1 — 2026-04-03
 - Removed live environment section (environments/live/ archived — will be rebuilt from scratch)
@@ -35,7 +56,9 @@ _Last updated: 2026-04-03 | v2.1 | All P0 + P1 sprints applied; live env + autor
 
 ### Description
 
-Ruppert is an automated prediction-market trading bot targeting Kalshi contracts across crypto, weather, economics, and geopolitical markets. It operates in a **demo environment** (simulated orders, real market data) and is structured as a multi-module pipeline: three entry modules generate directional signals from OKX, Kraken, Binance, Coinbase, Kalshi, and Polymarket feeds; a strategy layer applies capital allocation gates (Kelly sizing, edge/confidence thresholds, exposure caps); a real-time WebSocket feed monitors and executes exits via stop-loss and gain thresholds; a batch settlement checker catches any positions the WS path misses; and an analytics pipeline joins outcomes to scored predictions for calibration and optimizer review. A FastAPI dashboard on port 8765 and a CEO daily brief (Telegram + markdown) provide David with live P&L visibility. All persistent state lives in `environments/demo/logs/`; Windows Task Scheduler drives the scheduled scan cycles.
+Ruppert is an automated prediction-market trading bot targeting Kalshi crypto contracts. It operates in a **demo environment** (simulated orders, real market data) and is structured as a multi-module pipeline: three entry modules generate directional signals from OKX, Coinbase, Kalshi, and Polymarket feeds; a strategy layer applies capital allocation gates (Kelly sizing, edge/confidence thresholds, exposure caps); a real-time WebSocket feed monitors and executes exits via stop-loss and gain thresholds; a batch settlement checker catches any positions the WS path misses; and an analytics pipeline joins outcomes to scored predictions for calibration and optimizer review. A FastAPI dashboard on port 8765 and a CEO daily brief (Telegram + markdown) provide David with live P&L visibility. All persistent state lives in `environments/demo/logs/`; Windows Task Scheduler drives the scheduled scan cycles.
+
+> **Architecture Note (2026-04-03):** Weather, geopolitical, economics, fed, and sports modules were fully removed (commit 503dc64). The system is now crypto-only.
 
 ---
 
@@ -45,9 +68,7 @@ Ruppert is an automated prediction-market trading bot targeting Kalshi contracts
 External Data Sources
 ─────────────────────────────────────────────────────────────────────
  OKX (trades, books, candles, OI, funding) │ Kalshi WebSocket + REST
- Kraken (spot prices)                       │ Polymarket (consensus)
- Binance Futures (funding)                  │ Coinbase (spot cross-check)
- OpenMeteo/NWS (weather)                   │ TheNewsAPI (geo signals)
+ Coinbase (spot price, settlement ref)      │ Polymarket (smart money consensus)
 ─────────────────────────────────────────────────────────────────────
                               │
           ┌───────────────────┼──────────────────────┐
@@ -116,8 +137,8 @@ External Data Sources
 | `KalshiClient` | Execution | Active | All Kalshi API calls. Demo mode blocks orders silently. Live RSA/PSS auth. Enriches orderbooks. |
 | `Trader` | Execution | Active | Converts strategy decisions into orders. Calls `KalshiClient.place_order()`, logs all outcomes (success + failure). |
 | `logger.py` | Execution | Active | All trade logging (`build_trade_entry`, `log_trade`, `log_activity`). P&L aggregation. Module classification. Session-level dedup. |
-| `ruppert_cycle.py` | Orchestration | Active | Cycle dispatcher. Modes: `full`, `check`, `crypto_only`, `crypto_1d`, `weather_only`, `econ_prescan`, `report`. Loads state, reconciles positions, dispatches scans. |
-| `main.py` | Orchestration | Active | Per-module scan runners for weather, crypto band, crypto 1D, fed, geo. Interfaces `should_enter()` → `Trader`. |
+| `ruppert_cycle.py` | Orchestration | Active | Cycle dispatcher. Modes: `full`, `check`, `crypto_only`, `crypto_1d`, `report`. Loads state, reconciles positions, dispatches scans. Sprint 4 P2: `smart` mode removed; `_get_local_tz()` uses `ZoneInfo('America/Los_Angeles')`. |
+| `main.py` | Orchestration | Active | Per-module scan runners for crypto band, crypto 1D. Interfaces `should_enter()` → `Trader`. |
 | `ws_feed.py` | Exit | Active | Persistent WS process. Real-time price cache updates, stop-loss/gain exit evaluation, fallback poll loop for missed 15m windows. |
 | `position_tracker.py` | Exit | Active | Core exit engine. Tracks open positions in memory + disk. Stop-loss tiers (15m and daily). Threshold exits. Settlement detection. |
 | `settlement_checker.py` | Exit | Scheduled | Batch settlement resolver. 3× daily (11PM, 8AM, 6AM PDT). Catches positions missed by WS path. FIFO exit accounting. |
@@ -137,7 +158,11 @@ External Data Sources
 | `brief_generator.py` | Reporting | Active | CEO daily brief. Telegram + markdown report. Two conflicting P&L methods in same output. |
 | `daily_progress_report.py` | Reporting | Deprecated | Shim that delegates to `brief_generator.py`. |
 
-> **Note (2026-04-03):** `environments/live/` has been archived and will be rebuilt from scratch before going live. `autoresearch.py` has been archived and will be replaced with a new backtest engine.
+> **Live Environment (Archived 2026-04-03):** `environments/live/` has been archived and will be rebuilt from scratch before going live. See `environments/archive/live/`.
+>
+> **Autoresearch (Archived 2026-04-03):** `autoresearch.py` has been archived and will be replaced with a new backtest engine. Parameter tuning is now handled by the Optimizer agent via config changes.
+>
+> **Dead Modules (Removed 2026-04-03):** Weather (noaa_client, openmeteo_client, edge_detector), Geopolitical (geo_client, geo_edge_detector, geopolitical_scanner), Economics (economics_client, economics_scanner), Fed (fed_client), and Sports Odds (sports_odds_collector) were fully stripped in commit 503dc64 (57 files, 10,580 lines removed).
 
 ---
 
@@ -150,7 +175,7 @@ _Source: `memory/agents/sysmap-section1-entry-pipeline.md`_
 All three crypto entry modules follow the same general flow:
 
 ```
-Data Sources (OKX API, Kraken, Binance, Coinbase, Kalshi, Polymarket)
+Data Sources (OKX API, Coinbase, Kalshi, Polymarket)
     ↓
 Signal Computation (module-specific: z-scores, log-normal, momentum)
     ↓
@@ -303,7 +328,7 @@ Then three-tier cap check: circuit breaker (3 consecutive losses = hard stop), d
 | Data | Source |
 |------|--------|
 | Daily OHLCV candles (30) | OKX `/api/v5/market/candles?bar=1D` |
-| Funding rate + cumulative | Binance Futures via `crypto_client._compute_funding_z_scores()` |
+| Funding rate + cumulative | OKX via `crypto_client._compute_funding_z_scores()` |
 | Current OI | OKX `/api/v5/public/open-interest` |
 | OI 24h baseline | `logs/oi_1d_snapshot.json` |
 | Polymarket consensus | `polymarket_client.get_crypto_daily_consensus(asset)` — **Fixed P1-6 (ISSUE-057):** switched from `get_crypto_consensus` (15m intraday scale) to `get_crypto_daily_consensus` (end-of-day scale, matches daily contract horizon). No longer labeled shadow — signal is actively used at 20% weight when available. |
@@ -314,7 +339,7 @@ Then three-tier cap check: circuit breaker (3 consecutive losses = hard stop), d
 
 **S1: 24h Momentum** — z-score of daily return vs 29-day history. Raw score = `clamp(z, -2, 2) / 2.0` → `[-1, 1]`.
 
-**S2: Funding Rate Regime** — Binance cumulative 24h funding. Sign-inverted: high positive funding (longs paying) → mild bearish signal. `filter_skip = True` if `|funding_24h_z| > 3.5`.
+**S2: Funding Rate Regime** — OKX cumulative 24h funding. Sign-inverted: high positive funding (longs paying) → mild bearish signal. `filter_skip = True` if `|funding_24h_z| > 3.5`.
 
 **S3: ATR Band** — Rolling ATR-14 percentage. Sizing multiplier only (not directional). `raw_score = 0.0` always.
 
@@ -331,6 +356,7 @@ direction: P_above > 0.54 → 'above'; P_above < 0.46 → 'below'; else 'no_trad
 #### Key Behaviors
 
 - **Does NOT call `should_enter()`** — bypasses strategy gate entirely (see Known Issue 1.3).
+- **Sprint 2 P2 — Disable guard:** `evaluate_crypto_1d_entry()` raises `RuntimeError` if `CRYPTO_THRESHOLD_DAILY_ENABLED` is `False`. Code-level kill switch.
 - Calls `Trader.execute_opportunity()` directly, wrapped in portalocker cap lock (**Fixed P1-6 / ISSUE-053:** concurrent BTC+ETH evaluations are now serialized — both assets cannot simultaneously pass the cap check and place orders).
 - Capital management via explicit per-asset cap (3%), daily cap (15%), secondary window global exposure gate (50%).
 - Position sizing: Half-Kelly with ATR modifier, capped at $200 hard cap, $10 floor.
@@ -348,7 +374,7 @@ direction: P_above > 0.54 → 'above'; P_above < 0.46 → 'below'; else 'no_trad
 
 | Data | Source |
 |------|--------|
-| Spot prices | Kraken `GET /0/public/Ticker?pair=<sym>` |
+| Spot prices | Coinbase `GET /v2/prices/<ASSET>-USD/spot` (30s cache) |
 | All market metadata | Kalshi `KalshiClient.get_markets_metadata()` |
 | Orderbook (per market) | Kalshi `KalshiClient.enrich_orderbook()` (parallel, 10 workers) |
 | Composite confidence | `crypto_client.compute_composite_confidence()` |
@@ -376,6 +402,8 @@ edge = max(edge_yes, edge_no)
 
 #### How it Calls strategy.py
 
+**Sprint 2 P2 — Disable guard:** `run_crypto_scan()` raises `RuntimeError` if `CRYPTO_BAND_DAILY_ENABLED` is `False`. Code-level kill switch.
+
 Uses `should_enter()` and respects `decision['size']` (unlike crypto_15m which ignores it). Module daily cap (7%) enforced before the loop. ⚠️ **Module daily cap config key `CRYPTO_BAND_DAILY_BTC_DAILY_CAP_PCT` does not exist in config** — strategy gate fails open, relies on module's own 7% check (see Known Issue 1.12).
 
 ---
@@ -398,6 +426,9 @@ Uses `should_enter()` and respects `decision['size']` (unlike crypto_15m which i
 | 5 | `module_deployed_pct >= module_cap_pct` (if cap exists in config) | `module_cap_exceeded` | **Fixed P1-1 (ISSUE-104):** `_module_cap_missing = False` initialized before the `if module is not None:` block. Previously, `module=None` caused `NameError` (variable used before assignment). Now safely defaults to `False` in all paths. |
 | 6 | `ticker in traded_tickers` | `same_day_reentry` |
 | 7 | `check_daily_cap(capital, deployed_today) <= 0` | `daily_cap_reached` |
+| 8 | Circuit breaker tripped for module (Sprint 2 P2 — defensive backstop) | `circuit_breaker_tripped` |
+
+> **Sprint 2 P2 — CB backstop gate:** Gate 8 is a defensive layer in `should_enter()` that catches modules which forget their own CB check before calling the strategy layer. Prevents entries when the module's circuit breaker is already tripped.
 
 #### Sizing
 
@@ -422,9 +453,6 @@ if size < min_viable: reject 'below_min_viable'
 | `crypto_band_daily_*` | 0.12 |
 | `crypto_dir_15m_*` | 0.12 (strategy gate; local gate is 0.02) |
 | `crypto_threshold_daily_*` | 0.08 (bypassed — module doesn't call `should_enter`) |
-| `weather_band`, `weather_threshold` | 0.12 |
-| `geo` | 0.15 |
-| `econ_*` | 0.12 |
 
 ---
 
@@ -495,7 +523,7 @@ should_enter() returns True
 |--------|----------|
 | `__init__()` | Reads RSA key + API key ID from `kalshi_config.json`. Demo mode: prints "DEMO mode — all order methods are BLOCKED". |
 | `get_balance()` | Returns dollars (Kalshi returns cents). Retries 3×. |
-| `search_markets()` | Fetches weather series markets + enriches orderbooks. 0.1s sleep between markets. |
+| `search_markets()` | Fetches series markets + enriches orderbooks. 0.1s sleep between markets. |
 | `get_markets_metadata()` | Paginates all markets for a series (no orderbook enrichment — fast path). |
 | `get_markets()` | Fetches markets list with optional filters. |
 | `get_market()` | Fetches single market by ticker. |
@@ -549,21 +577,17 @@ should_enter() returns True
 |---|---|---|
 | `trade_id` | str (uuid4) | Generated fresh |
 | `timestamp` | str (ISO) | `opportunity.get('timestamp')` or now |
-| `date` | str (YYYY-MM-DD) | `opportunity.get('date')` or `_today_pdt()` — **Sprint 5 (ISSUE-044):** uses PDT timezone via `_today_pdt()` helper; replaces `str(date.today())` which used system/local TZ |
+| `date` | str (YYYY-MM-DD) | `opportunity.get('date')` or `_today_pdt()` — **Sprint 5 (ISSUE-044):** uses PDT timezone via `_today_pdt()` helper; replaces `str(date.today())` which used system/local TZ. **Sprint 4 P2:** all 3 remaining `date.today()` call sites (`build_trade_entry`, `get_daily_summary`, `rotate_logs`) replaced with `_pdt_today()`. |
 | `ticker` | str | Required |
 | `title` | str | Fallback to ticker |
 | `side` | str | Required |
 | `action` | str | Normalized: 'buy', 'exit', 'open', or lowercased |
 | `action_detail` | str | Raw pre-normalization value |
-| `source` | str | e.g. 'weather', 'crypto', 'ws_position_tracker' |
+| `source` | str | e.g. 'crypto', 'ws_position_tracker', 'bot' |
 | `module` | str | From opportunity or `classify_module()` |
-| `noaa_prob` | float\|None | Weather model probability |
 | `market_prob` | float\|None | Market price at entry |
 | `edge` | float\|None | |
 | `confidence` | float\|None | `abs(edge)` fallback if None |
-| `ensemble_temp_forecast_f` | float\|None | `ensemble_mean` |
-| `model_source` | str\|None | |
-| `ensemble_components` | dict\|None | From `models_used` |
 | `entry_price` | float\|None | From `entry_price` or `fill_price` |
 | `size_dollars` | float | `size` argument |
 | `contracts` | int | `contracts` argument |
@@ -608,14 +632,12 @@ should_enter() returns True
 
 | Mode | Schedule | What runs |
 |---|---|---|
-| `full` | 7am, 3pm | All modules: weather + crypto + long-horizon + fed + geo |
+| `full` | 7am, 3pm | All active modules: crypto + long-horizon |
+| ~~`smart`~~ | ~~(placeholder)~~ | **Removed (Sprint 4 P2)** — dead mode fully deleted from dispatch, docstring, and audit gates |
 | `check` | 10pm | Position check only |
-| `econ_prescan` | 5am | Position check + econ scan |
-| `weather_only` | 7pm | Position check + weather scan |
 | `crypto_only` | 8am–8pm (every 2h) | Position check + crypto scan |
 | `crypto_1d` | 9:30 ET, 1:30 ET | Daily crypto above/below scan |
 | `report` | 7am | P&L summary + loss detection + optimizer review |
-| `smart` | (placeholder) | **Runs as `check` mode — not implemented** (see Known Issue 2.7) |
 
 **`run_cycle()` step sequence:**
 1. Print banner, rotate logs
@@ -624,10 +646,10 @@ should_enter() returns True
 4. `get_capital()` → circuit breaker check; `sys.exit(0)` if tripped
 5. `get_buying_power()` → `compute_open_exposure()`
 6. Build `CycleState` dataclass
-7. Historical audit (full/smart/econ_prescan modes)
+7. Historical audit (full/smart modes)
 8. `run_orphan_reconciliation()` — alert on orphaned positions
 9. `run_exposure_reconciliation()` — alert if divergence > $50 and > 5%
-10. `run_position_check()` — auto-exit weather positions (P&L > $4, margin < 2°F)
+10. `run_position_check()` — check open positions (source filter: 'bot', 'crypto' only). Sprint 4 P2: P&L now uses **bid price** (not ask) with is-not-None fallback; display-only (no auto-exits)
 11. Dispatch to mode handler
 12. `save_state()` → writes `logs/state.json`
 13. `run_post_scan_audit()` (data agent)
@@ -659,7 +681,7 @@ All records in `logs/trades/trades_YYYY-MM-DD.jsonl`.
 | ISSUE-E04 | Session-level dedup only. Process restarts allow re-logging same trade. | Medium |
 | ISSUE-E05 | `strategy_size` missing → trade skipped + Telegram alert. Guard works, but the failure mode is silent data loss. | Medium |
 | ISSUE-E06 | `get_daily_exposure()` START_DATE hardcoded to `'2026-03-26'`. Brittle on redeployment. | Low |
-| ISSUE-E07 | `smart` mode runs `check` mode — not implemented. | Medium |
+| ISSUE-E07 | ~~`smart` mode runs `check` mode — not implemented.~~ **FIXED Sprint 4 P2:** Dead `smart` mode fully removed from dispatch, docstring, and audit gates. | ~~Medium~~ **Resolved** |
 | ISSUE-E08 | Demo mode blocks all orders silently, but `log_trade()` still writes buy records. Trades appear real in logs. | Low |
 
 ---
@@ -800,6 +822,8 @@ settle_loss: pnl = -size_dollars  (cost-basis approach)
 ```
 
 **Sprint 1 Batch 2 — Exit dedup (ISSUE-002 fix):** `execute_exit()` uses `_exits_lock = asyncio.Lock()` to atomically check-and-set `_exits_in_flight`. The check+add of the in-flight guard is wrapped in `async with _exits_lock`. This eliminates the race condition where two concurrent exit coroutines could both pass the guard before either set the flag.
+
+**Sprint 1 P2 — File-based exit lock:** `execute_exit()` now acquires `acquire_exit_lock(ticker, side)` (file-based mutex) before proceeding. This coordinates with `post_trade_monitor`, which also acquires the same lock — preventing concurrent exit attempts from both the WS path and scheduled post-trade monitor.
 
 **Sprint 1 Batch 2 — Exit failure handling (ISSUE-003 fix):** A `_exit_failures` counter is tracked per position dict. After 3 consecutive `sell_position()` failures the position is abandoned: a synthetic `action='exit'`, `action_detail='ABANDONED after 3 exit failures'` JSONL record is written (DS-NEW-001, commit 4a92830), `push_alert` is called (try/except wrapped), and `remove_position()` is called. This prevents infinite retry loops on persistently failing exits.
 
@@ -953,6 +977,8 @@ Downstream readers must handle missing fields when consuming settle records from
 
 **Sprint 3 (ISSUE-023):** All settle writes from both paths now route through `logger.log_settle()` wrapper, which enforces dedup fingerprint.
 
+**Sprint 1 P2:** `post_trade_monitor.check_settlements()` now uses `_append_jsonl()` for JSONL writes (was raw `open()`), gaining cross-process file locking.
+
 **Sprint 3 (ISSUE-025):** `check_expired_positions()` now calls `_settle_record_exists(ticker, side)` (checks today + yesterday's trade log) before writing. If a settle record already exists, position is removed from tracker without writing a duplicate.
 
 After each settlement: calls `backfill_outcome()` and `prediction_scorer.score_new_settlements()`.
@@ -995,7 +1021,7 @@ Thread-safe via `threading.Lock()`. Persists to `logs/price_cache.json` via atom
 **Auto-reset:** Day boundary is **PDT** (`America/Los_Angeles`). Module state resets automatically on new day.
 
 **Trip conditions:**
-- Per-module: `consecutive_losses >= N` (N=3 for 15m/1h, N=5 for daily). `ADVISORY=False` → hard stop.
+- Per-module: `consecutive_losses >= N`. N is resolved by **module prefix** (Sprint 2 P2): `15m` → N=3, `daily` → N=5. `ADVISORY=False` → hard stop. `post_trade_monitor.update_1h_circuit_breaker()` uses the same prefix-based N resolution.
 - Global: `net_loss_today > capital * 0.05`. Fails closed if capital ≤ 0 or trade log unreadable.
 
 **Atomic write:** `.tmp` → `os.replace()`. Full state file always written.
@@ -1062,7 +1088,7 @@ for each settle/exit record:
 
 **Fixed P1-3 (ISSUE-103):** Overnight positions (settlement date ≠ buy date) previously received `null` for `predicted_prob` due to failed date-keyed join. Now maintains secondary `(ticker, side)` fallback index. Warning logged on fallback use; `null` on no-match in either index.
 
-`predicted_prob` priority: `noaa_prob` → `model_prob` → `market_prob`  
+`predicted_prob` priority: `model_prob` → `market_prob`  
 `outcome` = `settlement_result` string mapped to int (1=yes, 0=no)  
 `brier_score` = `(outcome - predicted_prob)²`
 
@@ -1070,7 +1096,7 @@ for each settle/exit record:
 
 | Field | Type | Notes |
 |---|---|---|
-| `domain` | str\|None | e.g. "weather", "crypto" |
+| `domain` | str\|None | e.g. "crypto" |
 | `ticker` | str | Kalshi market ticker |
 | `predicted_prob` | float\|None | 4 decimal places |
 | `outcome` | int\|None | 0 or 1 |
@@ -1116,7 +1142,7 @@ for each settle/exit record:
 **`get_domain_brier_summary()` output:**
 ```python
 {
-  'weather': {
+  'crypto': {
     'count': int,         # scored predictions
     'brier_mean': float,  # mean Brier score
     'threshold_pct': int, # count/30 * 100 (archived — autoresearch pipeline removed)
@@ -1149,6 +1175,10 @@ for each settle/exit record:
 **Proposal types:** `WIN_RATE`, `CONFIDENCE_TIER`, `CALIBRATION`, `EXIT`, `SIZING`, `CAP_UTILIZATION`  
 **Output:** `logs/optimizer_proposals_YYYY-MM-DD.md`
 
+**Sprint 5 P2 — `detect_module()` deleted:** Module classification now uses `classify_module()` from `logger.py` (single source of truth). Previously, `optimizer.py` had its own `detect_module()` with divergent logic.
+
+**Sprint 5 P2 — `DAILY_CAP` updated:** Now uses `LOSS_CIRCUIT_BREAKER_PCT` (0.05) instead of previously-removed stale constants.
+
 **Domain eligibility:** ≥ 30 scored trades. `run_domain_experiments()` is a **no-op placeholder** (see Known Issue 4.8).
 
 ---
@@ -1168,7 +1198,6 @@ for each settle/exit record:
 | Module/ticker mismatch | `_fix_module()` — overwrites module, preserves old in `_module_corrected_from` |
 | Position tracker drift (orphans + missing) | Orphans: `_remove_tracker_orphans()`. Missing: `_register_missing_positions()` via `add_position()`. **Sprint 2 (ISSUE-055):** `_has_close_record(ticker, side)` guard runs before `add_position()` — if an exit or settle record already exists for this position, it is NOT re-added to the tracker (prevents settled positions from being resurrected). |
 
-⚠️ **Module mismatch auto-fix** maps all `KXHIGH*` to `'weather_band'` — cannot distinguish `weather_threshold` (see Known Issue 4.5).  
 ⚠️ **Missing-position reconstruction** computes exit thresholds from potentially wrong `entry_price` — can cause wrong stop-losses and WS crashes (known historical issue).
 
 **Fixed P1-2 (ISSUE-102):** `TICKER_MODULE_MAP` and `_cap_map` now include entries for `KXXRPD` (→ `crypto_threshold_daily_xrp`) and `KXDOGED` (→ `crypto_threshold_daily_doge`). Also includes `KXBTCD` mapping. Previously missing — module classification and cap checking were skipped for these tickers.
@@ -1268,9 +1297,9 @@ Optimizer (manual/scheduled)
 | ISSUE-A02 | NO-side Brier score inverted. `prediction_scorer.py` maps YES settlement → `outcome=1` regardless of trade side. NO-side trades have Brier scores computed against wrong probability polarity. | High |
 | ISSUE-A03 | Schema conflict in `scored_predictions.jsonl`. Both `prediction_scorer.py` and `brier_tracker.py` write to same file with incompatible schemas. Readers must handle missing fields. | High |
 | ISSUE-A04 | `synthesize_pnl_cache()` comment/code divergence. Docstring says deleted; function still writes. Downstream consumers may read stale file. | Low |
-| ISSUE-A05 | Module mismatch auto-fix uses imprecise `KXHIGH*` mapping → may write `'weather_band'` on `'weather_threshold'` records. Corrupts per-submodule analytics. | Medium |
+| ISSUE-A05 | ~~Module mismatch auto-fix uses imprecise `KXHIGH*` mapping → may write `'weather_band'` on `'weather_threshold'` records.~~ **Obsolete:** Weather modules removed 2026-04-03. | ~~Medium~~ **Resolved** |
 | ISSUE-A06 | ~~`$10,000` capital fallback is silent. Missing/empty `demo_deposits.jsonl` → all sizing and cap calculations use fictional $10k without alerting David.~~ **FIXED Sprint 2 (ISSUE-051):** Fallback now sends Telegram alert + `log_activity()` with 4-hour dedup via `logs/capital_fallback_alert.json`. Error message capped at 500 chars. | ~~High~~ **Resolved** |
-| ISSUE-A07 | `analyze_brier_score()` excludes records where `win_prob` and `noaa_prob` both absent. Silent exclusion understates sample size. | Low |
+| ISSUE-A07 | `analyze_brier_score()` excludes records where `win_prob` absent. Silent exclusion understates sample size. | Low |
 | ISSUE-A08 | `run_domain_experiments()` is a no-op. No actual optimization runs. | Medium |
 | ISSUE-A09 | `check_daily_cap_violations()` in `data_agent.py` is dead code. All per-module daily caps were removed 2026-03-31. The function still exists but checks will never fire. | Low |
 
@@ -1286,7 +1315,8 @@ _Source: `memory/agents/sysmap-section5-infrastructure.md`_
 
 #### Mode Detection
 - `DRY_RUN` — derived from `mode.json` at import. Requires restart to reflect changes.
-- `_MODE_FILE` — `environments/demo/mode.json`
+- `_MODE_FILE` — resolved via three-tier workspace shim (same as `SECRETS_DIR`). Sprint 3 P2 fix.
+- `load_config()` — Sprint 3 P2: now has try/except with clear FATAL message on `FileNotFoundError`/`JSONDecodeError`.
 
 #### Position Sizing
 
@@ -1301,7 +1331,6 @@ _Source: `memory/agents/sysmap-section5-infrastructure.md`_
 | `CRYPTO_1D_PER_ASSET_CAP_PCT` | 0.03 | 3% per asset per day |
 | `CRYPTO_1D_MAX_POSITION_USD` | $200 | Hard cap per crypto_1d entry |
 | `DAILY_CAP_RATIO` | 0.70 | Max fraction of capital deployable per day |
-| `TTYPE_PER_TRADE_SIZE` | $50 | Fixed size for weather T-type trades |
 | `MIN_VIABLE_TRADE_USD` | $5 | Absolute minimum trade floor |
 | `CAPITAL_FALLBACK` | $10,000 | Fallback when API unavailable |
 
@@ -1309,11 +1338,8 @@ _Source: `memory/agents/sysmap-section5-infrastructure.md`_
 
 | Constant | Value | Meaning |
 |----------|-------|---------|
-| `MIN_EDGE_THRESHOLD` | 0.12 | General min edge (weather/econ) |
 | `CRYPTO_MIN_EDGE_THRESHOLD` | 0.12 | Crypto module min edge |
 | `LOSS_CIRCUIT_BREAKER_PCT` | 0.05 | Halt all trading if daily losses > 5% of capital |
-| `GEO_MIN_EDGE_THRESHOLD` | 0.15 | Geo min edge |
-| `ECON_MIN_EDGE` | 0.12 | Econ min edge |
 | `CRYPTO_15M_MIN_EDGE` | 0.02 | Data collection: 2% (prod: 0.05+) |
 | `CRYPTO_1D_MIN_EDGE` | 0.08 | Primary crypto_1d window |
 | `CRYPTO_1D_SECONDARY_MIN_EDGE` | 0.12 | Secondary crypto_1d window |
@@ -1322,10 +1348,11 @@ _Source: `memory/agents/sysmap-section5-infrastructure.md`_
 
 | Constant | Value | Status |
 |----------|-------|--------|
-| `WEATHER_AUTO_TRADE` | False | **HALTED 2026-04-01** |
 | `CRYPTO_AUTO_TRADE` | True | Active |
-| `GEO_AUTO_TRADE` | False | **HALTED 2026-04-01** |
-| `ECON_AUTO_TRADE` | False | **HALTED 2026-04-01** |
+| `CRYPTO_BAND_DAILY_ENABLED` | False | Sprint 2 P2: code-level disable guard for crypto_band_daily |
+| `CRYPTO_THRESHOLD_DAILY_ENABLED` | False | Sprint 2 P2: code-level disable guard for crypto_threshold_daily |
+
+> Weather, geo, and econ auto-trade constants removed with dead modules (2026-04-03).
 
 #### Circuit Breakers
 
@@ -1381,18 +1408,15 @@ _Source: `memory/agents/sysmap-section5-infrastructure.md`_
 
 | Module | Min Confidence |
 |--------|---------------|
-| `weather_band`, `weather_threshold` | 0.25 |
 | `crypto_band_daily_*` | 0.50 |
 | `crypto_threshold_daily_*` | 0.50 |
 | `crypto_dir_15m_*` | 0.40 (Phase 2; was 0.50) |
-| `econ_*` | 0.55 |
-| `geo` | 0.50 |
 
 #### WS-First Architecture
 
 | Constant | Value |
 |----------|-------|
-| `WS_ACTIVE_SERIES` | 45+ ticker prefixes |
+| `WS_ACTIVE_SERIES` | 18 ticker prefixes (crypto only — see §9.5) |
 | `WS_CACHE_STALE_SECONDS` | 60s |
 | `WS_CACHE_PURGE_SECONDS` | 86400s (24h) |
 
@@ -1451,42 +1475,40 @@ Read once at import time by `config.py`. Changes require restart.
 
 ---
 
-### 5.5 Task Scheduler — All Scheduled Tasks
+### 5.5 Task Scheduler — Active Scheduled Tasks
 
-| Task Name | Schedule | Command | State | Purpose |
-|-----------|----------|---------|-------|---------|
-| `Ruppert-Crypto-8AM` through `8PM` (7 tasks) | Daily 08:00–20:00 PDT (every 2h) | `ruppert_cycle.py crypto_only` | Ready | 15m crypto scan cycles |
-| `Ruppert-Crypto-930AM` | Daily 09:30 PDT | `ruppert_cycle.py crypto_only` | Ready | Additional 15m crypto scan |
-| `Ruppert-Crypto1D` | Daily 06:30 + 10:30 PDT | `ruppert_cycle crypto_1d` | Ready | Daily crypto above/below |
-| `Ruppert-Demo-7AM` | Daily 07:00 PDT | `ruppert_cycle.py full` | **Disabled** | Full scan (all modules) |
-| `Ruppert-Demo-3PM` | Daily 15:00 PDT | `ruppert_cycle.py full` | **Disabled** | Full scan |
-| `Ruppert-Demo-10PM` | Daily 22:00 PDT | `ruppert_cycle.py check` | **Disabled** | Position check / settlement review |
-| `Ruppert-Weather-7PM` | Daily 19:00 PDT | `ruppert_cycle.py weather_only` | **Disabled** | Weather scan |
-| `Ruppert-Econ-Prescan` | Daily 05:00 PDT | `ruppert_cycle.py econ_prescan` | **Disabled** | Econ prescan |
-| `Ruppert-PostTrade-Monitor` | Every 30 min (starts 06:00) | `post_trade_monitor` | **Disabled** | Position monitoring, 15m CB updates |
-| `Ruppert-SettlementChecker` | Daily 11:00 PM + 8:00 AM + 6:00 AM PDT | `settlement_checker` | Ready | Verify settled positions (3× daily) |
-| `Ruppert-MidnightRestart` | Daily 00:00 PDT | re-enables disabled tasks + restarts ws_feed/dashboard | Ready | Daily system reset — re-enables Disabled tasks |
-| `Ruppert-DailyHealthCheck` | Daily 06:45 PDT | `data_health_check` | Ready | Data health audit |
-| `Ruppert-DailyIntegrityCheck` | Daily 06:50 PDT | `data_integrity_check.py` | Ready | Data integrity check |
-| `Ruppert-DailyProgressReport` | Daily 20:00 PDT | `brief_generator` | Ready | Daily P&L brief to David |
-| `Ruppert-Research-Weekly` | Fridays 08:00 PDT | `research_agent` | Ready | Weekly research scan |
-| `Ruppert-SportsOdds` | Hourly 08:00–20:00 PDT (13 triggers) | `sports_odds_collector.py` | Ready | Sports odds data collection |
-| `Ruppert-WS-Persistent` | Boot (1-min delay) + Daily 00:01 | `ws_feed` | Ready | Start WebSocket feed |
-| `Ruppert-WS-Watchdog` | Boot | `ws_feed_watchdog` | Running | Monitor + restart ws_feed |
-| `RuppertDashboard` | User logon | `start_dashboard.ps1` | Ready | Launch dashboard (hidden window) |
+> All tasks currently **disabled for trading halt** (2026-04-03). Will be re-enabled when trading resumes.
 
-**Note on Disabled tasks:** `Ruppert-Demo-7AM`, `Ruppert-Demo-3PM`, `Ruppert-Demo-10PM`, `Ruppert-Weather-7PM`, `Ruppert-Econ-Prescan`, and `Ruppert-PostTrade-Monitor` are currently **Disabled** in Task Scheduler. `Ruppert-MidnightRestart` re-enables them at 00:00 PDT each day as part of the daily system reset cycle. The "Disabled" state reflects the status set at the end of each prior day's run.
+| Task Name | Schedule | Command | Purpose |
+|-----------|----------|---------|---------|
+| `Ruppert-WS-Persistent` | Boot (1-min delay) + Daily 00:01 | `ws_feed` | Start WebSocket feed |
+| `Ruppert-WS-Watchdog` | Boot | `ws_feed_watchdog` | Monitor + restart ws_feed |
+| `Ruppert-Demo-7AM` | Daily 07:00 PDT | `ruppert_cycle.py full` | Full cycle scan |
+| `Ruppert-Demo-3PM` | Daily 15:00 PDT | `ruppert_cycle.py full` | Full cycle scan |
+| `Ruppert-Demo-10PM` | Daily 22:00 PDT | `ruppert_cycle.py check` | Position check / settlement review |
+| `Ruppert-Crypto-930AM` | Daily 09:30 PDT | `ruppert_cycle.py crypto_1d` | crypto_1d morning scan |
+| `Ruppert-PostTrade-Monitor` | Every 30 min (starts 06:00) | `post_trade_monitor` | Position monitoring, 15m CB updates |
+| `Ruppert-SettlementChecker` | Daily 11:00 PM + 8:00 AM PDT | `settlement_checker` | Verify settled positions |
+| `Ruppert-DailyHealthCheck` | Daily 06:45 PDT | `data_health_check` | Data health audit |
+| `Ruppert-DailyIntegrityCheck` | Daily 06:50 PDT | `data_integrity_check.py` | Data integrity check |
+| `Ruppert-DailyProgressReport` | Daily 20:00 PDT | `brief_generator` | Daily P&L brief to David |
+| `RuppertDashboard` | User logon | `start_dashboard.ps1` | Launch dashboard (hidden window) |
+| `Ruppert-MidnightRestart` | Daily 00:00 PDT (via WS-Watchdog) | re-enables disabled tasks + restarts ws_feed/dashboard | Daily system reset |
+
+**Removed tasks (2026-04-03):** `Ruppert-Weather-7PM`, `Ruppert-Econ-Prescan`, `Ruppert-SportsOdds`, `Ruppert-Research-Weekly`, `Ruppert-Crypto-8AM` through `8PM` (7 hourly tasks replaced by focused schedule above).
 
 **All tasks run from:** `C:\Users\David Wu\.openclaw\workspace`  
 **Python path:** `C:\Users\David Wu\AppData\Local\Programs\Python\Python312\python.exe`
 
 ---
 
-### 5.6 Dead Config Constants
+### 5.6 Removed Config Constants
 
-The following were **removed in Phase 2 (2026-03-31)** — all per-module daily caps commented out. The circuit breaker (`LOSS_CIRCUIT_BREAKER_PCT = 0.05`) is now the sole daily hard stop:
+**Phase 2 (2026-03-31):** Per-module daily caps removed. Circuit breaker (`LOSS_CIRCUIT_BREAKER_PCT = 0.05`) is the sole daily hard stop.
 
-Removed: `WEATHER_DAILY_CAP_PCT`, `ECON_DAILY_CAP_PCT`, `FED_DAILY_CAP_PCT`, `CRYPTO_15M_DAILY_CAP_PCT`, `WEATHER_BAND_DAILY_CAP_PCT`, `WEATHER_THRESHOLD_DAILY_CAP_PCT`, `CRYPTO_1H_BAND_DAILY_CAP_PCT`, `CRYPTO_1H_DIR_DAILY_CAP_PCT`, `CRYPTO_15M_DIR_DAILY_CAP_PCT`, `ECON_CPI_DAILY_CAP_PCT`, `ECON_UNEMPLOYMENT_DAILY_CAP_PCT`, `ECON_FED_RATE_DAILY_CAP_PCT`, `ECON_RECESSION_DAILY_CAP_PCT`, `GEO_DAILY_CAP_PCT`
+**Dead module cleanup (2026-04-03, commit 503dc64):** ~39 additional constants removed with weather/geo/econ/fed/sports modules, including: `WEATHER_AUTO_TRADE`, `GEO_AUTO_TRADE`, `ECON_AUTO_TRADE`, `TTYPE_PER_TRADE_SIZE`, `MIN_EDGE_THRESHOLD`, `GEO_MIN_EDGE_THRESHOLD`, `ECON_MIN_EDGE`, all weather/econ/fed/geo daily caps, and all dead module MIN_CONFIDENCE entries.
+
+**Sprint 5 P2 — Dead remnant cleanup (2026-04-04):** All remaining dead module remnants cleaned from 10 files (weather/geo/econ references). CME secrets deleted (`secrets/cme_config.json`, `cme_gcp_credential.json`, `cme_token_cache.json`). `qa_health_check.py` dead weather/NOAA/FRED/OpenMeteo sections removed (was causing crashes). `data_health_check.py` `check_nws()` and `check_openmeteo()` removed.
 
 **Not actually dead** (despite being labeled legacy):
 - `CRYPTO_DAILY_CAP_PCT = 0.07` — has 3 active usages: `crypto_band_daily.py` (daily cap fallback), `position_monitor.py`, and `optimizer.py`.
@@ -1503,7 +1525,7 @@ Removed: `WEATHER_DAILY_CAP_PCT`, `ECON_DAILY_CAP_PCT`, `FED_DAILY_CAP_PCT`, `CR
 | ISSUE-I01 | Watchdog double-spawn at boot. Two Task Scheduler tasks launch ws_feed. Watchdog may see stale heartbeat and spawn second instance. Two ws_feed processes compete for WS connection. Unresolved. | High |
 | ISSUE-I02 | Stale watchdog copy at `environments/demo/scripts/ws_feed_watchdog.py` with different constants (300s/600s vs 60s/180s). Risk of confusion. | Low |
 | ISSUE-I03 | `mode.json` changes require process restart. No hot-reload. | Low |
-| ISSUE-I04 | `Ruppert-PostTrade-Monitor` (every 30 min) may overlap with WS exit path. `post_trade_monitor` uses `acquire_exit_lock()` but `position_tracker.py` (used by WS feed) does NOT check this lock. Exit locking is asymmetric — `post_trade_monitor` respects it; WS feed does not. Dedup guard in position_tracker is the primary protection. | Medium |
+| ISSUE-I04 | ~~`Ruppert-PostTrade-Monitor` (every 30 min) may overlap with WS exit path. Exit locking was asymmetric.~~ **FIXED Sprint 1 P2:** `execute_exit()` in `position_tracker.py` now acquires `acquire_exit_lock()` before proceeding — both WS and post_trade_monitor paths hold the same file lock. Exit locking is now symmetric. | ~~Medium~~ **Resolved** |
 
 ---
 
@@ -1538,11 +1560,8 @@ _Source: `memory/agents/sysmap-section6-dashboard.md`_
 | `/api/positions/active` | GET | Open (not exited/settled) positions with current prices. **Fixed P1-4 (ISSUE-019):** Previously crashed with `UnboundLocalError` — `side` variable was assigned in a conditional branch; now assigned as first statement in loop body. |
 | `/api/positions/prices` | GET | Live orderbook prices from market cache only (no REST fallback) |
 | `/api/positions/status` | GET | Market status per ticker (WS cache presence) |
-| `/api/kalshi/weather` | GET | Weather scan cache (< 4h old) from `logs/weather_scan.jsonl` |
-| `/api/scout/geo` | GET | Geo scan today from `logs/geopolitical_scanner.jsonl` |
 | `/api/crypto/15m_summary` | GET | Today's 15m decisions summary from `logs/decisions_15m.jsonl` |
 | `/api/crypto/scan` | GET | Crypto scan summary: prices + smart money + opportunities |
-| `/api/sports` | GET | Sports odds gaps from `logs/sports_odds_log.jsonl` |
 | `/api/pnl` | GET | Full P&L: open (unrealized) + closed (realized), per-module breakdown, time-period bucketing |
 | `/api/state` | GET | Single snapshot: account + positions + module stats + smart money |
 
@@ -1673,9 +1692,9 @@ _Consolidated list of all known issues across all sections. Severity: Critical /
 | ISSUE-X02 | ~~99c vs 100c discrepancy. `settlement_checker` uses 99c for wins; `check_expired_positions` uses 100c. 1-cent-per-contract systematic difference.~~ **FIXED P1-2 (ISSUE-026, commit d3584bf):** `settlement_checker.py` now uses `exit_price=100`. **FIXED P1-5 (ISSUE-098, commit 8a32658):** `position_monitor.py` corrected for YES-win and NO-win paths. ✅ RESOLVED (P1) | §3 Exit | ~~Medium~~ **Resolved** |
 | ISSUE-X04 | ~~In-flight guard doesn't block threshold checks. Warning logs generated; dedup guard prevents double-exit.~~ **FIXED Sprint 1 Batch 2 (ISSUE-002):** `_exits_lock = asyncio.Lock()` in `execute_exit()` makes check+add of `_exits_in_flight` atomic. | §3 Exit | ~~Medium~~ **Resolved** |
 | ISSUE-X08 | Fallback poll marks window evaluated on exception. Transient error → window permanently skipped for that connection cycle. | §3 Exit | **Medium** |
-| ISSUE-A05 | Module mismatch auto-fix maps all `KXHIGH*` to `'weather_band'`. Cannot distinguish `weather_threshold`. Corrupts per-submodule analytics. | §4 Analytics | **Medium** |
+| ISSUE-A05 | ~~Module mismatch auto-fix maps all `KXHIGH*` to `'weather_band'`.~~ **Obsolete:** Weather modules removed 2026-04-03. | §4 Analytics | ~~Medium~~ **Resolved** |
 | ISSUE-A08 | `run_domain_experiments()` is a no-op placeholder. No actual optimization runs. | §4 Analytics | **Medium** |
-| ISSUE-I04 | `Ruppert-PostTrade-Monitor` (every 30 min) may overlap with WS exit path. `post_trade_monitor` uses `acquire_exit_lock()`; `position_tracker` (WS path) does NOT. Asymmetric locking — dedup guard is the only protection for concurrent exits. | §5 Infrastructure | **Medium** |
+| ISSUE-I04 | ~~`Ruppert-PostTrade-Monitor` overlap with WS exit path. Asymmetric exit locking.~~ **FIXED Sprint 1 P2:** `execute_exit()` now acquires `acquire_exit_lock()` — symmetric locking. | §5 Infrastructure | ~~Medium~~ **Resolved** |
 | ISSUE-D01 | ~~Fake P&L chart (two-point series). Hardcoded `'2026-03-10'` to today. Not real per-day cumulative data.~~ **FIXED P1-4/P1-5 (ISSUE-063/CLEANUP-063):** Removed from `dashboard/api.py`. ✅ RESOLVED (P1) | §6 Dashboard | ~~Medium~~ **Resolved** |
 | ISSUE-D02 | ~~`BOT_SRC` missing `ws_*` sources in `/api/pnl`. WS-originated trades undercount in deployed capital.~~ **FIXED P1-4 (ISSUE-064):** `_is_auto()`/`_is_manual()` now at module scope, covers `ws_*` sources. ✅ RESOLVED (P1) | §6 Dashboard | ~~Medium~~ **Resolved** |
 | ISSUE-D03 | ~~Settled positions may show as open (non-standard tickers, near-midnight EDT edge cases).~~ **FIXED P1-4 (ISSUE-065):** `exited` set now includes `settle` action records. ✅ RESOLVED (P1) | §6 Dashboard | ~~Medium~~ **Resolved** |
@@ -1692,7 +1711,7 @@ _Consolidated list of all known issues across all sections. Severity: Critical /
 | ISSUE-X06 | `_write_off_logged` not cleared on WS reconnect. Write-off suppression persists across reconnects. | §3 Exit | **Low** |
 | ISSUE-X07 | Recovery poll without `close_time` bypasses NO-side settlement guard. | §3 Exit | **Low** |
 | ISSUE-A04 | `synthesize_pnl_cache()` comment/code divergence. Docstring says deleted; function still writes. | §4 Analytics | **Low** |
-| ISSUE-A07 | `analyze_brier_score()` silently excludes records without `win_prob` and `noaa_prob`. | §4 Analytics | **Low** |
+| ISSUE-A07 | `analyze_brier_score()` silently excludes records without `win_prob`. | §4 Analytics | **Low** |
 | ISSUE-I02 | Stale watchdog copy at `environments/demo/scripts/` with different constants. Risk of confusion. | §5 Infrastructure | **Low** |
 | ISSUE-I03 | `mode.json` changes require process restart. No hot-reload. | §5 Infrastructure | **Low** |
 | ISSUE-1-02 | `crypto_15m` ignores `strategy.py` size recommendation. `decision['size']` discarded; module uses own Half-Kelly. | §1 Entry | **Low** |
@@ -1760,8 +1779,6 @@ _What each section produces and consumes. Files are relative to `environments/de
 | File | Who Writes | Who Reads |
 |------|-----------|-----------|
 | `logs/decisions_15m.jsonl` | `crypto_15m._log_decision()` — every evaluation (ENTER or SKIP) | `dashboard/api.py` (`/api/crypto/15m_summary`), `data_agent.check_decision_log_orphans()`, `data_agent.check_15m_entry_drought()` |
-| `logs/decisions_weather.jsonl` | Weather scan module | `data_agent.check_decision_log_orphans()` |
-| `logs/decisions_econ.jsonl` etc. | Respective scan modules | `data_agent.check_decision_log_orphans()` |
 
 ---
 
@@ -1866,11 +1883,138 @@ _What each section produces and consumes. Files are relative to `environments/de
 
 ---
 
+---
+
+## 9. API Wiring — External Service Integrations
+
+_Added v3.0 — 2026-04-03. Documents how each active external API connects to the system._
+
+### 9.1 Kalshi API (Trading + Market Data)
+
+**Connecting files:**
+- `agents/ruppert/data_analyst/kalshi_client.py` — primary REST client
+- `agents/ruppert/data_analyst/ws_feed.py` — WebSocket client
+- `agents/ruppert/data_analyst/market_cache.py` — cache layer
+
+**Endpoints:**
+- REST: `https://api.elections.kalshi.com/trade-api/v2`
+- WebSocket: `wss://api.elections.kalshi.com/trade-api/ws/v2`
+
+**Authentication:** RSA-PSS signature. Private key loaded from `kalshi_config.json` → `private_key_path`. Headers: `KALSHI-ACCESS-KEY`, `KALSHI-ACCESS-SIGNATURE`, `KALSHI-ACCESS-TIMESTAMP`. Same endpoint for demo and live — distinguished by account credentials.
+
+**Rate Limits / Retry:** 429 → exponential backoff (reads `Retry-After` header). 5xx → exponential backoff, max 3 retries via `_get_with_retry()`.
+
+**Usage:**
+- **Read:** `get_balance()`, `get_markets()`, `get_markets_metadata()`, `get_market(ticker)` (enriched with orderbook), `get_positions()`, `get_orders()`
+- **Write (demo-safe):** `place_order()`, `sell_position()`, `cancel_order()`, `amend_order()` — all blocked in demo mode (return `{"dry_run": True, "simulated": True}`)
+
+---
+
+### 9.2 Polymarket API (Smart Money Signal — Read-Only)
+
+**Connecting files:**
+- `agents/ruppert/data_analyst/polymarket_client.py` — market search + price queries
+- `agents/ruppert/data_analyst/fetch_smart_money.py` — wallet aggregation
+
+**Endpoints:**
+- Gamma (public search): `https://gamma-api.polymarket.com/public-search`
+- CLOB (live prices): `https://clob.polymarket.com/midpoint`
+- Data (wallet positions): `https://data-api.polymarket.com/positions`
+
+**Authentication:** None required (public endpoints). User-Agent header only.
+
+**Usage:**
+- `get_crypto_consensus(asset)` — crypto direction UP probability (5-min TTL, used as bias filter in crypto_15m)
+- `get_crypto_daily_consensus(asset)` — daily above/below probability (10-min TTL, used by crypto_threshold_daily S5)
+- `get_smart_money_signal(wallets, keyword)` — aggregated yes/no count + net_signal float `[-1, 1]`
+- `get_macro_signals()` — macro markets: inflation, rates (10-min TTL)
+
+**Word-boundary matching:** Short tickers (eth, sol, xrp, btc, doge) use regex `\b...\b` to avoid false positives (e.g., "eth" won't match "steth", "ethena").
+
+**Wallet source:** `logs/smart_money_wallets.json` (maintained by `wallet_updater.py`, 25-hour staleness check). Fallback: hardcoded `TOP_TRADER_WALLETS` from Polymarket leaderboard.
+
+---
+
+### 9.3 Coinbase API (Primary Spot Price Feed)
+
+**Connecting file:** `agents/ruppert/trader/crypto_client.py`
+
+**Endpoint:** `https://api.coinbase.com/v2/prices/{asset}-USD/spot`
+
+**Authentication:** None (public pricing endpoint).
+
+**Function:** `fetch_coinbase_price(asset: str) -> float | None` — current spot price in USD (30-sec cache TTL).
+
+**Integration:**
+- **crypto_15m:** Primary reference price for 15-min direction evaluation. Entry blocked with `COINBASE_UNAVAILABLE` if unavailable.
+- **Basis risk gate:** Coinbase vs OKX comparison — blocks if `|CB - OKX| / OKX > MAX_BASIS_PCT (0.15%)`.
+- **crypto_band_daily:** Spot price source for log-normal model.
+
+---
+
+### 9.4 OKX API (Price Feed + Funding Rates + Microstructure)
+
+**Connecting file:** `agents/ruppert/trader/crypto_client.py`
+
+**Endpoints:**
+- Market data: `https://www.okx.com/api/v5/market/...` (ticker, candles, trades, books, open-interest)
+- Funding rates: `https://www.okx.com/api/v5/public/funding-rate-history`
+
+**Authentication:** None (public endpoints). OKX chosen over Binance because Binance returns HTTP 451 (geo-blocked) from US IPs.
+
+**Key Functions:**
+
+| Function | Data | Cache TTL |
+|----------|------|-----------|
+| `fetch_okx_price(symbol)` | Spot price from ticker | 30s |
+| `get_funding_rates(symbol, limit=96)` | Perpetual swap funding history (32-day window) | 1h |
+| `_compute_funding_z_scores(symbol)` | Z-score vs 30-day baseline (contrarian: z>+2→bearish, z<-2→bullish) | internal |
+| `_fetch_okx_5m_volume(symbol)` | Current 5-min candle volume | none |
+| `_fetch_30d_avg_okx_vol(symbol)` | 30-day rolling average volume | cached |
+| `fetch_okx_candles()` | Historical 1h candles for RSI, MACD, moving averages | none |
+
+**Usage in crypto_15m:** OKX provides all 4 microstructure signals (TFI from trades, OBI from orderbook, MACD from candles, OI from open-interest). Also provides funding z-score bias filter and volume-based thin market detection.
+
+---
+
+### 9.5 WebSocket Feed (Primary Real-Time Data Path)
+
+**Connecting files:**
+- `agents/ruppert/data_analyst/ws_feed.py` — main WS loop
+- `agents/ruppert/data_analyst/market_cache.py` — cache storage
+- `agents/ruppert/trader/position_tracker.py` — exit routing
+
+**Connection:** `wss://api.elections.kalshi.com/trade-api/ws/v2` — RSA-PSS auth (same as REST). Runs 24/7 with exponential backoff reconnect (5s→60s max). Server pings every 10s; client timeout = 30s silence.
+
+**Subscription:** Subscribes to ALL ticker updates (no market_tickers filter). Only tickers matching `WS_ACTIVE_SERIES` prefixes are cached/evaluated.
+
+**Active Series (crypto only):**
+```
+Crypto hourly bands:  KXBTC, KXETH, KXXRP, KXDOGE, KXSOL
+Crypto 15m direction: KXBTC15M, KXETH15M, KXXRP15M, KXDOGE15M, KXSOL15M
+Crypto long-horizon:  KXBTCMAXM, KXBTCMAXY, KXBTCMINY, KXBTC2026250, KXBTCMAX100,
+                      KXETHMAXM, KXETHMINY, KXETHMAXY
+```
+
+**Message Routing:**
+1. **Market Cache Update:** WS updates `market_cache` (bid/ask in dollars, source='ws')
+2. **Exit Check:** Routes to position_tracker for live exit evaluations (settlement guard)
+3. **15m Entry Evaluation:** Fires `evaluate_crypto_15m_entry()` for KXBTC15M/KXETH15M/etc.
+4. **Hourly Entry Evaluation:** Fires `evaluate_crypto_entry()` for hourly band markets
+
+**REST Fallback:** `_check_and_fire_fallback()` runs every 30s. Evaluates each 15m series that WS missed the window for. Per-window dedup prevents duplicate evaluations.
+
+**Cache Persistence:** Persisted to `logs/price_cache.json` every 60s. Loaded on startup. Stale entries (>60s) trigger REST fallback. Purged after 24h.
+
+**Heartbeat:** Writes `logs/ws_feed_heartbeat.json` every 60s (watchdog reads to detect stalls).
+
+---
+
 _End of System Map_
 
 ---
 
-## 9. Revision History
+## 10. Revision History
 
 - v1.0 (2026-04-02): Initial assembly from 6 research agents
 - v1.1 (2026-04-02): Corrections from 10-audit pass (12 factual errors fixed, 12 gaps filled)
@@ -1879,3 +2023,5 @@ _End of System Map_
 - v1.4 (2026-04-03): QA corrections. §2.7: ISSUE-E01 marked Resolved (Sprint 2, ISSUE-029/099, commit d286b28 — failed orders now use `action='failed_order'`). §5.4: Watchdog double-spawn marked Resolved (Sprint 1, ISSUE-049, commit ceba350 — `kill_existing_ws_feed()` called before every spawn). §7 index entry for ISSUE-I01 updated with commit reference.
 - v2.0 (2026-04-03): Applied 40+ corrections from P1 domain audits (DS, Trader, Strategist) verified by QA. All QA-verified P1 known issues marked ✅ RESOLVED. Key changes: settlement exit_price 99→100 (ISSUE-026/027/098); optimizer glob path fixed (ISSUE-005); WS reconnect changed to exponential backoff (ISSUE-096); S5 Polymarket switched to daily function + bounds gate (ISSUE-057/089); daily module cap lock via portalocker (ISSUE-053); exit records gain edge+confidence fields (ISSUE-074); dashboard issues D01/D02/D03/D05 resolved; brier_tracker dynamic paths (ISSUE-004); KXXRPD/KXDOGED added to TICKER_MODULE_MAP (ISSUE-102); signal weight validation at startup (ISSUE-114/069); OI delta near-zero guard (ISSUE-129); normalize_entry_price() in post_trade_monitor (ISSUE-079).
 - v2.1 (2026-04-03): Archived environments/live/ (will be rebuilt from scratch before going live). Archived autoresearch.py (will be replaced with new backtest engine). Removed active-component descriptions for both; added archive note in module inventory.
+- v3.1 (2026-04-04): **Sprint 1-5 hardening.** Exit safety: `execute_exit()` file-based lock coordinating with post_trade_monitor (ISSUE-I04 resolved); `check_settlements()` uses `_append_jsonl()`. CB: per-module-prefix N resolution (15m=3, daily=5); CB backstop gate in `should_enter()`. Daily module disable guards: `CRYPTO_BAND_DAILY_ENABLED`, `CRYPTO_THRESHOLD_DAILY_ENABLED` + RuntimeError guards. Config: `load_config()` try/except, `_MODE_FILE` three-tier resolution. TZ: `_get_local_tz()` uses ZoneInfo; logger `_pdt_today()` at all 3 sites. Display: `run_position_check()` uses bid price, docstring corrected; smart mode removed (ISSUE-E07 resolved). Optimizer: `detect_module()` → `classify_module()`; `DAILY_CAP` uses `LOSS_CIRCUIT_BREAKER_PCT`. Cleanup: CME secrets deleted, qa_health_check crash fix, data_health_check dead checks removed, 10 files cleaned of dead remnants. Tests: `crypto_1d` and `report` added to REQUIRED_MODES.
+- v3.0 (2026-04-03): **Post-cleanup: crypto-only architecture.** Dead modules fully removed (weather/geo/econ/fed/sports — commit 503dc64, 57 files, 10,580 lines). All 118 bug fix issues resolved across P0-P3 sprints. Removed all references to NOAA, Open-Meteo, FRED, CME FedWatch, TheNewsAPI, Kraken, Binance, noaa_prob, weather_only/econ_prescan modes, and dead WS_ACTIVE_SERIES entries. Updated: system description, architecture diagram, module inventory, scan modes (only full/smart/check/crypto_only/crypto_1d/report), task scheduler (removed 4 dead tasks), dashboard endpoints (removed /api/kalshi/weather, /api/scout/geo, /api/sports), config constants (~39 dead removed), known issues (ISSUE-A05 obsolete). Added §9 API Wiring section documenting Kalshi, Polymarket, Coinbase, OKX, and WebSocket integrations. Added Live Environment stub and autoresearch archive notes.

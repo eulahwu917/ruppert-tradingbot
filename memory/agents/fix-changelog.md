@@ -247,4 +247,71 @@ _Every fix must be logged here with issue ID, summary, and commit hash_
 |----|------|---------|--------|
 | DS-NEW-001 | position_tracker.py | Abandoned positions (3-strike) now write a JSONL exit record with `action_detail='ABANDONED'` and `pnl=-(cost)`. Uses `_abandon_log_path` (inline, not reusing later-defined `log_path`). Wrapped in try/except. Fixes audit trail gap found by DS. | 4a92830 |
 
+## Sprint 1 P1 Fixes — 2026-04-04
+
+| ID | File | Summary | Commit |
+|----|------|---------|--------|
+| P1-1 | position_tracker.py | Unified exit locking: `acquire_exit_lock`/`release_exit_lock` added to execute_exit — dedup-guard path + finally block both release | 08931ae |
+| P1-2 | post_trade_monitor.py | Settlement checker write now uses `_append_jsonl()` (portalocker-protected) instead of raw open()+write() | 08931ae |
+
+## Sprint 2 P2 Fixes — 2026-04-04
+
+| ID | File | Summary | Commit |
+|----|------|---------|--------|
+| P2-CB-1 | circuit_breaker.py | CB threshold lookup now uses per-module prefix mapping instead of wrong fallback chain | 3339846 |
+| P2-CB-2 | strategy.py | CB check added to `should_enter()` — defensive guard for new modules that bypass individual CB calls | 3339846 |
+| P2-DM-1 | crypto_band_daily.py | Disable guard added (`BAND_DAILY_ENABLED` config flag) | 3339846 |
+| P2-DM-2 | crypto_threshold_daily.py | Disable guard added (`THRESHOLD_DAILY_ENABLED` config flag) | 3339846 |
+| P2-PTM | post_trade_monitor.py | Additional hardening from Sprint 2 review | 3339846 |
+| P2-CFG | config.py | New enable/disable flags for daily modules | 3339846 |
+
 **Pipeline note:** ceba350 also includes unspecced `start_ws_feed()` changes in `ws_feed_watchdog.py` (PYTHONPATH + module path fix, labeled "P1-2 fix"). These were not in Sprint 1 spec but were reviewed and confirmed beneficial by DS audit. No rollback needed.
+
+---
+
+## 2026-04-04 Sprints (Post-cleanup P1/P2 fixes)
+
+### Sprint 1-2026-04-04 — P1: Exit Safety (08931ae)
+| ID | File | Fix | Commit |
+|----|------|-----|--------|
+| P1-EXIT-1 | position_tracker.py | execute_exit() now acquires file-based lock via acquire_exit_lock() before proceeding — coordinates with post_trade_monitor to prevent double-exit P&L corruption | 08931ae |
+| P1-EXIT-2 | post_trade_monitor.py | check_settlements() now uses _append_jsonl() for JSONL writes (was raw open() without locking) | 08931ae |
+
+### Sprint 2-2026-04-04 — P2: Circuit Breaker + Daily Module Guards (3339846)
+| ID | File | Fix | Commit |
+|----|------|-----|--------|
+| P2-CB-3 | circuit_breaker.py | increment_consecutive_losses(): N resolved by module prefix (crypto_dir_15m_* → N=3, crypto_band/threshold_daily_* → N=5) instead of fallback chain that always picked 15m N | 3339846 |
+| P2-CB-4 | post_trade_monitor.py | update_1h_circuit_breaker(): same prefix-based N resolution for settlement logging | 3339846 |
+| P2-CB-5 | strategy.py | CB backstop gate added to should_enter() — defensive layer catches modules that forget primary CB check | 3339846 |
+| P2-DM-3 | config.py | CRYPTO_BAND_DAILY_ENABLED=False, CRYPTO_THRESHOLD_DAILY_ENABLED=False added | 3339846 |
+| P2-DM-4 | crypto_band_daily.py | RuntimeError guard in run_crypto_scan() if CRYPTO_BAND_DAILY_ENABLED=False | 3339846 |
+| P2-DM-5 | crypto_threshold_daily.py | RuntimeError guard in evaluate_crypto_1d_entry() if CRYPTO_THRESHOLD_DAILY_ENABLED=False | 3339846 |
+
+### Sprint 3-2026-04-04 — P2: Runtime Correctness (7a2dc76)
+| ID | File | Fix | Commit |
+|----|------|-----|--------|
+| P2-RT-1 | config.py | load_config() now has try/except with FATAL message on FileNotFoundError/JSONDecodeError | 7a2dc76 |
+| P2-RT-2 | config.py | _MODE_FILE now uses same three-tier workspace shim resolution as SECRETS_DIR | 7a2dc76 |
+| P2-RT-3 | position_tracker.py | GIL safety comment added to _persist() — sync functions, no lock needed under CPython | 7a2dc76 |
+| P2-RT-4 | ws_feed.py | Comment added: check_expired_positions() pauses during WS reconnect; post_trade_monitor is backstop | 7a2dc76 |
+
+### Sprint 4-2026-04-04 — P2: Display + Reporting (2962743)
+| ID | File | Fix | Commit |
+|----|------|-----|--------|
+| P2-DP-1 | ruppert_cycle.py | run_position_check() P&L now uses bid price (not ask) with is-not-None fallback to ask | 2962743 |
+| P2-DP-2 | ruppert_cycle.py | run_position_check() docstring corrected — display-only, not auto-exit | 2962743 |
+| P2-DP-3 | ruppert_cycle.py | _get_local_tz() now uses zoneinfo.ZoneInfo('America/Los_Angeles') (was hardcoded UTC-7/-8) | 2962743 |
+| P2-DP-4 | ruppert_cycle.py | Dead 'smart' mode fully removed from dispatch, docstring, audit gates | 2962743 |
+| P2-DP-5 | logger.py | All date.today() calls replaced with _pdt_today() (3 sites: build_trade_entry, get_daily_summary, rotate_logs) | 2962743 |
+
+### Sprint 5-2026-04-04 — P2: Optimizer, Tests, Cleanup (80b7d02 + d2a3134)
+| ID | File | Fix | Commit |
+|----|------|-----|--------|
+| P2-OPT-1 | optimizer.py | detect_module() deleted; classify_module() from logger.py used at callsite | d2a3134 |
+| P2-OPT-2 | optimizer.py | DAILY_CAP now uses LOSS_CIRCUIT_BREAKER_PCT (0.05) instead of stale removed constants | d2a3134 |
+| P2-TEST-1 | test_cycle_modes.py | crypto_1d added to REQUIRED_MODES and handler dict | d2a3134 |
+| P2-TEST-2 | test_patterns.py | crypto_1d and 'report' added to REQUIRED_MODES | d2a3134 |
+| P2-SEC-1 | secrets/ | CME secret files deleted (cme_config.json, cme_gcp_credential.json, cme_token_cache.json) | d2a3134 |
+| P2-CRASH | audit/qa_health_check.py | Dead weather/NOAA/FRED/OpenMeteo sections removed (crash fix — was ImportError on import) | 80b7d02 |
+| P2-CLN-1 | audit/data_health_check.py | check_nws(), check_openmeteo() removed | d2a3134 |
+| P2-CLN-2 | 9 other files | Dead weather/geo/econ remnants cleaned (noaa_prob fields, architecture comments, whitelist entries) | d2a3134 |

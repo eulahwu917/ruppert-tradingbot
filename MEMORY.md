@@ -6,6 +6,46 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 
 ---
 
+## 2026-04-04 — Post-Cleanup P1/P2 Fix Sprints + Trading Restart
+
+### All 5 post-cleanup sprints complete (00:00-01:00 PDT)
+- **Sprint 1** ✅ P1 Exit Safety — 08931ae
+- **Sprint 2** ✅ P2 CB + Daily Guards — 3339846
+- **Sprint 3** ✅ P2 Runtime Correctness — 7a2dc76
+- **Sprint 4** ✅ P2 Display + Reporting — 2962743
+- **Sprint 5** ✅ P2 Optimizer/Tests/Cleanup — 80b7d02 + d2a3134
+- System Map updated to v3.1
+- All commits pushed to GitHub
+
+### System state: READY TO RESTART TRADING
+- P0 bug free ✅
+- All P1 and P2 fixes complete ✅
+- Dead modules stripped (weather/geo/econ/fed/sports) ✅
+- Codebase clean — no import crashes
+- Next action: re-enable WS feed + watchdog (crypto 15m only)
+- Daily modules (band/threshold): REMAIN OFF until Strategist shadow WR > 45% over 50+ trades
+
+### Fix pipeline (David approved — permanent)
+1. DS/Strategist/Trader specs → 2. Adversarial review → 3. Revise → 4. Dev builds → 5. QA → 6. Commit → 7. System Map + MEMORY.md + daily log + changelog
+
+### Key adversarial catches tonight:
+- Sprint 1: release_exit_lock import was missing — would have crashed on first exit
+- Sprint 2: third wrong-N site in post_trade_monitor missed by spec
+- Sprint 4: actions_taken auto-exit proposal was scope creep + double-exit risk → minimal path taken
+- Sprint 5: wrong constant name (CB_DAILY_LOSS_LIMIT_PCT → LOSS_CIRCUIT_BREAKER_PCT)
+- Sprint 5: CME config had plaintext API password — flagged David to rotate
+
+### CME API key rotation (David's action)
+- `secrets/cme_config.json` deleted but contained `"api_password": "tnqdnYn#g#r9e3Ar$n*Rq7Q6"`
+- David to deactivate this key at CME Group when convenient
+
+### P3 backlog (deferred — no sprint needed)
+- 13 items, see memory/adversarial-review-findings-2026-04-03.md
+- Review after 30+ trades per domain when Optimizer runs
+- Rate limiter (Kalshi): deferred to pre-LIVE checklist
+
+---
+
 ## Major Session: 2026-04-02 Evening → 2026-04-03 Morning
 
 ### System Map Built (v1.1)
