@@ -14,8 +14,15 @@ from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 import json
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo as _ZoneInfo
+
+# PDT-aware date helper — safe during UTC midnight boundary (B5-DS-3)
+_LA_TZ = _ZoneInfo('America/Los_Angeles')
+def _today_pdt():
+    """Return today's date in PDT/PST (America/Los_Angeles). Use instead of date.today()."""
+    return datetime.now(timezone.utc).astimezone(_LA_TZ).date()
 from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 from agents.ruppert.data_scientist.logger import classify_module, get_parent_module, compute_closed_pnl_from_logs
 import agents.ruppert.data_analyst.market_cache as market_cache
@@ -87,7 +94,7 @@ def get_mode() -> str:
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def read_today_trades():
-    log_path = LOGS_DIR / "trades" / f"trades_{date.today().isoformat()}.jsonl"
+    log_path = LOGS_DIR / "trades" / f"trades_{_today_pdt().isoformat()}.jsonl"  # B5-DS-3
     trades = []
     if log_path.exists():
         with open(log_path, encoding='utf-8') as f:
@@ -113,12 +120,43 @@ def read_all_trades():
 
 
 
+def _build_close_records(all_trades: list) -> dict:
+    """Shared helper: build (ticker, side) -> merged close record dict.
+
+    Iterates all_trades in order. For each exit/settle record:
+      - If key not seen: store a copy.
+      - If key seen and both records have non-None pnl: SUM the pnl (multi-leg).
+      - If either pnl is None: keep existing (do not overwrite with worse record).
+
+    Returns dict keyed by (ticker, side).
+    NOTE: The separate exit_records dict (action='exit', keyed by ticker alone)
+    is NOT part of this helper — it stays inline in its original location.
+    """
+    close_recs: dict = {}
+    for t in all_trades:
+        if t.get('action') not in ('exit', 'settle'):
+            continue
+        tk = t.get('ticker', '')
+        sd = t.get('side', '')
+        if not tk:
+            continue
+        key = (tk, sd)
+        if key not in close_recs:
+            close_recs[key] = dict(t)
+        else:
+            existing = close_recs[key]
+            if t.get('pnl') is not None and existing.get('pnl') is not None:
+                existing['pnl'] = float(existing['pnl']) + float(t['pnl'])
+            # else: keep existing — do not overwrite with a worse record
+    return close_recs
+
+
 def read_crypto_15m_summary() -> dict:
     """Read today's 15m crypto window decisions from decisions_15m.jsonl.
     Returns a summary dict for the dashboard crypto_15m_summary section.
     """
     log_path = LOGS_DIR / "decisions_15m.jsonl"
-    today_prefix = date.today().isoformat()  # e.g. "2026-03-28"
+    today_prefix = _today_pdt().isoformat()  # e.g. "2026-03-28"  # B5-DS-3
 
     if not log_path.exists():
         return {
@@ -340,8 +378,8 @@ def compute_module_closed_stats_from_logs() -> dict:
 
     Manual sources are excluded.
     """
-    from datetime import date as _date, datetime as _dt, timedelta as _td
-    _today = _date.today()
+    from datetime import datetime as _dt, timedelta as _td
+    _today = _today_pdt()  # B5-DS-3: PDT-aware (was _date.today())
     _week_start = _today - _td(days=_today.weekday())
     _MANUAL_SRC = ('manual',)
 
@@ -581,7 +619,7 @@ async def add_deposit(request: Request):
     note   = str(body.get('note', 'Manual deposit'))
     if amount <= 0:
         return {"error": "Amount must be positive"}
-    entry = {"date": date.today().isoformat(), "amount": round(amount, 2), "note": note}
+    entry = {"date": _today_pdt().isoformat(), "amount": round(amount, 2), "note": note}  # B5-DS-3
     log_event('DEPOSIT_ADDED', entry, source='dashboard')
     return {"ok": True, "pending": True, "entry": entry,
             "note": "Deposit queued — Data Scientist will apply on next synthesis run."}
@@ -998,17 +1036,10 @@ def get_pnl_history():
         if t.get('action') == 'exit':
             exit_records[t.get('ticker', '')] = t
 
-    # Build close records index for pnl: (ticker, side) -> settle/exit record
-    # Deduplicate: keep only the LATEST close record per (ticker, side).
-    # Prior accumulation logic double/triple-counted pnl when the same ticker
-    # appeared in multiple log files.
-    close_records_pnl = {}
-    for t in all_trades:
-        if t.get('action') in ('exit', 'settle'):
-            tk = t.get('ticker', '')
-            sd = t.get('side', '')
-            if tk:
-                close_records_pnl[(tk, sd)] = t  # last-write-wins (latest record)
+    # Build close records index for pnl: (ticker, side) -> merged settle/exit record.
+    # Uses shared _build_close_records() helper — SUMs pnl for duplicate (ticker, side)
+    # records (correct multi-leg behavior). Replaces last-write-wins (B5-DS-2).
+    close_records_pnl = _build_close_records(all_trades)
 
     # ISSUE-066: Build close records indexed by trade_id for accurate win rate counting.
     # Deduplicates on trade_id (not ticker), so scale-in/multi-close trades count correctly.
@@ -1070,8 +1101,7 @@ def get_pnl_history():
         'wins': 0,
     } for m in module_keys}
 
-    from datetime import date as _date
-    _today = _date.today()
+    _today = _today_pdt()  # B5-DS-3: PDT-aware (was _date.today())
 
 
     # ── Settled / manually exited positions ─────────────────────────────────
@@ -1402,8 +1432,6 @@ def _build_state():
     """Compute the full dashboard state in one pass.
     Uses price_cache only — no REST calls.
     """
-    from datetime import date as _date
-
     all_trades = read_all_trades()
 
     try:
@@ -1419,20 +1447,9 @@ def _build_state():
             if tk:
                 exit_records[tk] = t
 
-    # ── Build close records index: (ticker, side) -> settle/exit record ─────
-    # SUM fix: accumulate pnl for duplicate (ticker, side) settle records
-    _close_recs = {}
-    for t in all_trades:
-        if t.get('action') in ('exit', 'settle'):
-            tk = t.get('ticker', '')
-            sd = t.get('side', '')
-            if tk:
-                if (tk, sd) in _close_recs:
-                    existing = _close_recs[(tk, sd)]
-                    if t.get('pnl') is not None and existing.get('pnl') is not None:
-                        existing['pnl'] = float(existing['pnl']) + float(t['pnl'])
-                else:
-                    _close_recs[(tk, sd)] = dict(t)
+    # ── Build close records index: (ticker, side) -> merged settle/exit record ─
+    # Uses shared _build_close_records() helper — SUMs pnl for multi-leg (B5-DS-2).
+    _close_recs = _build_close_records(all_trades)
 
     # ── Split: settled/exited vs open (for P&L calculation) ──────────────────
     # A position is "closed" ONLY if it has a settle/exit record with pnl.
@@ -1566,7 +1583,7 @@ def _build_state():
             _logger.error("[dashboard:_build_state/open_pnl] %s", e, exc_info=True)
 
     # ── Closed P&L (settled/exited positions) ────────────────────────────────
-    _today = _date.today()
+    _today = _today_pdt()  # B5-DS-3: PDT-aware (was _date.today())
     closed_pnl_total = 0.0
     closed_pnl_month = 0.0
     closed_pnl_year  = 0.0
@@ -1585,20 +1602,8 @@ def _build_state():
         'wins': 0,
     } for m in module_closed_keys}
 
-    # Build close records index for _build_state: (ticker, side) -> record
-    # SUM fix: accumulate pnl for duplicate (ticker, side) settle records
-    _close_recs_state = {}
-    for t in all_trades:
-        if t.get('action') in ('exit', 'settle'):
-            tk = t.get('ticker', '')
-            sd = t.get('side', '')
-            if tk:
-                if (tk, sd) in _close_recs_state:
-                    existing = _close_recs_state[(tk, sd)]
-                    if t.get('pnl') is not None and existing.get('pnl') is not None:
-                        existing['pnl'] = float(existing['pnl']) + float(t['pnl'])
-                else:
-                    _close_recs_state[(tk, sd)] = dict(t)
+    # _close_recs already built above via _build_close_records() — reuse it here.
+    _close_recs_state = _close_recs  # alias for clarity in the settled loop below
 
     for ticker, t in settled_tickers.items():
         try:

@@ -65,8 +65,7 @@ WS_ENABLED = False                   # WS mode retired 2026-03-31 — polling on
 WS_EVENT_LOOP_DURATION = 840         # 14 minutes (Task Scheduler runs every 30 min)
 POLL_BACKSTOP_INTERVAL = 300         # 5 min polling backstop inside WS loop
 
-# 15-min crypto direction series
-CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M']
+# CRYPTO_15M_SERIES removed — now imported from agents.ruppert.trader.utils (B5-DS-4)
 
 # ─────────────────────────────── Helpers ──────────────────────────────────────
 
@@ -75,7 +74,7 @@ def ts():
 
 
 # push_alert moved to agents.ruppert.trader.utils (2026-03-31)
-from agents.ruppert.trader.utils import push_alert
+from agents.ruppert.trader.utils import push_alert, CRYPTO_15M_SERIES  # B5-DS-4: CRYPTO_15M_SERIES canonical
 
 
 # ─────────────────────────────── Position Loading ─────────────────────────────

@@ -3,16 +3,27 @@ import json
 import logging
 from datetime import date, datetime, timezone, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo as _ZoneInfo
 
 from agents.ruppert.env_config import get_paths as _get_paths
 from scripts.event_logger import log_event
 
+_LA = _ZoneInfo('America/Los_Angeles')
+
+def _today_pdt() -> str:
+    """Return today's date string in PDT/PST (America/Los_Angeles). Safe during UTC midnight."""
+    return datetime.now(timezone.utc).astimezone(_LA).strftime('%Y-%m-%d')
+
 TRADES_DIR = _get_paths()['trades']
+
+# Canonical definition of Kalshi 15-minute crypto direction series.
+# Import from here — do NOT redefine locally in crypto_15m.py or position_monitor.py.
+CRYPTO_15M_SERIES = ('KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M')
 
 
 def load_traded_tickers() -> set:
     """Load set of already-traded tickers for dedup."""
-    today = date.today().isoformat()
+    today = _today_pdt()
     trade_log = TRADES_DIR / f"trades_{today}.jsonl"
     tickers = set()
 

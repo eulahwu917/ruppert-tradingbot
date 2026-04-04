@@ -227,9 +227,11 @@ def check_settlements():
         hold_hours = None
         try:
             entry_dt = datetime.fromisoformat(
-                pos.get('timestamp', '').replace('Z', '+00:00').split('+')[0]
+                pos.get('timestamp', '').replace('Z', '+00:00')
             )
-            hold_hours = round((datetime.now() - entry_dt).total_seconds() / 3600, 2)
+            if entry_dt.tzinfo is None:
+                entry_dt = entry_dt.replace(tzinfo=timezone.utc)  # B5-DS-1: naive fallback
+            hold_hours = round((datetime.now(timezone.utc) - entry_dt).total_seconds() / 3600, 2)  # B5-DS-1
         except Exception:
             pass
 

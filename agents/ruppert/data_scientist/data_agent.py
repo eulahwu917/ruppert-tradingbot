@@ -19,7 +19,7 @@ import sys
 import time
 import zoneinfo
 from collections import Counter
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 # Ensure project root is on sys.path when running standalone
@@ -32,6 +32,12 @@ if str(_WORKSPACE_ROOT) not in sys.path:
 from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.data_scientist.logger import log_activity, send_telegram
 from agents.ruppert.trader import position_tracker
+
+# PDT-aware date helper — safe during UTC midnight boundary (B5-DS-3)
+_LA_TZ = zoneinfo.ZoneInfo('America/Los_Angeles')
+def _today_pdt():
+    """Return today's date in PDT/PST (America/Los_Angeles). Use instead of date.today()."""
+    return datetime.now(timezone.utc).astimezone(_LA_TZ).date()
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +195,7 @@ def _get_trade_files(since_date: str = '2026-03-26') -> list[Path]:
 
 
 def _today_trades_path() -> Path:
-    return TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'  # P0-1 fix
+    return TRADES_DIR / f'trades_{_today_pdt().isoformat()}.jsonl'  # P0-1 fix; B5-DS-3: PDT-aware
 
 
 # ─────────────────────────────── Check functions ──────────────────────────────
@@ -440,7 +446,7 @@ def get_open_positions_from_logs() -> list[dict]:
                         )
 
     # Filter out positions where the ticker's market has already expired
-    today = date.today()
+    today = _today_pdt()  # B5-DS-3: PDT-aware (was date.today())
     open_records = []
     for key, rec in entries.items():
         if key in exits:
@@ -561,13 +567,13 @@ def check_decision_log_orphans() -> list[dict]:
     # decisions made just before midnight reference markets whose trades land in
     # yesterday's log, and early-morning decisions may not have executed yet.
     today_trades = _read_trades_file(_today_trades_path())
-    yesterday = date.today() - timedelta(days=1)
+    yesterday = _today_pdt() - timedelta(days=1)  # B5-DS-3: PDT-aware (was date.today())
     yesterday_path = TRADES_DIR / f'trades_{yesterday.isoformat()}.jsonl'
     yesterday_trades = _read_trades_file(yesterday_path)
     trade_tickers = {t.get('ticker') for t in today_trades} | {t.get('ticker') for t in yesterday_trades}
 
     orphans = []
-    today_str = date.today().isoformat()
+    today_str = _today_pdt().isoformat()  # B5-DS-3: PDT-aware (was date.today())
     yesterday_str = yesterday.isoformat()
     for d in decisions:
         if d.get('decision', '').upper() in ('SKIP',):
@@ -613,7 +619,7 @@ def check_ws_stability():
     last 10 minutes, and writes a warning/exit alert to pending_alerts.json
     if a crash loop is detected (>= 5 disconnects in 10 min).
     """
-    log_path = LOGS_DIR / f'activity_{date.today().isoformat()}.log'
+    log_path = LOGS_DIR / f'activity_{_today_pdt().isoformat()}.log'  # B5-DS-3: PDT-aware
     if not log_path.exists():
         return
 
@@ -817,7 +823,7 @@ def check_15m_entry_drought():
 
 def check_ws_stale_trades(trades: list[dict]) -> list[dict]:
     """Flag trades from last 7 days where price_source was 'rest' at entry."""
-    cutoff = (date.today() - timedelta(days=7)).isoformat()
+    cutoff = (_today_pdt() - timedelta(days=7)).isoformat()  # B5-DS-3: PDT-aware
     flagged = []
     for t in trades:
         t_date = t.get('date', '')
@@ -978,7 +984,7 @@ def _register_missing_positions(missing_tickers: list, open_positions: list) -> 
                 # ISSUE-055: skip if a close record (exit/settle) exists for this position today
                 def _has_close_record(_ticker: str, _side: str) -> bool:
                     """Return True if a settle or exit record exists for (_ticker, _side) today."""
-                    today_log = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
+                    today_log = TRADES_DIR / f'trades_{_today_pdt().isoformat()}.jsonl'  # B5-DS-3
                     if not today_log.exists():
                         return False
                     try:
@@ -1270,7 +1276,7 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
                 'cap': v['cap'],
                 'action': 'flagged + ALERT',
             })
-            ih = _issue_hash('daily_cap', f'{v["module"]}_{date.today().isoformat()}')
+            ih = _issue_hash('daily_cap', f'{v["module"]}_{_today_pdt().isoformat()}')  # B5-DS-3
             if _should_alert(state, ih):
                 # crypto_15m threshold is a canary (early activity flag), not an enforcement cap.
                 # Strategist will tune the 10% threshold after 30 trades.
@@ -1323,7 +1329,7 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
 
     if issues:
         # Write audit report
-        audit_file = LOGS_DIR / f'data_audit_{date.today().isoformat()}.json'
+        audit_file = LOGS_DIR / f'data_audit_{_today_pdt().isoformat()}.json'  # B5-DS-3
         audit_report = {
             'timestamp': datetime.now().isoformat(),
             'mode': mode,
@@ -1352,7 +1358,7 @@ def run_post_scan_audit(mode: str = 'post_cycle') -> dict:
 
         # Send batch alert if 5+ alertable issues
         if len(alertable_issues) >= 5:
-            batch_hash = _issue_hash('batch', f'{date.today().isoformat()}_{len(alertable_issues)}')
+            batch_hash = _issue_hash('batch', f'{_today_pdt().isoformat()}_{len(alertable_issues)}')  # B5-DS-3
             if _should_alert(state, batch_hash):
                 send_telegram(_format_batch_alert(alertable_issues, str(audit_file)))
                 _mark_alerted(state, batch_hash)
@@ -1416,7 +1422,7 @@ def run_historical_audit(since_date: str = '2026-03-26') -> dict:
 
     # Check if already ran today
     last_full = state.get('last_full_audit')
-    if last_full and last_full[:10] == date.today().isoformat():
+    if last_full and last_full[:10] == _today_pdt().isoformat():  # B5-DS-3
         log_activity('[DataAgent] Historical audit already ran today — skipping')
         return {'skipped': True}
 
@@ -1509,7 +1515,7 @@ def run_historical_audit(since_date: str = '2026-03-26') -> dict:
         'flagged': total_flagged,
         'issues': all_issues,
     }
-    audit_file = LOGS_DIR / f'data_audit_{date.today().isoformat()}.json'
+    audit_file = LOGS_DIR / f'data_audit_{_today_pdt().isoformat()}.json'  # B5-DS-3
     try:
         audit_file.write_text(json.dumps(report, indent=2), encoding='utf-8')
     except Exception as e:
@@ -1523,11 +1529,11 @@ def run_historical_audit(since_date: str = '2026-03-26') -> dict:
 
     # Alert if issues found
     if all_issues:
-        ih = _issue_hash('historical_audit', date.today().isoformat())
+        ih = _issue_hash('historical_audit', _today_pdt().isoformat())  # B5-DS-3
         if _should_alert(state, ih):
             msg = (
                 f'\U0001f50d Data Agent: Historical audit complete\n'
-                f'Period: {since_date} to {date.today().isoformat()}\n'
+                f'Period: {since_date} to {_today_pdt().isoformat()}\n'  # B5-DS-3
                 f'Trades audited: {total_trades}\n'
                 f'Issues: {len(all_issues)} ({total_auto_fixed} auto-fixed, {total_flagged} flagged)\n'
                 f'Details: {audit_file}'

@@ -49,7 +49,8 @@ logger = logging.getLogger(__name__)
 OKX_API      = 'https://www.okx.com/api/v5'
 COINBASE_API = 'https://api.coinbase.com/v2/prices'
 
-CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M']
+# CRYPTO_15M_SERIES removed — now imported from agents.ruppert.trader.utils (B5-DS-4)
+# NOTE: utils.py is a new import dependency for this module (added in Batch 5).
 
 ASSET_SYMBOLS = {
     'BTC':  'BTC-USDT-SWAP',
@@ -110,6 +111,7 @@ from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.strategist.strategy import should_enter
 from agents.ruppert.data_analyst.polymarket_client import get_crypto_consensus
 from agents.ruppert.trader import circuit_breaker
+from agents.ruppert.trader.utils import CRYPTO_15M_SERIES  # B5-DS-4: canonical definition in utils
 LOGS_DIR = _get_paths()['logs']
 LOGS_DIR.mkdir(exist_ok=True)
 DECISION_LOG = LOGS_DIR / 'decisions_15m.jsonl'
@@ -550,7 +552,7 @@ def get_funding_z(asset: str) -> float | None:
 
 def _get_session_pnl_15m() -> float:
     """Sum realized P&L from today's 15m trades."""
-    today = date.today().isoformat()
+    today = circuit_breaker._today_pdt()  # B5-DS-3: PDT-aware date (was date.today())
     log_path = _get_paths()['trades'] / f'trades_{today}.jsonl'
     if not log_path.exists():
         return 0.0
@@ -1330,7 +1332,7 @@ def evaluate_crypto_15m_entry(
         'contracts': contracts,
         'size_dollars': round(actual_spend, 2),  # ISSUE-105: use actual_spend (post-floor rounding)
         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'date': str(date.today()),
+        'date': circuit_breaker._today_pdt(),  # B5-DS-3: PDT-aware date (was date.today())
         'scan_price': entry_price,
         'fill_price': entry_price,
         'window_open_ts': window_open_ts,                         # for get_window_exposure() re-hydration
