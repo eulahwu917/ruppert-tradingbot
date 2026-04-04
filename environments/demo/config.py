@@ -20,7 +20,12 @@ else:
 CONFIG_FILE = os.path.join(SECRETS_DIR, 'kalshi_config.json')
 
 # DRY_RUN: derived from mode.json — True = demo (no real orders), False = live
-_MODE_FILE = os.path.join(os.path.dirname(__file__), 'mode.json')
+if '_WORKSPACE' in dir():
+    _MODE_FILE = str(_WORKSPACE / 'environments' / 'demo' / 'mode.json')
+elif _this_file is not None:
+    _MODE_FILE = str(_this_file.parent / 'mode.json')
+else:
+    _MODE_FILE = os.path.join(os.path.dirname(__file__), 'mode.json')
 try:
     with open(_MODE_FILE, 'r', encoding='utf-8') as _f:
         _mode = json.load(_f).get('mode', 'demo')
@@ -29,9 +34,13 @@ except Exception:
 DRY_RUN = (_mode != 'live')
 
 def load_config():
-    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-        cfg = json.load(f)
-    return cfg
+    try:
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+        return cfg
+    except (FileNotFoundError, json.JSONDecodeError) as e:
+        print(f"FATAL: Cannot load config from {CONFIG_FILE}: {e}\nEnsure kalshi_config.json exists in secrets/ and contains valid JSON.")
+        raise
 
 def get_private_key_path():
     cfg = load_config()

@@ -148,6 +148,11 @@ def _parse_close_time(ticker: str) -> 'datetime | None':
     return None
 
 
+# Thread-safety note: add_position() and remove_position() are synchronous
+# functions with no await points. Under CPython's GIL, dict mutations and
+# the _tracked.copy() snapshot in _persist() are effectively atomic. A
+# concurrent race between add and remove cannot occur unless these functions
+# are made async — at which point an asyncio.Lock should be added here.
 def _persist():
     """Write tracked positions to disk. Keys are serialized as 'ticker::side' strings."""
     try:

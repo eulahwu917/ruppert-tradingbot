@@ -914,6 +914,9 @@ async def run_ws_feed():
                             last_persist = now
 
                         # Periodic expiry check every 60s
+                        # NOTE: check_expired_positions() pauses when WS is reconnecting.
+                        # post_trade_monitor (30-min Task Scheduler) is the backstop for
+                        # settlements missed during WS downtime.
                         if now - last_expiry_check >= 60:
                             try:
                                 await position_tracker.check_expired_positions()
