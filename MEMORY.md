@@ -46,16 +46,24 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 - **Log atomicity (ISSUE-014):** logger.py has no file locking — acceptable for DEMO, must fix before LIVE
 - **Pipeline violations noted:** Dev committed without waiting for DS sign-off (Batch 2, DS-NEW-001) — process to be reinforced
 
-### P1 Sprints Progress (2026-04-03)
-- **Sprint P1-1** ✅ COMPLETE — Signal Integrity (8 issues): ISSUE-096, 032, 129, 114, 069, 116, 104, 105 — commits b171271, c03e5b1, a441a6d
-- **Sprint P1-2** ✅ COMPLETE — Settlement + Capital Accuracy (5 issues): ISSUE-026, 027, 110, 030, 102 — commits d3584bf, 641e2d3
-- **Sprint P1-3** ✅ COMPLETE — Analytics + Calibration (6 issues): ISSUE-005, 041, 004, 101, 103, 046 — commits 2e870f6, 1ebee0a, 9a1d78e
-- **Sprint P1-4** ✅ COMPLETE — Dashboard Fixes (7 issues): ISSUE-018, 019, 063, 064, 065, 066, 072 — commit d02db9f
-  - Note: ISSUE-063 (P&L chart) was already resolved by design — chart was intentionally removed. Backend change is harmless dead code. Will clean up in P1-5.
-- **Sprint P1-5** — Exit Records + Monitoring (8 issues) — IN PROGRESS
-- **Sprint P1-6** — Daily Module Pre-Re-Enable (5 issues) — parallel track, pending Strategist shadow analysis
-- **Adversarial reviewer** added permanently to pipeline — catches spec bugs every round
-- **Pipeline improvement:** System Map audit deferred to after all P1-P3 sprints complete (not after P1)
+### All P1 Sprints COMPLETE (2026-04-03)
+- **Sprint P1-1** ✅ Signal Integrity (8 issues): ISSUE-096, 032, 129, 114, 069, 116, 104, 105 — b171271, c03e5b1, a441a6d
+- **Sprint P1-2** ✅ Settlement + Capital Accuracy (5 issues): ISSUE-026, 027, 110, 030, 102 — d3584bf, 641e2d3
+- **Sprint P1-3** ✅ Analytics + Calibration (6 issues): ISSUE-005, 041, 004, 101, 103, 046 — 2e870f6, 1ebee0a, 9a1d78e
+- **Sprint P1-4** ✅ Dashboard Fixes (7 issues): ISSUE-018, 019, 063, 064, 065, 066, 072 — d02db9f
+- **Sprint P1-5** ✅ Exit Records + Monitoring (8 issues + CLEANUP): ISSUE-108, 062, 121, 098, 074, 079, 045, 023 — 8a32658
+- **Sprint P1-6** ✅ Daily Module Pre-Re-Enable (5 issues): ISSUE-016, 017, 057, 089, 053 — d161a89
+
+**Pipeline rules (locked in):**
+- Adversarial reviewer is always a SEPARATE agent from the domain expert who wrote specs — enforced from P1-6 onward
+- System Map audit deferred until ALL P1-P3 sprints complete (currently at v1.4 as of Sprint 5 P0)
+- Daily modules stay OFF until Strategist shadow WR > 45% over 50+ trades
+
+**Notable P1 findings:**
+- ISSUE-023 confirmed already resolved in Sprint 3 (log_exit alias was public wrapper all along)
+- ISSUE-017 root cause was threshold module only — band module was never broken (indirect price encoding)
+- crypto_band_daily.py was missing `logging` import entirely despite using logger.warning (latent NameError fixed in P1-6)
+- Dev subagent timed out repeatedly during P1-6; Ruppert implemented directly from reviewed specs
 
 ### P0 Mini-Sprint — COMPLETE (2026-04-03)
 5 additional P0 issues found during P1 domain reviews and fixed immediately:
