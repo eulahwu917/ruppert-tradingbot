@@ -318,6 +318,13 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
     if traded_tickers is None:
         traded_tickers = set()
 
+    # Code-level disable guard
+    if not getattr(config, 'CRYPTO_BAND_DAILY_ENABLED', False):
+        raise RuntimeError(
+            'crypto_band_daily is DISABLED (config.CRYPTO_BAND_DAILY_ENABLED=False). '
+            'Set CRYPTO_BAND_DAILY_ENABLED=True in config.py to enable.'
+        )
+
     client = KalshiClient()
     executed = []
 

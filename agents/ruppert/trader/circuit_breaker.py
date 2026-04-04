@@ -195,9 +195,13 @@ def increment_consecutive_losses(module: str, window_ts: str) -> None:
 
     _rw_locked(path, _mutate)
 
-    cb_n = getattr(config, 'CRYPTO_15M_CIRCUIT_BREAKER_N',
-                   getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N',
-                           getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3)))
+    # Resolve CB threshold N based on module prefix
+    if module.startswith('crypto_dir_15m_'):
+        cb_n = getattr(config, 'CRYPTO_15M_CIRCUIT_BREAKER_N', 3)
+    elif module.startswith('crypto_band_daily_') or module.startswith('crypto_threshold_daily_'):
+        cb_n = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N', 5)
+    else:
+        cb_n = 3  # hardcoded fallback for unknown modules
     if _new_count[0] >= cb_n:
         logger.warning(
             '[circuit_breaker] TRIP: %s consecutive_losses=%d hit threshold=%d (window=%s)',

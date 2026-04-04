@@ -368,7 +368,12 @@ def update_1h_circuit_breaker(window_ts: str, settlements: list, module_key: str
         window_result = 'win'
         circuit_breaker.reset_consecutive_losses(module_key, window_ts)
 
-    cb_n = getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3)
+    if module_key.startswith('crypto_dir_15m_'):
+        cb_n = getattr(config, 'CRYPTO_15M_CIRCUIT_BREAKER_N', 3)
+    elif module_key.startswith('crypto_band_daily_') or module_key.startswith('crypto_threshold_daily_'):
+        cb_n = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N', 5)
+    else:
+        cb_n = getattr(config, 'CRYPTO_1H_CIRCUIT_BREAKER_N', 3)
     losses = circuit_breaker.get_consecutive_losses(module_key)
 
     print(

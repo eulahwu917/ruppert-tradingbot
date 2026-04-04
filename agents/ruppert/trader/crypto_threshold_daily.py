@@ -965,6 +965,12 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
     Main entry point — run all signals, apply risk filters, place order if qualified.
     Returns {'entered': bool, 'ticker': str|None, 'size_usd': float, 'reason': str}.
     """
+    # Code-level disable guard
+    if not getattr(config, 'CRYPTO_THRESHOLD_DAILY_ENABLED', False):
+        raise RuntimeError(
+            'crypto_threshold_daily is DISABLED (config.CRYPTO_THRESHOLD_DAILY_ENABLED=False). '
+            'Set CRYPTO_THRESHOLD_DAILY_ENABLED=True in config.py to enable.'
+        )
 
     # 0. Validate asset
     if asset not in ASSETS_PHASE1:

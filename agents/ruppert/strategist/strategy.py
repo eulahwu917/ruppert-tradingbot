@@ -329,6 +329,27 @@ def should_enter(
         return {'enter': False, 'size': 0.0,
                 'reason': f'too_close_to_settlement ({hours:.2f}h < {min_hours}h)'}
 
+    # --- Circuit breaker defensive backstop ---
+    # NOTE: This is a DEFENSIVE BACKSTOP only. Each module checks CB before
+    # calling should_enter(). This catches modules that forget to do so.
+    try:
+        from agents.ruppert.trader import circuit_breaker as _cb
+        _cb_losses = _cb.get_consecutive_losses(signal_module)
+        if signal_module.startswith('crypto_dir_15m_'):
+            _cb_threshold = getattr(config, 'CRYPTO_15M_CIRCUIT_BREAKER_N', 3)
+        elif signal_module.startswith('crypto_band_daily_') or signal_module.startswith('crypto_threshold_daily_'):
+            _cb_threshold = getattr(config, 'CRYPTO_DAILY_CIRCUIT_BREAKER_N', 5)
+        else:
+            _cb_threshold = 3
+        if _cb_losses >= _cb_threshold:
+            return {'enter': False, 'size': 0.0,
+                    'reason': f'CIRCUIT_BREAKER (backstop: {signal_module} has {_cb_losses} consecutive losses >= {_cb_threshold})'}
+    except ImportError:
+        logger.warning('[strategy] CB backstop: circuit_breaker module not importable for %s — proceeding fail-open', signal_module)
+    except Exception as _cb_err:
+        logger.warning('[strategy] CB backstop: unexpected error for %s: %s — failing closed', signal_module, _cb_err)
+        return {'enter': False, 'size': 0.0, 'reason': f'CIRCUIT_BREAKER_ERROR: {_cb_err}'}
+
     # --- Per-module confidence gate (single gate, replaces old dual-gate) ---
     # config.MIN_CONFIDENCE is a dict keyed by module name.
     # Falls back to module-level MIN_CONFIDENCE (0.25) for unlisted modules.

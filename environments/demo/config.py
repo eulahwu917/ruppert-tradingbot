@@ -350,6 +350,12 @@ CRYPTO_1H_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop; True = log only
 CRYPTO_DAILY_CIRCUIT_BREAKER_N        = 5      # consecutive contract losses before daily CB trips
 CRYPTO_DAILY_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop
 
+# ── Daily Module Enable Flags ────────────────────────────────────────────────
+# Code-level kill switch. Set True only when module is approved for trading.
+# Currently OFF — pending shadow WR > 45% over 50+ trades.
+CRYPTO_BAND_DAILY_ENABLED      = False
+CRYPTO_THRESHOLD_DAILY_ENABLED = False
+
 # ── Daily module stop-loss (band + threshold) ─────────────────────────────────
 # Applies to: crypto_band_daily_* and crypto_threshold_daily_*
 
