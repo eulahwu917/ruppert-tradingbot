@@ -530,7 +530,11 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
 
         # Daily cap check before executing
         try:
-            _total_capital  = get_capital()
+            try:
+                _total_capital  = get_capital()
+            except RuntimeError as e:
+                logger.warning("crypto_band_daily: get_capital() failed — aborting scan: %s", e)
+                return []
             _deployed_today = get_daily_exposure()
             _cap_remaining  = check_daily_cap(_total_capital, _deployed_today)
             if _cap_remaining <= 0:

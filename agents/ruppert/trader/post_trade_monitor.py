@@ -43,6 +43,7 @@ from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from agents.ruppert.data_scientist.logger import log_trade, log_activity, acquire_exit_lock, release_exit_lock, normalize_entry_price, _append_jsonl
 from agents.ruppert.trader import position_tracker
 from agents.ruppert.trader import circuit_breaker
+from agents.ruppert.trader.utils import _today_pdt
 
 def ts():
     return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -98,7 +99,7 @@ def check_settlements(client):
     """
     print(f"\n  [Settlement Checker] running...")
 
-    today = date.today()
+    today = date.fromisoformat(_today_pdt())
 
     # Scan a rolling 365-day window to catch long-horizon positions (monthly/annual).
     # Extended from 30 days — positions entered more than 30 days ago were silently
@@ -262,7 +263,7 @@ def check_settlements(client):
             entry_dt = None
 
         # Write settle record directly to avoid build_trade_entry() schema stripping
-        log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
+        log_path = TRADES_DIR / f'trades_{_today_pdt()}.jsonl'
         settle_record = {
             "trade_id": str(uuid.uuid4()),
             "timestamp": datetime.now().isoformat(),
@@ -407,7 +408,7 @@ def load_open_positions():
     (monthly, quarterly, annual markets). Most files will not exist and
     are skipped cheaply via exists() check.
     """
-    today = date.today()
+    today = date.fromisoformat(_today_pdt())
 
     # Scan rolling 365-day window to capture long-horizon positions (monthly/annual).
     # Extended from 30 days — a 30-day window silently dropped positions entered
@@ -598,7 +599,7 @@ def run_monitor():
                     'market_prob': cur_price / 100, 'edge': None,
                     'size_dollars': round(pos_contracts * cur_price / 100, 2),
                     'contracts': pos_contracts, 'source': source,
-                    'timestamp': ts(), 'date': str(date.today()),
+                    'timestamp': ts(), 'date': _today_pdt(),
                 }
 
                 # Compute realized P&L for pnl_cache

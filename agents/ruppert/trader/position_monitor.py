@@ -74,7 +74,7 @@ def ts():
 
 
 # push_alert moved to agents.ruppert.trader.utils (2026-03-31)
-from agents.ruppert.trader.utils import push_alert, CRYPTO_15M_SERIES  # B5-DS-4: CRYPTO_15M_SERIES canonical
+from agents.ruppert.trader.utils import push_alert, CRYPTO_15M_SERIES, _today_pdt  # B5-DS-4: CRYPTO_15M_SERIES canonical
 
 
 # ─────────────────────────────── Position Loading ─────────────────────────────
@@ -86,7 +86,7 @@ def load_open_positions():
     (monthly, quarterly, annual markets). Most files will not exist and
     are skipped cheaply via exists() check.
     """
-    today = date.today()
+    today = date.fromisoformat(_today_pdt())
 
     # Scan rolling 365-day window to capture long-horizon positions (monthly/annual).
     # Extended from 30 days — a 30-day window silently dropped positions entered
@@ -171,11 +171,11 @@ def _settle_single_ticker(ticker: str, result: str, pos: Optional[dict] = None):
             pnl = -(entry_price * contracts / 100)
     
     # Write settle record
-    log_path = TRADES_DIR / f'trades_{date.today().isoformat()}.jsonl'
+    log_path = TRADES_DIR / f'trades_{_today_pdt()}.jsonl'
     settle_record = {
         "trade_id": str(uuid.uuid4()),
         "timestamp": datetime.now().isoformat(),
-        "date": str(date.today()),
+        "date": _today_pdt(),
         "ticker": ticker,
         "title": pos.get("title", ""),
         "side": side,
@@ -436,7 +436,7 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     opp['contracts'] = contracts
     opp['size_dollars'] = size
     opp['timestamp'] = ts()
-    opp['date'] = str(date.today())
+    opp['date'] = _today_pdt()
     opp['scan_price'] = bet_price
     opp['fill_price'] = bet_price
     
@@ -566,7 +566,7 @@ def run_polling_scan(client: KalshiClient, run_settlement_check: bool = True):
                     'market_prob': _pm_price / 100, 'edge': None,
                     'size_dollars': round(_pm_contracts * _pm_price / 100, 2),
                     'contracts': _pm_contracts, 'source': pos.get('source', 'monitor'),
-                    'module': pos.get('module', ''), 'timestamp': ts(), 'date': str(date.today()),
+                    'module': pos.get('module', ''), 'timestamp': ts(), 'date': _today_pdt(),
                     'pnl': _pm_pnl,
                     'entry_price': _pm_entry_price,
                     'exit_price': _pm_price,

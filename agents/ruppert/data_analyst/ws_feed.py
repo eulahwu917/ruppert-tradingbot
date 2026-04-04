@@ -510,7 +510,11 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     # Check daily cap
     from agents.ruppert.data_scientist.capital import get_capital
     from agents.ruppert.data_scientist.logger import get_daily_exposure
-    capital = get_capital()
+    try:
+        capital = get_capital()
+    except RuntimeError as e:
+        logger.warning("evaluate_crypto_entry: get_capital() failed — skipping entry evaluation: %s", e)
+        return
     # NOTE: DAILY_CAP_RATIO (0.70) is 10x the old CRYPTO_DAILY_CAP_PCT (0.07).
     # At $2k capital this allows ~$1,200/day through the WS hourly path vs ~$120 before.
     # Monitor daily exposure closely for first 3 live days after trading resumes.
@@ -570,9 +574,12 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
 
     # Compute open_position_value for strategy gate (same pattern as main.py)
     from agents.ruppert.data_scientist.capital import get_buying_power
-    _total = get_capital()
-    _bp = get_buying_power()
-    opp['open_position_value'] = max(0.0, _total - _bp)
+    try:
+        _bp = get_buying_power()
+    except RuntimeError as e:
+        logger.warning("evaluate_crypto_entry: get_buying_power() failed — skipping entry evaluation: %s", e)
+        return
+    opp['open_position_value'] = max(0.0, capital - _bp)
 
     # Check entry via strategy
     from agents.ruppert.strategist.strategy import should_enter, calculate_position_size

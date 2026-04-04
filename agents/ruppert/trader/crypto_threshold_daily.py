@@ -1008,9 +1008,9 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
     # 2. Capital / cap checks
     try:
         capital = get_capital()
-    except Exception as e:
-        capital = getattr(config, 'CAPITAL_FALLBACK', 10000.0)
-        logger.warning('evaluate_crypto_1d_entry: get_capital() failed: %s — using fallback', e)
+    except RuntimeError as e:
+        logger.warning("crypto_threshold_daily: get_capital() failed — aborting 1d scan: %s", e)
+        return
 
     _asset_module = ASSET_MODULE_NAMES_1D.get(asset, 'crypto_threshold_daily_btc')
 

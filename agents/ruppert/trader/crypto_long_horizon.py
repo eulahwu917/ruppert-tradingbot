@@ -14,7 +14,7 @@ import re
 import sys
 import logging
 import requests
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone
 from pathlib import Path
 from scipy.stats import norm
 
@@ -31,6 +31,7 @@ from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
 from agents.ruppert.data_scientist.logger import log_trade, log_activity, get_daily_exposure
 
 from agents.ruppert.env_config import get_paths as _get_paths
+from agents.ruppert.trader.utils import _today_pdt
 
 logger = logging.getLogger(__name__)
 
@@ -424,7 +425,7 @@ def run_long_horizon_scan(client, dry_run: bool = True, traded_tickers: set = No
             'holding_type': 'long_horizon',
             'note': f"regime={opp['regime']} fg={opp['fear_greed']} strike={opp['strike']} days={opp['days_to_expiry']}",
             'timestamp': datetime.now(timezone.utc).isoformat(),
-            'date': str(date.today()),
+            'date': _today_pdt(),
             'scan_price': bet_price,
             'fill_price': bet_price,
         }
