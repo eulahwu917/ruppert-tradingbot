@@ -87,7 +87,7 @@ except Exception as e:
 # ── 3. Required files exist ──────────────────────────────────────────────────
 print("\n=== Required Files ===")
 
-secrets_config = Path(r"C:\Users\David Wu\.openclaw\workspace\secrets\kalshi_config.json")
+secrets_config = _WORKSPACE_ROOT / "secrets" / "kalshi_config.json"
 check("secrets/kalshi_config.json exists", secrets_config.exists())
 
 logs_dir = ROOT.parent / "logs"
@@ -109,7 +109,7 @@ DEPRECATED = [
 ]
 
 for fname in DEPRECATED:
-    gone = not (ROOT / fname).exists()
+    gone = not (_DEMO_DIR / fname).exists()
     check(f"{fname} removed", gone, "still present!" if not gone else "")
 
 # ── 5. Summary ───────────────────────────────────────────────────────────────

@@ -98,7 +98,7 @@ def check_trade_schema():
     """Verify today's trade log has required fields."""
     from datetime import date
     today = date.today().isoformat()
-    trade_log = LOGS_DIR / f"trades_{today}.jsonl"
+    trade_log = LOGS_DIR / "trades" / f"trades_{today}.jsonl"
     if not trade_log.exists():
         print(f"  trades_{today}.jsonl: no trades today yet — OK")
         return

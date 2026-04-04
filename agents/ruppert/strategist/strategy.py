@@ -372,8 +372,9 @@ def should_enter(
     _module_cap_missing = False  # ISSUE-104: init before if block (linter hygiene)
     if module is not None:
         _module_key = module.upper() + '_DAILY_CAP_PCT'
-        _module_cap = getattr(config, _module_key, None)
-        _module_cap_missing = _module_cap is None
+        _default_cap = getattr(config, 'DEFAULT_MODULE_DAILY_CAP_PCT', 0.05)
+        _module_cap = getattr(config, _module_key, _default_cap)
+        _module_cap_missing = not hasattr(config, _module_key)   # True only if key absent (still warn)
         if not _module_cap_missing:
             # NOTE: Setting MODULE_DAILY_CAP_PCT = 0.0 will ALWAYS block the module (0.0 >= 0.0 is True).
             # To disable a module, set it to a very high value (e.g. 99.0) or remove the config key entirely.
@@ -387,10 +388,24 @@ def should_enter(
         else:
             logger.warning(
                 f'should_enter: no daily cap config for module "{module}" '
-                f'({_module_key} not in config). Allowing through.'
+                f'({_module_key} not in config). Using default cap {_default_cap:.1%}.'
             )
             # NOTE: Callers should check result.get('warning') and send notifications
             # themselves. should_enter() is a pure decision function — no side effects.
+
+    # --- 15m directional daily dollar backstop ---
+    _backstop_enabled = getattr(config, 'CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED', False)
+    if _backstop_enabled and module is not None and module.startswith('crypto_dir_15m'):
+        _15m_wager_cap_pct = getattr(config, 'CRYPTO_15M_DAILY_WAGER_CAP_PCT', 0.60)
+        _15m_daily_cap_usd = capital * _15m_wager_cap_pct
+        # module_deployed_pct here is the 15m-module-specific deployed fraction passed by caller
+        _15m_deployed_usd = module_deployed_pct * capital
+        if _15m_deployed_usd >= _15m_daily_cap_usd:
+            return {
+                'enter': False,
+                'size': 0.0,
+                'reason': f'crypto_15m_daily_backstop_reached ({_15m_deployed_usd:.0f} >= {_15m_daily_cap_usd:.0f})'
+            }
 
     # --- Same-day re-entry block ---
     if traded_tickers is not None:

@@ -17,12 +17,14 @@ import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent
+AUDIT_DIR = Path(__file__).parent
+ROOT = AUDIT_DIR.parent   # audit/ -> demo/
 PYTHON_FILES = [f for f in ROOT.glob("*.py") if f.name not in (
     "code_audit.py", "config_audit.py", "data_integrity_check.py"
 )]
 BOT_FILES = list((ROOT / "bot").glob("*.py"))
-ALL_FILES = PYTHON_FILES + BOT_FILES
+AUDIT_FILES = list(AUDIT_DIR.glob("*.py"))
+ALL_FILES = PYTHON_FILES + BOT_FILES + AUDIT_FILES
 
 issues = []
 warnings = []

@@ -50,6 +50,24 @@ def get_environment():
 # limiting trade throughput with insufficient risk-control benefit.
 # Optimizer to revisit after 30+ days of post-CB data.
 
+# Default cap for any module missing its own constant — fail-safe floor (ISSUE-119)
+DEFAULT_MODULE_DAILY_CAP_PCT = 0.05   # 5% of capital — safe default for unlisted modules
+
+# Per-module daily caps (key format must match module.upper() + '_DAILY_CAP_PCT') (ISSUE-119)
+CRYPTO_DIR_15M_BTC_DAILY_CAP_PCT      = 0.60   # uses CRYPTO_15M_DAILY_WAGER_CAP_PCT logic (backstop in ISSUE-090)
+CRYPTO_DIR_15M_ETH_DAILY_CAP_PCT      = 0.60
+CRYPTO_DIR_15M_SOL_DAILY_CAP_PCT      = 0.60
+CRYPTO_DIR_15M_XRP_DAILY_CAP_PCT      = 0.60
+CRYPTO_DIR_15M_DOGE_DAILY_CAP_PCT     = 0.60
+CRYPTO_BAND_DAILY_BTC_DAILY_CAP_PCT   = 0.10   # band daily module cap
+CRYPTO_BAND_DAILY_ETH_DAILY_CAP_PCT   = 0.10
+CRYPTO_BAND_DAILY_XRP_DAILY_CAP_PCT   = 0.10
+CRYPTO_BAND_DAILY_DOGE_DAILY_CAP_PCT  = 0.10
+CRYPTO_BAND_DAILY_SOL_DAILY_CAP_PCT   = 0.10
+CRYPTO_THRESHOLD_DAILY_BTC_DAILY_CAP_PCT = 0.10
+CRYPTO_THRESHOLD_DAILY_ETH_DAILY_CAP_PCT = 0.10
+CRYPTO_THRESHOLD_DAILY_SOL_DAILY_CAP_PCT = 0.10
+
 # Legacy keys (kept for reference / future re-enable)
 # WEATHER_DAILY_CAP_PCT = 0.07   # removed Phase 2
 CRYPTO_DAILY_CAP_PCT  = 0.07   # daily cap for crypto module (legacy fallback)
@@ -247,7 +265,7 @@ CRYPTO_15M_DIR_W_OI   = 0.10   # Open Interest Delta weight (Phase 2: reduced fr
 
 CRYPTO_15M_DIR_HARD_CAP_USD     = 100.0   # absolute per-trade dollar cap (half-Kelly formula)
 CRYPTO_15M_DIR_MIN_POSITION_USD =   5.0   # minimum viable trade size
-CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED = False   # Phase 2: disabled — CB is daily guardrail
+CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED = True    # P2+P3-1: enabled — see ISSUE-090
 CRYPTO_15M_MAX_SPREAD        = 25     # DATA COLLECTION: 25c max spread (was 15)
 CRYPTO_15M_THIN_MARKET_RATIO = 0.01   # DATA COLLECTION: 1% of 30d avg vol (was 0.05)
 CRYPTO_15M_MIN_CONVICTION    = 0.05   # DATA COLLECTION: min |raw_score| (was hardcoded 0.15)
