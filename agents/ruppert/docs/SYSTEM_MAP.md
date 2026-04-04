@@ -132,8 +132,8 @@ External Data Sources
          ▼                    ▼                      ▼
     ws_feed.py         settlement_checker.py   post_trade_monitor.py
   (WS exit engine)     (batch settlement)      (position monitor)
-  stop-loss tiers      catches WS misses       every 30 min
-  gain thresholds      2× daily (11PM, 8AM)
+  stop-loss tiers      catches WS misses       every 15 min
+  gain thresholds      every 30 min, 24/7      (6AM-11PM PDT)
   check_expired_pos()
          │                    │
          ▼                    ▼
@@ -165,7 +165,7 @@ External Data Sources
 
 | Module Name | Type | Status | Description |
 |---|---|---|---|
-| `crypto_15m.py` | Entry | Active | 15-min Kalshi binary direction (BTC/ETH/XRP/DOGE/SOL). OKX microstructure, 4 z-scored signals (TFI/OBI/MACD/OI), Half-Kelly sizing. Data-collection thresholds in Phase 2. **Batch 5 (B5-DS-3):** 2 `date.today()` sites replaced with `_today_pdt()`. **Batch 5 (B5-DS-4):** `CRYPTO_15M_SERIES` constant removed — now imported from `utils.py` canonical definition. |
+| `crypto_15m.py` | Entry | Active | 15-min Kalshi binary direction (BTC/ETH/XRP/DOGE/SOL). OKX microstructure, 4 z-scored signals (TFI/OBI/MACD/OI), Half-Kelly sizing. Data-collection thresholds in Phase 2. **Batch 5 (B5-DS-3):** 2 `date.today()` sites replaced with `_today_pdt()`. **Batch 5 (B5-DS-4):** `CRYPTO_15M_SERIES` constant removed — now imported from `utils.py` canonical definition. NOTE: ws_feed.py retains local copy (P2 open). |
 | `crypto_threshold_daily.py` | Entry | Disabled (`CRYPTO_THRESHOLD_DAILY_ENABLED=False`) | Daily above/below (BTC/ETH, SOL gated). 5-signal composite (momentum, funding, ATR, OI regime, Polymarket). Bypasses `should_enter()`. |
 | `crypto_band_daily.py` | Entry | Disabled (`CRYPTO_BAND_DAILY_ENABLED=False`) | Daily band/range (BTC/ETH/XRP/SOL/DOGE). Log-normal probability model. Uses `should_enter()` for sizing. Trade execution isolated in `_execute_band_trades()` with portalocker cap lock (ISSUE-053). |
 | `crypto_long_horizon.py` | Entry | Active | Monthly/annual Kalshi markets (KXBTCMAXM, KXBTCMAXY, etc.). Fear & Greed regime + log-normal touch probability. $50 hard cap, 1/6 Kelly. Called in `full` mode from `ruppert_cycle.py`. |
@@ -177,7 +177,7 @@ External Data Sources
 | `main.py` | Orchestration | Active | Per-module scan runners for crypto band, crypto 1D. Interfaces `should_enter()` → `Trader`. |
 | `ws_feed.py` | Exit | Active | Persistent WS process. Real-time price cache updates, stop-loss/gain exit evaluation, fallback poll loop for missed 15m windows. |
 | `position_tracker.py` | Exit | Active | Core exit engine. Tracks open positions in memory + disk. Stop-loss tiers (15m and daily). Threshold exits. Settlement detection. |
-| `settlement_checker.py` | Exit | Scheduled | Batch settlement resolver. 2× daily (11PM, 8AM PDT). Catches positions missed by WS path. FIFO exit accounting. **Batch 2 (B2-DS-1):** now uses `_pdt_today()` for date comparisons. **Batch 5 (B5-DS-1):** hold_duration uses `datetime.now(timezone.utc)`; naive-tz fallback added. |
+| `settlement_checker.py` | Exit | Scheduled | Batch settlement resolver. Every 30 minutes, 24/7 (Task Scheduler PT30M). Catches positions missed by WS path. FIFO exit accounting. **Batch 2 (B2-DS-1):** now uses `_pdt_today()` for date comparisons. **Batch 5 (B5-DS-1):** hold_duration uses `datetime.now(timezone.utc)`; naive-tz fallback added. |
 | `market_cache.py` | Shared | Active | In-memory price store. WS feed writes; all modules read. Staleness detection. Thread-safe. Persists to `price_cache.json`. |
 | `circuit_breaker.py` | Risk | Active | Per-module consecutive loss tracking + global daily loss circuit breaker. State file `circuit_breaker_state.json`. Auto-resets on PDT day boundary. |
 | `prediction_scorer.py` | Analytics | Active | Post-hoc join of buy records + settle records → `scored_predictions.jsonl`. Triggered by `settlement_checker`. |
