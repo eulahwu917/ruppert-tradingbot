@@ -54,24 +54,16 @@ def check_threshold_consistency():
         cfg_min_conf = getattr(config, 'MIN_CONFIDENCE', None)
 
         if isinstance(cfg_min_conf, dict):
-            cfg_weather_conf = cfg_min_conf.get('weather', None)
-            if cfg_weather_conf and abs(cfg_weather_conf - strat_min_conf) > 0.01:
-                warnings.append(
-                    f"MIN_CONFIDENCE mismatch: strategy.py={strat_min_conf} vs config.py[weather]={cfg_weather_conf}"
-                )
+            # Compare per-module confidence values if dict
+            for mod_key, mod_conf in cfg_min_conf.items():
+                if mod_conf and abs(mod_conf - strat_min_conf) > 0.01:
+                    warnings.append(
+                        f"MIN_CONFIDENCE mismatch: strategy.py={strat_min_conf} vs config.py[{mod_key}]={mod_conf}"
+                    )
         elif cfg_min_conf and abs(cfg_min_conf - strat_min_conf) > 0.01:
             warnings.append(
                 f"MIN_CONFIDENCE mismatch: strategy.py={strat_min_conf} vs config.py={cfg_min_conf}"
             )
-
-        # Check weather edge alignment
-        strat_weather_edge = strategy.MIN_EDGE.get('weather')
-        cfg_weather_edge = getattr(config, 'MIN_EDGE_THRESHOLD', None)
-        if strat_weather_edge and cfg_weather_edge:
-            if abs(strat_weather_edge - cfg_weather_edge) > 0.01:
-                warnings.append(
-                    f"Weather MIN_EDGE mismatch: strategy.py={strat_weather_edge} vs config.py={cfg_weather_edge}"
-                )
 
         # Check DEMO_MODE is True
         demo_mode = getattr(config, 'DEMO_MODE', None)
@@ -92,8 +84,6 @@ def check_task_scheduler():
         "Ruppert-Demo-10PM",
         "Ruppert-Crypto-10AM",
         "Ruppert-Crypto-6PM",
-        "Ruppert-Weather-7PM",
-        "Ruppert-Econ-Prescan",
         "Ruppert-PostTrade-Monitor",
         "Ruppert-DailyProgressReport",
         "Ruppert-DailyHealthCheck",

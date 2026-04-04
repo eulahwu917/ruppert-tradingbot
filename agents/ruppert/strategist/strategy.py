@@ -2,7 +2,7 @@
 Trading Strategy Layer — Module-Agnostic Capital Deployment
 
 This module is the single source of truth for ALL sizing, entry, add-on, and
-exit decisions. Market modules (weather, crypto, etc.) return *signals*; they
+exit decisions. Market modules (crypto, etc.) return *signals*; they
 never touch dollar amounts. Strategy converts signals → dollar decisions.
 
 Signal dict contract (produced by each module):
@@ -11,7 +11,7 @@ Signal dict contract (produced by each module):
         'win_prob':            float,   # model's estimated win probability
         'confidence':          float,   # 0–1 model confidence score
         'hours_to_settlement': float,   # hours until market settles
-        'module':              str,     # 'weather' | 'crypto'
+        'module':              str,     # 'crypto'
         'vol_ratio':           float,   # optional; 1.0 = normal vol (default)
         'open_position_value': float,   # REQUIRED: total open position value ($); fail-closed if absent
     }
@@ -39,8 +39,6 @@ import config
 # Module-specific thresholds (mirrors config.py constants)
 # ---------------------------------------------------------------------------
 MIN_EDGE = {
-    'weather_band':               getattr(config, 'MIN_EDGE_WEATHER_BAND',      0.12),
-    'weather_threshold':          getattr(config, 'MIN_EDGE_WEATHER_THRESHOLD',  0.12),
     # crypto band (formerly crypto_1h_band) — per-asset
     'crypto_band_daily_btc':      getattr(config, 'MIN_EDGE_CRYPTO_BAND_DAILY',      0.12),
     'crypto_band_daily_eth':      getattr(config, 'MIN_EDGE_CRYPTO_BAND_DAILY',      0.12),
@@ -53,11 +51,6 @@ MIN_EDGE = {
     # crypto threshold daily (formerly crypto_1h_dir) — per-asset
     'crypto_threshold_daily_btc': getattr(config, 'MIN_EDGE_CRYPTO_THRESHOLD_DAILY', 0.08),
     'crypto_threshold_daily_eth': getattr(config, 'MIN_EDGE_CRYPTO_THRESHOLD_DAILY', 0.08),
-    'geo':               getattr(config, 'MIN_EDGE_GEO',               0.15),
-    'econ_cpi':          getattr(config, 'MIN_EDGE_ECON_CPI',          0.12),
-    'econ_unemployment': getattr(config, 'MIN_EDGE_ECON_UNEMPLOYMENT', 0.12),
-    'econ_fed_rate':     getattr(config, 'MIN_EDGE_ECON_FED_RATE',     0.12),
-    'econ_recession':    getattr(config, 'MIN_EDGE_ECON_RECESSION',    0.12),
 }
 MIN_CONFIDENCE   = getattr(config, 'STRATEGY_MIN_CONFIDENCE_FLOOR', 0.25)
 
@@ -225,7 +218,7 @@ def calculate_position_size(edge: float, win_prob: float, capital: float,
         return 0.0
 
     # Cap win_prob at 0.999 to avoid division-by-zero in Kelly formula
-    # when NOAA gives 100% probability — these are our highest-edge trades.
+    # when model gives 100% probability — these are our highest-edge trades.
     if win_prob >= 0.999:
         win_prob = 0.999
 
@@ -573,7 +566,7 @@ def should_exit(current_bid: float, entry_price: float,
         signal:              Latest signal from the module.
         entry_signal:        Signal that triggered the original entry.
         hours_to_settlement: Hours until market settles.
-        module:              Module name ('weather'|'crypto') — reserved for
+        module:              Module name ('crypto') — reserved for
                              future module-specific overrides.
 
     Returns:
@@ -649,16 +642,9 @@ def get_strategy_summary() -> dict:
         'max_position_pct':         getattr(_cfg, 'MAX_POSITION_PCT', 0.01),
         'max_add_allocation':       getattr(_cfg, 'MAX_ADD_ALLOCATION', 50.0),
         'daily_cap_ratio':          DAILY_CAP_RATIO,
-        'min_edge_weather_band':         MIN_EDGE.get('weather_band', 0.12),
-        'min_edge_weather_threshold':    MIN_EDGE.get('weather_threshold', 0.12),
         'min_edge_crypto_band_daily':          MIN_EDGE.get('crypto_band_daily_btc', 0.12),
         'min_edge_crypto_dir_15m':             MIN_EDGE.get('crypto_dir_15m_btc', 0.12),
         'min_edge_crypto_threshold_daily':     MIN_EDGE.get('crypto_threshold_daily_btc', 0.08),
-        'min_edge_geo':                  MIN_EDGE.get('geo', 0.15),
-        'min_edge_econ_cpi':             MIN_EDGE.get('econ_cpi', 0.12),
-        'min_edge_econ_unemployment':    MIN_EDGE.get('econ_unemployment', 0.12),
-        'min_edge_econ_fed_rate':        MIN_EDGE.get('econ_fed_rate', 0.12),
-        'min_edge_econ_recession':       MIN_EDGE.get('econ_recession', 0.12),
         'min_confidence':           MIN_CONFIDENCE,
         'min_hours_to_entry':       MIN_HOURS_ENTRY,
         'min_hours_to_add':         MIN_HOURS_ADD,
@@ -771,11 +757,11 @@ if __name__ == '__main__':
 
     good_signal = {
         'edge': 0.20, 'win_prob': 0.70, 'confidence': 0.80,
-        'hours_to_settlement': 6.0, 'module': 'weather', 'vol_ratio': 1.0,
+        'hours_to_settlement': 6.0, 'module': 'crypto_band_daily_btc', 'vol_ratio': 1.0,
         'open_position_value': 0.0,
     }
     e1 = should_enter(good_signal, CAPITAL, deployed_today=0.0)
-    print(f"  Good weather signal:  {e1}")
+    print(f"  Good crypto signal:   {e1}")
 
     low_edge = {**good_signal, 'edge': 0.05}
     e2 = should_enter(low_edge, CAPITAL, deployed_today=0.0)
@@ -828,25 +814,25 @@ if __name__ == '__main__':
     cur_sig   = {**good_signal, 'edge': 0.18}   # similar to entry
     entry_sig2 = {**good_signal, 'edge': 0.20}
 
-    x1 = should_exit(96, 60, cur_sig, entry_sig2, 5.0, 'weather')
+    x1 = should_exit(96, 60, cur_sig, entry_sig2, 5.0, 'crypto_band_daily_btc')
     print(f"  bid=96 (95¢ rule):      {x1}")
 
-    x2 = should_exit(94, 60, cur_sig, entry_sig2, 5.0, 'weather')
+    x2 = should_exit(94, 60, cur_sig, entry_sig2, 5.0, 'crypto_band_daily_btc')
     # gain = (94-60)/(100-60) = 34/40 = 0.85 ≥ 0.70
     print(f"  bid=94, entry=60 (70%): {x2}")
 
-    x3 = should_exit(70, 60, cur_sig, entry_sig2, 0.2, 'weather')
+    x3 = should_exit(70, 60, cur_sig, entry_sig2, 0.2, 'crypto_band_daily_btc')
     print(f"  0.2h to settlement:     {x3}  (near-settlement hold)")
 
     rev_sig = {**good_signal, 'edge': 0.00}   # reversal = 0.20
-    x4 = should_exit(65, 60, rev_sig, entry_sig2, 3.0, 'weather')
+    x4 = should_exit(65, 60, rev_sig, entry_sig2, 3.0, 'crypto_band_daily_btc')
     print(f"  Reversal 0.20 (half):   {x4}")
 
     rev_sig2 = {**good_signal, 'edge': -0.20}  # reversal = 0.40 → full
-    x5 = should_exit(65, 60, rev_sig2, entry_sig2, 3.0, 'weather')
+    x5 = should_exit(65, 60, rev_sig2, entry_sig2, 3.0, 'crypto_band_daily_btc')
     print(f"  Reversal 0.40 (full):   {x5}")
 
-    x6 = should_exit(65, 60, cur_sig, entry_sig2, 5.0, 'weather')
+    x6 = should_exit(65, 60, cur_sig, entry_sig2, 5.0, 'crypto_band_daily_btc')
     print(f"  No exit trigger (hold): {x6}")
 
     # ------------------------------------------------------------------

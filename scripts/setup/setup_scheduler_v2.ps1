@@ -44,12 +44,6 @@ Write-Host "  Kept: Ruppert-Demo-10PM (no changes)"
 # ADD new tasks
 Write-Host "[3] Adding new tasks..." -ForegroundColor Yellow
 
-$actionWeather = New-ScheduledTaskAction -Execute $PythonExe -Argument "ruppert_cycle.py weather_only" -WorkingDirectory $ScriptDir
-$triggerWeather = New-ScheduledTaskTrigger -Daily -At 7:00PM
-try { Unregister-ScheduledTask -TaskName "Ruppert-Weather-7PM" -Confirm:$false -ErrorAction SilentlyContinue } catch {}
-Register-ScheduledTask -TaskName "Ruppert-Weather-7PM" -Action $actionWeather -Trigger $triggerWeather -Description "Ruppert weather_only 7pm" -RunLevel Highest
-Write-Host "  Added: Ruppert-Weather-7PM"
-
 $actionCrypto10 = New-ScheduledTaskAction -Execute $PythonExe -Argument "ruppert_cycle.py crypto_only" -WorkingDirectory $ScriptDir
 $triggerCrypto10 = New-ScheduledTaskTrigger -Daily -At 10:00AM
 try { Unregister-ScheduledTask -TaskName "Ruppert-Crypto-10AM" -Confirm:$false -ErrorAction SilentlyContinue } catch {}
@@ -61,12 +55,6 @@ $triggerCrypto6 = New-ScheduledTaskTrigger -Daily -At 6:00PM
 try { Unregister-ScheduledTask -TaskName "Ruppert-Crypto-6PM" -Confirm:$false -ErrorAction SilentlyContinue } catch {}
 Register-ScheduledTask -TaskName "Ruppert-Crypto-6PM" -Action $actionCrypto6 -Trigger $triggerCrypto6 -Description "Ruppert crypto_only 6pm" -RunLevel Highest
 Write-Host "  Added: Ruppert-Crypto-6PM"
-
-$actionEcon = New-ScheduledTaskAction -Execute $PythonExe -Argument "ruppert_cycle.py econ_prescan" -WorkingDirectory $ScriptDir
-$triggerEcon = New-ScheduledTaskTrigger -Daily -At 5:00AM
-try { Unregister-ScheduledTask -TaskName "Ruppert-Econ-Prescan" -Confirm:$false -ErrorAction SilentlyContinue } catch {}
-Register-ScheduledTask -TaskName "Ruppert-Econ-Prescan" -Action $actionEcon -Trigger $triggerEcon -Description "Ruppert econ_prescan 5am" -RunLevel Highest
-Write-Host "  Added: Ruppert-Econ-Prescan"
 
 # ADD post-trade monitor (every 30 min, 6am-11pm)
 # Phase 4: references agent module path directly, not root shim
@@ -81,11 +69,9 @@ Register-ScheduledTask -TaskName "Ruppert-PostTrade-Monitor" -Action $actionMoni
 Write-Host "  Added: Ruppert-PostTrade-Monitor (every 30min)"
 
 Write-Host "=== Done ===" -ForegroundColor Green
-Write-Host "  5:00am  Ruppert-Econ-Prescan"
 Write-Host "  6:00am  Ruppert-PostTrade-Monitor (every 30min until 11pm)"
 Write-Host "  7:00am  Ruppert-Demo-7AM (full)"
 Write-Host " 10:00am  Ruppert-Crypto-10AM (crypto_only)"
 Write-Host "  3:00pm  Ruppert-Demo-3PM (full)"
 Write-Host "  6:00pm  Ruppert-Crypto-6PM (crypto_only)"
-Write-Host "  7:00pm  Ruppert-Weather-7PM (weather_only)"
 Write-Host " 10:00pm  Ruppert-Demo-10PM (check)"

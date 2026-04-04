@@ -42,7 +42,7 @@ def log_prediction(domain: str, ticker: str, predicted_prob: float,
     Call this immediately when a trade is placed.
 
     Args:
-        domain:         'weather' | 'crypto' | 'fed' | 'geo' | 'econ'
+        domain:         'crypto' (or sub-domain like 'crypto_band_daily')
         ticker:         Kalshi market ticker
         predicted_prob: Model's estimated WIN probability (0-1)
         market_price:   Market price at time of entry (0-1)
@@ -152,7 +152,6 @@ def get_domain_brier_summary() -> dict:
 
     Returns:
         {
-          'weather': {'count': 12, 'brier_mean': 0.18, 'threshold_pct': 40},
           'crypto':  {'count': 5,  'brier_mean': 0.22, 'threshold_pct': 17},
           ...
         }

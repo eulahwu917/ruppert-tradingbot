@@ -409,7 +409,6 @@ def run_long_horizon_scan(client, dry_run: bool = True, traded_tickers: set = No
             'action': 'buy',
             'yes_price': opp['yes_ask'],
             'market_prob': opp['market_prob'],
-            'noaa_prob': None,
             'edge': opp['edge'],
             'size_dollars': actual_cost,
             'contracts': contracts,

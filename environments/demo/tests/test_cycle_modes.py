@@ -7,7 +7,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-REQUIRED_MODES = ['check', 'econ_prescan', 'weather_only', 'crypto_only', 'report']
+REQUIRED_MODES = ['check', 'crypto_only', 'report']
 FALLTHROUGH_MODES = {'full', 'smart'}
 
 
@@ -34,8 +34,6 @@ def test_mode_handler_functions_exist():
     mod = _import_cycle()
     expected = {
         'check': 'run_check_mode',
-        'econ_prescan': 'run_econ_prescan_mode',
-        'weather_only': 'run_weather_only_mode',
         'crypto_only': 'run_crypto_only_mode',
         'report': 'run_report_mode',
     }

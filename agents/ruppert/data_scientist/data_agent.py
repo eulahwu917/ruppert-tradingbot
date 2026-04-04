@@ -53,18 +53,6 @@ REQUIRED_FIELDS = ['ticker', 'side', 'size_dollars', 'module', 'ts_or_timestamp'
 _REAL_REQUIRED = ['ticker', 'side', 'size_dollars', 'module']
 
 TICKER_MODULE_MAP = {
-    # ── Weather ──────────────────────────────────────────────────────────────
-    # NOTE: KXHIGH* can be weather_band (-B*) or weather_threshold (-T*).
-    # Prefix-only maps cannot distinguish. These default to 'weather_band'.
-    # check_module_mismatch() should migrate to classify_module() for full accuracy.
-    'KXHIGHT':   'weather_band', 'KXHIGHNY':  'weather_band',
-    'KXHIGHMI':  'weather_band', 'KXHIGHCH':  'weather_band',
-    'KXHIGHDE':  'weather_band', 'KXHIGHLAX': 'weather_band',
-    'KXHIGHAUS': 'weather_band', 'KXHIGHSE':  'weather_band',
-    'KXHIGHSF':  'weather_band', 'KXHIGHPH':  'weather_band',
-    'KXHIGHLV':  'weather_band', 'KXHIGHSA':  'weather_band',
-    'KXHIGHMIA': 'weather_band', 'KXHIGHAT':  'weather_band',
-
     # ── Crypto 15m direction ─────────────────────────────────────────────────
     # Must appear BEFORE base prefixes (KXBTC, KXETH, etc.)
     'KXBTC15M':  'crypto_dir_15m_btc',  'KXETH15M':  'crypto_dir_15m_eth',
@@ -83,16 +71,6 @@ TICKER_MODULE_MAP = {
     'KXBTC':     'crypto_band_daily_btc',  'KXETH':  'crypto_band_daily_eth',
     'KXXRP':     'crypto_band_daily_xrp',  'KXDOGE': 'crypto_band_daily_doge',
     'KXSOL':     'crypto_band_daily_sol',
-
-    # ── Econ subcategories ────────────────────────────────────────────────────
-    'KXCPI':     'econ_cpi',          # CPI
-    'KXPCE':     'econ_cpi',          # PCE (same bucket as CPI)
-    'KXJOBS':    'econ_unemployment',  # Jobs report
-    'KXJOBLSS':  'econ_unemployment',  # KXJOBLESSCLAIMS prefix
-    'KXUE':      'econ_unemployment',  # Unemployment rate
-    'KXFED':     'econ_fed_rate',
-    'KXFOMC':    'econ_fed_rate',
-    'KXWRECSS':  'econ_recession',
 
     # ── Crypto long-horizon ───────────────────────────────────────────────────
     'KXBTCMAX':  'crypto_long', 'KXBTCMIN':  'crypto_long',
@@ -326,8 +304,6 @@ def check_daily_cap_violations(trades_today: list[dict]) -> list[dict]:
     # + circuit breaker).  Only build caps dict from constants that still exist
     # in config — if the constant is missing, the cap is disabled.
     _cap_map = {
-        'weather_band':               'WEATHER_BAND_DAILY_CAP_PCT',
-        'weather_threshold':          'WEATHER_THRESHOLD_DAILY_CAP_PCT',
         'crypto_band_daily_btc':      'CRYPTO_1H_BAND_DAILY_CAP_PCT',
         'crypto_band_daily_eth':      'CRYPTO_1H_BAND_DAILY_CAP_PCT',
         'crypto_band_daily_xrp':      'CRYPTO_1H_BAND_DAILY_CAP_PCT',
@@ -344,11 +320,6 @@ def check_daily_cap_violations(trades_today: list[dict]) -> list[dict]:
         'crypto_dir_15m_xrp':         'CRYPTO_15M_DIR_DAILY_CAP_PCT',
         'crypto_dir_15m_doge':        'CRYPTO_15M_DIR_DAILY_CAP_PCT',
         'crypto_long':                'LONG_HORIZON_DAILY_CAP_PCT',
-        'econ_cpi':                   'ECON_CPI_DAILY_CAP_PCT',
-        'econ_unemployment':          'ECON_UNEMPLOYMENT_DAILY_CAP_PCT',
-        'econ_fed_rate':              'ECON_FED_RATE_DAILY_CAP_PCT',
-        'econ_recession':             'ECON_RECESSION_DAILY_CAP_PCT',
-        'geo':                        'GEO_DAILY_CAP_PCT',
     }
     caps = {}
     for module, attr in _cap_map.items():
@@ -399,9 +370,9 @@ def compute_pnl_from_logs() -> float:
 
 
 def _parse_ticker_expiry(ticker: str) -> date | None:
-    """Parse expiry date from Kalshi weather ticker format.
+    """Parse expiry date from Kalshi ticker format.
 
-    Example: KXHIGHTSEA-26MAR29-B46.5  ->  date(2026, 3, 29)
+    Example: KXBTC-26MAR29-B46.5  ->  date(2026, 3, 29)
     Format: {EVENT}-{YY}{MON}{DD}-{STRIKE}
     """
     MONTH_MAP = {
@@ -574,13 +545,10 @@ def check_dashboard_consistency(open_positions: list = None) -> list[dict]:
 def check_decision_log_orphans() -> list[dict]:
     """Check for decision log entries with no matching trade.
 
-    Scans all known decision log files (crypto 15m, weather, econ, fed, crypto_long).
+    Scans all known decision log files (crypto 15m, crypto_long).
     """
     decision_paths = [
         LOGS_DIR / 'decisions_15m.jsonl',
-        LOGS_DIR / 'decisions_weather.jsonl',
-        LOGS_DIR / 'decisions_econ.jsonl',
-        LOGS_DIR / 'decisions_fed.jsonl',
         LOGS_DIR / 'decisions_crypto_long.jsonl',
     ]
     decisions = []

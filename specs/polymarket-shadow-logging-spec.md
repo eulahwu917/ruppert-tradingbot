@@ -8,13 +8,13 @@
 
 ## Overview
 
-Log Polymarket consensus price at every trade entry decision across all five active modules. Data is appended to existing JSONL logs as new nullable fields. Polymarket must never block a trade: all fetches are wrapped in `try/except`, fallback is `None` for all fields.
+Log Polymarket consensus price at every trade entry decision across all four active modules. Data is appended to existing JSONL logs as new nullable fields. Polymarket must never block a trade: all fetches are wrapped in `try/except`, fallback is `None` for all fields.
 
 ---
 
 ## Prerequisites — Import Block
 
-All five modules must import from the shared client. For modules that live outside the `agents/` tree (`environments/live/`), add a `sys.path` shim **before** the import so the workspace root is on the path.
+All four modules must import from the shared client. For modules that live outside the `agents/` tree (`environments/live/`), add a `sys.path` shim **before** the import so the workspace root is on the path.
 
 ### Shim (add to `environments/live/` files only, near top of file before other imports)
 
@@ -27,7 +27,7 @@ if str(_WS_ROOT) not in _sys.path:
 ```
 
 `parents[2]` is correct for files at depth `environments/live/<file>.py` (2 levels up = workspace root).  
-`crypto_15m.py` and `sports_odds_collector.py` already have their own `sys.path` shims — no new shim needed.
+`crypto_15m.py` already has its own `sys.path` shim — no new shim needed.
 
 ### Import line (add to each module)
 
@@ -339,99 +339,7 @@ No changes to the log-write block — it already writes the full `flagged` dict.
 
 ---
 
-## Module 3 — sports_odds_collector.py
-
-**File:** `agents/ruppert/researcher/sports_odds_collector.py`
-
-### 3a. Add import
-
-`sports_odds_collector.py` already defines `WORKSPACE_ROOT = Path(r"C:\Users\David Wu\.openclaw\workspace")` and the file is inside the workspace tree under `agents/`, so the existing `sys.path` setup (if any) may already cover it. To be safe, use the canonical shim pattern. Add after the existing imports at top of file:
-
-```python
-import sys as _sys
-_WS_ROOT_S = str(Path(__file__).resolve().parents[3])   # workspace root (3 levels up from agents/ruppert/researcher/)
-if _WS_ROOT_S not in _sys.path:
-    _sys.path.insert(0, _WS_ROOT_S)
-
-from agents.ruppert.data_analyst.polymarket_client import get_markets_by_keyword
-```
-
-> `parents[3]` is correct: `sports_odds_collector.py` lives at `agents/ruppert/researcher/sports_odds_collector.py` → 3 levels up = workspace root.
-
-### 3b. Modify `run_collection()` — inside the odds_snapshot construction
-
-**Location:** The section that builds `entry = { "event_type": "odds_snapshot", ... }` and `entry = { "event_type": "kalshi_only_snapshot", ... }`.
-
-Before each `log_entry(entry)` call for an `odds_snapshot` or `kalshi_only_snapshot`, add the Polymarket lookup:
-
-```python
-        # Shadow: Polymarket sports price
-        _poly_yes_price    = None
-        _poly_market_title = None
-        _poly_volume_24h   = None
-        try:
-            _query = f"{team_a} {team_b}".strip()
-            if not _query.strip():
-                _query = kg["event_ticker"]
-            _poly_results = get_markets_by_keyword(_query, limit=5)
-            if not _poly_results and team_a:
-                _poly_results = get_markets_by_keyword(team_a, limit=5)
-            if _poly_results:
-                _best_poly = max(_poly_results, key=lambda m: m.get("volume_24h", 0))
-                _poly_yes_price    = _best_poly.get("yes_price")
-                _poly_market_title = _best_poly.get("question")
-                _poly_volume_24h   = _best_poly.get("volume_24h")
-        except Exception:
-            pass
-```
-
-Then add the three fields to the `entry` dict (for **both** `odds_snapshot` and `kalshi_only_snapshot` branches):
-
-```python
-            "polymarket_yes_price":    _poly_yes_price,
-            "polymarket_market_title": _poly_market_title,
-            "polymarket_volume_24h":   _poly_volume_24h,
-```
-
-**Exact placement in the odds_snapshot branch:**
-```python
-        entry = {
-            "event_type": "odds_snapshot",
-            # ... existing fields unchanged ...
-            "tradeable": abs(delta_a) >= 0.03,
-            "vegas_home_team": vegas_game["home_team"],
-            "vegas_away_team": vegas_game["away_team"],
-            # NEW:
-            "polymarket_yes_price":    _poly_yes_price,
-            "polymarket_market_title": _poly_market_title,
-            "polymarket_volume_24h":   _poly_volume_24h,
-        }
-```
-
-**Exact placement in the kalshi_only_snapshot branch:**
-```python
-        entry = {
-            "event_type": "kalshi_only_snapshot",
-            # ... existing fields unchanged ...
-            "note": "Vegas line not yet posted",
-            # NEW:
-            "polymarket_yes_price":    _poly_yes_price,
-            "polymarket_market_title": _poly_market_title,
-            "polymarket_volume_24h":   _poly_volume_24h,
-        }
-```
-
-### Fields added to `environments/demo/logs/sports_odds_log.jsonl`
-
-| Field | Type | Notes |
-|-------|------|-------|
-| `polymarket_yes_price` | `float \| null` | Team A YES probability on Polymarket |
-| `polymarket_market_title` | `str \| null` | Matched market question |
-| `polymarket_volume_24h` | `float \| null` | 24h volume in USD |
-
----
-
-## Module 4 — fed_client.py
+## Module 3 — fed_client.py
 
 **File:** `environments/live/fed_client.py`
 
@@ -439,7 +347,7 @@ Then add the three fields to the `entry` dict (for **both** `odds_snapshot` and 
 
 `fed_client.py` already has deep Polymarket integration via `get_polymarket_fomc_probabilities()` (a bespoke slug-based FOMC fetch). This shadow logging adds a **second, simpler** Polymarket lookup using the shared `get_markets_by_keyword` client — providing a keyword-search-based consensus price alongside the existing slug-based probability. Both coexist.
 
-### 4a. Add sys.path shim and import
+### 3a. Add sys.path shim and import
 
 Add near the top of file after existing imports:
 
@@ -455,7 +363,7 @@ from agents.ruppert.data_analyst.polymarket_client import get_markets_by_keyword
 
 Using `_pm_get_markets` alias avoids any collision with local function names.
 
-### 4b. Add helper function
+### 3b. Add helper function
 
 Add near the bottom of the file, before `run_fed_scan()`:
 
@@ -480,7 +388,7 @@ def _get_polymarket_fed_shadow() -> tuple:
         return None, None, None
 ```
 
-### 4c. Add shadow fields to `get_fed_signal()`
+### 3c. Add shadow fields to `get_fed_signal()`
 
 **Location:** Inside `get_fed_signal()`, immediately before `_save_scan_result(best_signal)` at the end of the function (just before the final `return best_signal`).
 
@@ -519,11 +427,11 @@ Only call `_get_polymarket_fed_shadow()` on the **success path** (immediately be
 
 ---
 
-## Module 5 — economics_scanner.py
+## Module 4 — economics_scanner.py
 
 **File:** `environments/live/economics_scanner.py`
 
-### 5a. Add sys.path shim and import
+### 4a. Add sys.path shim and import
 
 After existing imports at top of file:
 
@@ -537,7 +445,7 @@ if str(_WS_ROOT) not in _sys.path:
 from agents.ruppert.data_analyst.polymarket_client import get_markets_by_keyword as _pm_get_markets
 ```
 
-### 5b. Series → keyword mapping
+### 4b. Series → keyword mapping
 
 Add as a module-level constant near the `ACTIVE_ECON_SERIES` list:
 
@@ -552,7 +460,7 @@ _SERIES_POLY_KEYWORD: dict[str, str] = {
 }
 ```
 
-### 5c. Modify `analyze_market()`
+### 4c. Modify `analyze_market()`
 
 **Location:** Inside `analyze_market()`, after the early-return checks (`if volume < MIN_VOLUME`, etc.) and before `return _build_opportunity(...)`.
 
@@ -586,7 +494,7 @@ Then pass the three values to `_build_opportunity`:
     )
 ```
 
-### 5d. Modify `_build_opportunity()`
+### 4d. Modify `_build_opportunity()`
 
 **Signature change:**
 ```python
@@ -629,7 +537,6 @@ def _build_opportunity(
 |--------|-----------|---------|
 | crypto_15m | `agents/ruppert/trader/crypto_15m.py` | Remove placeholder fn, add import, extend `_log_decision` signature, add fetch block after signals, update 2 log calls |
 | geo | `environments/live/geopolitical_scanner.py` | Add sys.path shim, import, bulk pre-fetch before loop, per-market match inside loop, 3 fields in flagged dict |
-| sports | `agents/ruppert/researcher/sports_odds_collector.py` | Add sys.path shim, import, per-matchup lookup in `run_collection`, 3 fields in both entry dict branches |
 | fed | `environments/live/fed_client.py` | Add sys.path shim, import, helper fn `_get_polymarket_fed_shadow`, 3 fields in signal dict (None in early-exit paths, live fetch only on success path) |
 | econ | `environments/live/economics_scanner.py` | Add sys.path shim, import, keyword map constant, fetch in `analyze_market`, 3 kwargs through `_build_opportunity` |
 
@@ -637,13 +544,12 @@ def _build_opportunity(
 
 ## Acceptance Checklist
 
-- [ ] All 5 modules log Polymarket fields on every entry/evaluation  
-- [ ] None of the 5 modules change any signal weights or decision logic  
-- [ ] API failure in any module → `null` fields, trade proceeds normally  
-- [ ] `decisions_15m.jsonl` entries include `polymarket_yes_price` and `polymarket_fetched_at`  
-- [ ] Sports `odds_snapshot` records include `polymarket_yes_price`, `polymarket_market_title`, `polymarket_volume_24h`  
-- [ ] `get_polymarket_yes_prob` stub removed; replaced with `get_crypto_consensus` from shared client  
-- [ ] All five modules import from `agents.ruppert.data_analyst.polymarket_client`  
+- [ ] All 4 modules log Polymarket fields on every entry/evaluation
+- [ ] None of the 4 modules change any signal weights or decision logic
+- [ ] API failure in any module → `null` fields, trade proceeds normally
+- [ ] `decisions_15m.jsonl` entries include `polymarket_yes_price` and `polymarket_fetched_at`
+- [ ] `get_polymarket_yes_prob` stub removed; replaced with `get_crypto_consensus` from shared client
+- [ ] All four modules import from `agents.ruppert.data_analyst.polymarket_client`  
 - [ ] Staleness guard in crypto_15m: `null` if age > 600s  
 - [ ] No `try/except` missing — every Polymarket call is wrapped  
 - [ ] `None` is logged (not field omitted) when unavailable  

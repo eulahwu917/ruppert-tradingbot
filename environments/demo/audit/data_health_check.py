@@ -142,40 +142,6 @@ def check_kraken(results: dict):
         results["kraken"] = "fail"
 
 
-def check_fred(results: dict):
-    """Check FRED DFEDTARU returns a sensible rate."""
-    try:
-        r = requests.get(
-            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU", timeout=10
-        )
-        r.raise_for_status()
-        lines = r.text.strip().splitlines()
-        rate = float(lines[-1].split(",")[1])
-        if not (0.0 <= rate <= 20.0):
-            _push_alert(f"FRED rate anomaly: {rate}%")
-            results["fred"] = "warn"
-        else:
-            results["fred"] = "ok"
-    except Exception as e:
-        _push_alert(f"FRED check failed: {e}")
-        results["fred"] = "fail"
-
-
-def check_cme(results: dict):
-    """Check CME OAuth token is still valid."""
-    try:
-        from fed_client import _get_cme_oauth_token
-        token = _get_cme_oauth_token()
-        if not token:
-            _push_alert("CME OAuth token unavailable")
-            results["cme"] = "warn"
-        else:
-            results["cme"] = "ok"
-    except Exception as e:
-        _push_alert(f"CME check failed: {e}")
-        results["cme"] = "fail"
-
-
 def check_openmeteo(results: dict):
     """Check Open-Meteo ensemble returns members for Miami."""
     try:
@@ -223,8 +189,6 @@ def main():
 
     check_nws(results)
     check_kraken(results)
-    check_fred(results)
-    check_cme(results)
     check_openmeteo(results)
     check_capital(results)
 

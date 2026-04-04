@@ -5,8 +5,6 @@ Modes:
   full          — scan + positions + smart money + execute (7am, 3pm)
   check         — positions only (10pm)
   smart         — smart money refresh only (lightweight)
-  econ_prescan  — position check + econ scan only, skip if no release today (5am)
-  weather_only  — position check + weather scan only (7pm)
   crypto_only   — position check + crypto scan only (10am, 6pm)
   crypto_1d     — daily crypto above/below scan only (09:30 ET, 13:30 ET)
   report        — 7am P&L summary + loss detection
@@ -329,9 +327,6 @@ def run_position_check(client, state):
     print("\n[1] Position check...")
     actions_taken = []
     try:
-        from agents.ruppert.data_analyst.openmeteo_client import get_full_weather_signal
-        from agents.ruppert.strategist.edge_detector import parse_date_from_ticker, parse_threshold_from_ticker
-
         from agents.ruppert.env_config import get_paths as _get_paths_pc
         # Load last N days of trade records to catch multi-day open positions
         _LOOKBACK_DAYS = getattr(config, 'POSITION_CHECK_LOOKBACK_DAYS', 7)
@@ -360,7 +355,7 @@ def run_position_check(client, state):
         for pos in open_positions:
             ticker = pos.get('ticker', '')
             source = pos.get('source', 'bot')
-            if source not in ('weather', 'bot', 'crypto', 'fed', 'geo'): continue
+            if source not in ('bot', 'crypto'): continue
             if ticker in state.traded_tickers: continue
 
             # Get current market price
@@ -378,91 +373,9 @@ def run_position_check(client, state):
                 contracts = pos.get('contracts', 0)
                 pnl     = round((cur_p - entry_p) * contracts / 100, 2)
 
-                # Weather: check ensemble if close to expiry
-                alert_msg = None
-                if source in ('weather', 'bot'):
-                    try:
-                        # Derive correct args for get_full_weather_signal from the ticker
-                        series_ticker = ticker.split('-')[0].upper()  # e.g. KXHIGHMIA
-                        threshold_f = parse_threshold_from_ticker(ticker)   # e.g. 85.5
-                        target_date = parse_date_from_ticker(ticker)        # e.g. date(2026,3,12)
-                        if threshold_f is not None:
-                            sig = get_full_weather_signal(series_ticker, threshold_f, target_date)
-                            # forecast: use tomorrow_high if not same-day, else today_high
-                            conditions = sig.get('conditions', {})
-                            if sig.get('is_same_day'):
-                                forecast = conditions.get('today_high_f') or 0
-                            else:
-                                forecast = conditions.get('tomorrow_high_f') or 0
-                            margin = abs(forecast - threshold_f) if forecast else 999
-                            ens_prob = sig.get('final_prob', 0.5) or 0.5
-
-                            if side == 'no':
-                                # NO wins if forecast OUTSIDE band — check if forecast moved inside
-                                if margin < 1.0:
-                                    alert_msg = f'WARNING: {ticker} forecast {forecast:.1f}F only {margin:.1f}F from band edge {threshold_f}F | P&L ${pnl:+.2f}'
-                                    push_alert('warning', alert_msg, ticker=ticker, pnl=pnl)
-                                elif ens_prob > 0.80:
-                                    alert_msg = f'EXIT SIGNAL: {ticker} ensemble {ens_prob:.0%} against NO position | P&L ${pnl:+.2f}'
-                                    push_alert('exit', alert_msg, ticker=ticker, pnl=pnl)
-
-                                # Auto-exit if gain > $4 and margin tight
-                                if pnl > 4.0 and margin < 2.0:
-                                    print(f'  AUTO-EXIT: {ticker} P&L=${pnl:+.2f} margin={margin:.1f}F')
-                                    actions_taken.append(('exit', ticker, side, cur_p, contracts, pnl))
-                                    state.traded_tickers.add(ticker)
-                    except Exception as e:
-                        print(f'  Weather check error for {ticker}: {e}')
-
-                print(f'  {ticker:38} {side.upper()} entry={entry_p}c cur={cur_p}c P&L=${pnl:+.2f}' +
-                      (f' [ALERT]' if alert_msg else ''))
+                print(f'  {ticker:38} {side.upper()} entry={entry_p}c cur={cur_p}c P&L=${pnl:+.2f}')
             except Exception as e:
                 print(f'  Error checking {ticker}: {e}')
-
-        # Execute auto-exits
-        if actions_taken:
-            for action, ticker, side, price, contracts, pnl in actions_taken:
-                if not acquire_exit_lock(ticker, side):
-                    print(f'  SKIP: {ticker} exit already in progress (lock held)')
-                    continue
-                try:
-                    opp = {'ticker': ticker, 'title': ticker, 'side': side, 'action': 'exit',
-                           'yes_price': price if side=='yes' else 100-price,
-                           'market_prob': price/100, 'noaa_prob': None, 'edge': None,
-                           'size_dollars': round(contracts*price/100, 2), 'contracts': contracts,
-                           'source': 'weather', 'timestamp': ts(), 'date': str(date.today()),
-                           'pnl': pnl}
-                    if state.dry_run:
-                        log_trade(opp, opp['size_dollars'], contracts, {'dry_run': True})
-                        log_activity(f'[AUTO-EXIT] {ticker} {side.upper()} @ {price}c P&L=${pnl:+.2f}')
-                        print(f'  [DEMO] AUTO-EXIT logged: {ticker}')
-                        # Notify position tracker — prevent WS from attempting a second exit
-                        # Note: _recently_exited cooldown dict in position_tracker is not updated
-                        # by this cycle path — only _tracked removal is the primary guard.
-                        try:
-                            from agents.ruppert.trader import position_tracker as _pt
-                            _pt.remove_position(ticker, side)
-                            log_activity(f'[PositionCheck] Removed {ticker} {side} from tracker after auto-exit')
-                        except Exception as _pt_err:
-                            log_activity(f'[PositionCheck] WARNING: could not remove {ticker} from tracker: {_pt_err}')
-                    else:
-                        try:
-                            result = client.sell_position(ticker, side, price, contracts)
-                            log_trade(opp, opp['size_dollars'], contracts, result)
-                            print(f'  [LIVE] AUTO-EXIT executed: {ticker}')
-                            # Notify position tracker — prevent WS from attempting a second exit
-                            # Note: _recently_exited cooldown dict in position_tracker is not updated
-                            # by this cycle path — only _tracked removal is the primary guard.
-                            try:
-                                from agents.ruppert.trader import position_tracker as _pt
-                                _pt.remove_position(ticker, side)
-                                log_activity(f'[PositionCheck] Removed {ticker} {side} from tracker after auto-exit')
-                            except Exception as _pt_err:
-                                log_activity(f'[PositionCheck] WARNING: could not remove {ticker} from tracker: {_pt_err}')
-                        except Exception as e:
-                            print(f'  EXIT ERROR {ticker}: {e}')
-                finally:
-                    release_exit_lock(ticker, side)
 
     except Exception as e:
         print(f'  Position check error: {e}')
@@ -477,193 +390,6 @@ def run_check_mode(state):
     """
     print(f"\nCheck-only cycle done. {ts()}")
     return {'actions': len(state.actions_taken)}
-
-
-def run_econ_prescan_mode(client, state):
-    """Econ prescan: check releases, trade if any today.
-    Returns {'econ_trades': int, 'reason': str (optional)}.
-    """
-    print("\n[econ_prescan] Checking for econ releases today...")
-    _econ_trades = 0
-    try:
-        # Path guard: economics modules live in environments/demo/, not agents/ruppert/
-        import sys as _sys
-        _econ_env_root = str(Path(__file__).parent)
-        if _econ_env_root not in _sys.path:
-            _sys.path.insert(0, _econ_env_root)
-        from economics_client import get_upcoming_releases as _get_upcoming
-        from economics_scanner import find_econ_opportunities as _find_econ
-        from agents.ruppert.data_scientist.capital import get_capital as _get_cap_econ
-
-        _releases_today = [r for r in _get_upcoming() if r.get('days_away') == 0]
-        if not _releases_today:
-            print("  No econ release today — skipping scan")
-            return {'econ_trades': 0, 'reason': 'no_release_today'}
-
-        print(f"  {len(_releases_today)} release(s) today: {[r['event'] for r in _releases_today]}")
-        _econ_opps = _find_econ()
-        print(f"  {len(_econ_opps)} econ opportunity(ies) found")
-
-        _econ_capital  = _get_cap_econ()
-        _econ_deployed = get_daily_exposure()
-        _econ_daily_cap = _econ_capital * getattr(config, 'ECON_DAILY_CAP_PCT', 0.04)
-        _econ_spent = 0.0
-
-        for opp in _econ_opps:
-            ticker = opp.get('ticker', '')
-            if ticker in state.traded_tickers:
-                print(f"  Already traded {ticker} — skipping")
-                continue
-
-            side = opp.get('bet_direction', 'yes').lower()
-            bet_price = int(opp.get('bet_price_cents',
-                opp.get('yes_ask', 50) if side == 'yes' else (100 - opp.get('yes_ask', 50))))
-            hours_left = max(1.0, opp.get('hours_to_settlement', 48))
-
-            if not check_open_exposure(_econ_capital, state.open_position_value):
-                print(f"  [GlobalCap] STOP: open exposure ${state.open_position_value:.2f} >= 70% of capital")
-                break
-
-            _cap_ok = check_daily_cap(_econ_capital, _econ_deployed + _econ_spent)
-            if _cap_ok <= 0:
-                print(f"  [DailyCap] Daily cap reached — stopping econ trades")
-                break
-
-            _CONF_MAP = {'high': 0.75, 'medium': 0.55, 'low': 0.30}
-            _raw_conf = opp.get('confidence', 0)
-            _conf_float = _CONF_MAP.get(str(_raw_conf).lower(), 0.0) if isinstance(_raw_conf, str) else float(_raw_conf or 0.0)
-
-            signal = {
-                'edge': opp.get('edge', 0),
-                'win_prob': opp.get('model_prob', 0.5),
-                'confidence': _conf_float,
-                'hours_to_settlement': hours_left,
-                'module': 'econ',
-                'vol_ratio': 1.0,
-                'side': side,
-                'yes_ask': int(opp.get('yes_ask', 50)),
-                'yes_bid': int(opp.get('yes_bid', 50)),
-                'open_position_value': state.open_position_value,
-            }
-            decision = should_enter(
-                signal, _econ_capital, _econ_deployed + _econ_spent,
-                module='econ',
-                module_deployed_pct=_econ_spent / _econ_capital if _econ_capital > 0 else 0.0,
-                traded_tickers=state.traded_tickers,
-            )
-            if not decision['enter']:
-                print(f"  [Strategy] SKIP {ticker}: {decision['reason']}")
-                continue
-            if decision['size'] > _econ_daily_cap - _econ_spent:
-                print(f"  [DailyCap] SKIP {ticker}: would exceed econ daily cap")
-                continue
-
-            size = min(decision['size'], _cap_ok)
-            contracts = max(1, int(size / bet_price * 100))
-            actual_cost = round(contracts * bet_price / 100, 2)
-
-            trade = {
-                'ticker': ticker,
-                'title': opp.get('title', ticker),
-                'side': side,
-                'action': 'buy',
-                'yes_price': int(opp.get('yes_ask', 50)),
-                'market_prob': opp.get('market_prob', 0.5),
-                'noaa_prob': None,
-                'edge': opp.get('edge'),
-                'confidence': _conf_float,
-                'size_dollars': actual_cost,
-                'contracts': contracts,
-                'source': 'econ',
-                'note': opp.get('reasoning', '')[:200],
-                'timestamp': ts(),
-                'date': str(date.today()),
-            }
-
-            if state.dry_run:
-                log_trade(trade, actual_cost, contracts, {'dry_run': True})
-                log_activity(f'[ECON-PRESCAN] BUY {side.upper()} {ticker} {contracts}@{bet_price}c ${actual_cost:.2f}')
-                print(f"  [DEMO] BUY {side.upper()} {ticker} {contracts}@{bet_price}c ${actual_cost:.2f}")
-            else:
-                try:
-                    result = client.place_order(ticker, side, bet_price, contracts)
-                    log_trade(trade, actual_cost, contracts, result)
-                    log_activity(f'[ECON-PRESCAN] EXECUTED {ticker} {side.upper()} {contracts}@{bet_price}c')
-                    print(f"  [LIVE] EXECUTED econ trade: {ticker}")
-                except Exception as _ex:
-                    print(f"  ERROR executing econ trade {ticker}: {_ex}")
-                    continue
-
-            state.traded_tickers.add(ticker)
-            _econ_spent += actual_cost
-            _econ_trades += 1
-            state.open_position_value += actual_cost
-
-    except Exception as _e:
-        print(f"  econ_prescan error: {_e}")
-        import traceback; traceback.print_exc()
-
-    print(f"\necon_prescan done — {_econ_trades} trade(s). {ts()}")
-    return {'econ_trades': _econ_trades}
-
-
-def run_weather_only_mode(state):
-    """Weather-only scan mode.
-    Returns {'weather_trades': int}.
-    """
-    print("\n[weather_only] Running weather scan...")
-    _weather_count = 0
-    try:
-        from agents.ruppert.trader.main import run_weather_scan as _run_weather
-        _weather_results = _run_weather(
-            dry_run=state.dry_run,
-            traded_tickers=state.traded_tickers,
-            open_position_value=state.open_position_value,
-        )
-        _weather_count = len(_weather_results) if _weather_results else 0
-        if _weather_count:
-            print(f"  {_weather_count} weather trade(s) executed")
-        else:
-            print("  No weather opportunities above threshold")
-    except Exception as _e:
-        print(f"  weather_only error: {_e}")
-        import traceback; traceback.print_exc()
-
-    print(f"\nweather_only done — {_weather_count} trade(s). {ts()}")
-
-    # Scan summary notification
-    try:
-        _tz_pdt = _get_local_tz()
-        _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
-        import time as _time
-        _tz_abbr = 'PDT' if _time.localtime().tm_isdst > 0 else 'PST'
-        try:
-            _capital  = get_capital()
-            _deployed = get_daily_exposure()
-            _bp       = get_buying_power()
-            _cap_line = f'${_capital:.2f} | Deployed: ${_deployed:.2f} | BP: ${_bp:.2f}'
-        except Exception:
-            _cap_line = 'N/A'
-        _scan_msg = (
-            f'\U0001f4ca Ruppert Scan \u2014 {_time_str} {_tz_abbr}\n\n'
-            f'\U0001f324 Weather-only scan\n'
-            f'{_weather_count} trade(s) placed\n\n'
-            f'\U0001f4b0 Capital: {_cap_line}'
-        )
-        log_event('SCAN_COMPLETE', {
-            'mode': 'weather_only',
-            'weather_trades': _weather_count,
-            'summary': _scan_msg,
-        })
-        if _weather_count > 0:
-            send_telegram(_scan_msg)
-            log_activity('[SCAN NOTIFY] weather_only summary sent via Telegram')
-        push_alert('info', _scan_msg)
-        print('  Scan summary sent via Telegram.')
-    except Exception as _notify_ex:
-        print(f'  Scan notify error (non-fatal): {_notify_ex}')
-
-    return {'weather_trades': _weather_count}
 
 
 def run_crypto_only_mode(state):
@@ -969,8 +695,8 @@ def run_report_mode(state):
 
 
 def run_full_mode(client, state):
-    """Full cycle: wallet refresh, smart money, weather, crypto, fed, security audit, notification.
-    Returns {'weather_trades': int, 'crypto_trades': int, 'fed_trades': int,
+    """Full cycle: wallet refresh, smart money, crypto, security audit, notification.
+    Returns {'crypto_trades': int, 'long_horizon_trades': int,
              'smart_money': str, 'auto_exits': int}.
     """
     # STEP 1b: WALLET LIST REFRESH
@@ -1008,34 +734,8 @@ def run_full_mode(client, state):
 
     state.direction = direction
 
-    # STEP 3: WEATHER OPPORTUNITY SCAN
-    print("\n[3] Scanning for new weather opportunities...")
-    new_weather = []
-    try:
-        from agents.ruppert.trader.main import run_weather_scan
-        new_weather = run_weather_scan(
-            dry_run=state.dry_run,
-            traded_tickers=state.traded_tickers,
-            open_position_value=state.open_position_value,
-        )
-        if new_weather:
-            for _wt in new_weather:
-                _wtk = _wt.get('ticker')
-                if _wtk:
-                    state.traded_tickers.add(_wtk)
-            print(f"  {len(new_weather)} new weather trade(s) executed")
-            for t in new_weather:
-                print(f"    {t.get('ticker')} {t.get('side','').upper()} edge={t.get('edge',0)*100:.0f}%")
-        else:
-            print("  No new weather opportunities above threshold")
-    except Exception as e:
-        print(f"  Weather scan error: {e}")
-
-    # Refresh global exposure cap after weather trades before passing to next scan
-    state.open_position_value += sum(t.get('size_dollars', 0) for t in new_weather)
-
-    # STEP 4: CRYPTO OPPORTUNITY SCAN
-    print("\n[4] Scanning for new crypto opportunities...")
+    # STEP 3: CRYPTO OPPORTUNITY SCAN
+    print("\n[3] Scanning for new crypto opportunities...")
     new_crypto = []
     try:
         from agents.ruppert.trader.main import run_crypto_scan
@@ -1075,47 +775,6 @@ def run_full_mode(client, state):
 
     state.open_position_value += sum(t.get('size_dollars', 0) for t in new_long_horizon)
 
-    # STEP 4b: FED RATE DECISION SCAN
-    print("\n[4b] Scanning for Fed rate decision opportunities...")
-    new_fed = []
-    try:
-        from agents.ruppert.trader.main import run_fed_scan as _run_fed_scan_cycle
-        new_fed = _run_fed_scan_cycle(dry_run=state.dry_run, traded_tickers=state.traded_tickers, open_position_value=state.open_position_value)
-        if new_fed:
-            print(f"  {len(new_fed)} Fed trade(s) executed")
-        else:
-            print("  No Fed opportunities this cycle")
-    except Exception as e:
-        print(f"  Fed scan error: {e}")
-        import traceback; traceback.print_exc()
-
-    # STEP 4c: GEOPOLITICAL SCAN
-    print("\n[4c] Scanning for geopolitical opportunities...")
-    new_geo = []
-    # Always update exposure after Fed trades
-    state.open_position_value += sum(t.get('size_dollars', 0) for t in new_fed)
-    if getattr(config, 'GEO_AUTO_TRADE', False):
-        try:
-            from agents.ruppert.trader.main import run_geo_trades as _run_geo_trades
-            new_geo = _run_geo_trades(
-                dry_run=state.dry_run,
-                traded_tickers=state.traded_tickers,
-                open_position_value=state.open_position_value,
-            )
-            if new_geo:
-                print(f"  {len(new_geo)} geo trade(s) executed")
-                for t in new_geo:
-                    print(f"    {t.get('ticker')} {t.get('side','').upper()} edge={t.get('edge',0)*100:.0f}%")
-            else:
-                print("  No geo opportunities above threshold")
-        except Exception as e:
-            print(f"  Geo scan error: {e}")
-            import traceback; traceback.print_exc()
-    else:
-        print("  GEO_AUTO_TRADE=False — skipping")
-
-    state.open_position_value += sum(t.get('size_dollars', 0) for t in new_geo)
-
     # STEP 5: SECURITY AUDIT (weekly — Sunday only)
     if datetime.now().weekday() == 6:  # Sunday
         print("\n[5] Weekly security audit...")
@@ -1134,11 +793,8 @@ def run_full_mode(client, state):
 
     # DONE — summary + notification
     summary = {
-        'weather_trades': len(new_weather) if new_weather else 0,
         'crypto_trades':  len(new_crypto) if new_crypto else 0,
         'long_horizon_trades': len(new_long_horizon) if new_long_horizon else 0,
-        'fed_trades':     len(new_fed) if new_fed else 0,
-        'geo_trades':     len(new_geo) if new_geo else 0,
         'smart_money':    direction,
         'auto_exits':     len(state.actions_taken),
     }
@@ -1146,7 +802,7 @@ def run_full_mode(client, state):
 
     print(f"\n{'='*60}")
     print(f"  CYCLE COMPLETE  {ts()}")
-    print(f"  Weather: {summary['weather_trades']} new | Crypto: {summary['crypto_trades']} new | LongHorizon: {summary['long_horizon_trades']} new | Fed: {summary['fed_trades']} new | Geo: {summary['geo_trades']} new")
+    print(f"  Crypto: {summary['crypto_trades']} new | LongHorizon: {summary['long_horizon_trades']} new")
     print(f"  Auto-exits: {summary['auto_exits']} | Signal: {direction.upper()}")
     print(f"{'='*60}\n")
 
@@ -1156,26 +812,6 @@ def run_full_mode(client, state):
         _time_str = datetime.now(_tz_pdt).strftime('%I:%M %p')
         import time as _time
         _tz_abbr = 'PDT' if _time.localtime().tm_isdst > 0 else 'PST'
-
-        # Fed status
-        _fed_status = 'no signal (outside window)'
-        try:
-            from agents.ruppert.env_config import get_paths as _get_paths_fed
-            _fed_latest_path = _get_paths_fed()['logs'] / 'fed_scan_latest.json'
-            if _fed_latest_path.exists():
-                _fed_data = json.loads(_fed_latest_path.read_text(encoding='utf-8'))
-                _skip = _fed_data.get('skip_reason')
-                if _skip:
-                    _fed_status = f'no signal ({_skip})'
-                elif _fed_data.get('direction'):
-                    _fed_dir  = _fed_data['direction'].upper()
-                    _fed_edge = round(_fed_data.get('edge', 0) * 100)
-                    _fed_conf = round(_fed_data.get('confidence', 0) * 100)
-                    _fed_status = f'{_fed_dir} edge={_fed_edge}% conf={_fed_conf}%'
-                else:
-                    _fed_status = 'no signal'
-        except Exception:
-            _fed_status = 'error reading fed data'
 
         # Capital
         try:
@@ -1187,31 +823,22 @@ def run_full_mode(client, state):
             _cap_line = 'N/A'
 
         # Build message
-        _w_opps   = len(new_weather) if isinstance(new_weather, list) else 0
-        _w_trades = summary['weather_trades']
         _c_opps   = len(new_crypto) if isinstance(new_crypto, list) else 0
         _c_trades = summary['crypto_trades']
         _c_dir    = direction.upper() if direction else 'NEUTRAL'
-        _geo_trades = summary.get('geo_trades', 0)
 
         _15m_block = _build_crypto_15m_block()
         _scan_msg = (
             f"\U0001f4ca Ruppert Scan \u2014 {_time_str} {_tz_abbr}\n\n"
-            f"\U0001f324 Weather: {_w_opps} opportunities | {_w_trades} trades placed\n"
-            f"\u20bf Crypto: {_c_dir} | {_c_opps} opportunities | {_c_trades} trades placed\n"
-            f"\U0001f30d Geo: {_geo_trades} trade(s) placed\n"
-            f"\U0001f3db Fed: {_fed_status}"
+            f"\u20bf Crypto: {_c_dir} | {_c_opps} opportunities | {_c_trades} trades placed"
             f"{_15m_block}\n\n"
             f"\U0001f4b0 Capital: {_cap_line}"
         )
 
         log_event('SCAN_COMPLETE', {
             'mode': 'full',
-            'weather_trades': summary['weather_trades'],
             'crypto_trades': summary['crypto_trades'],
             'long_horizon_trades': summary.get('long_horizon_trades', 0),
-            'fed_trades': summary['fed_trades'],
-            'geo_trades': summary['geo_trades'],
             'smart_money': summary['smart_money'],
             'summary': _scan_msg,
         })
@@ -1281,7 +908,7 @@ def run_cycle(mode):
         )
 
         # Only run historical audit on substantive modes — skip for lightweight check/report/weather-only
-        if mode in ('full', 'smart', 'econ_prescan'):
+        if mode in ('full', 'smart'):
             try:
                 from agents.ruppert.data_scientist.data_agent import run_historical_audit
                 run_historical_audit(since_date=(date.today() - timedelta(days=30)).isoformat())
@@ -1298,10 +925,6 @@ def run_cycle(mode):
         # Dispatch
         if mode == 'check':
             summary = run_check_mode(state)
-        elif mode == 'econ_prescan':
-            summary = run_econ_prescan_mode(client, state)
-        elif mode == 'weather_only':
-            summary = run_weather_only_mode(state)
         elif mode == 'crypto_only':
             summary = run_crypto_only_mode(state)
         elif mode == 'report':
@@ -1326,7 +949,7 @@ def run_cycle(mode):
         # Note: 'smart' mode currently runs as check_mode (position check only).
         # TODO: implement smart money refresh + light synthesis when ready.
         # Until then, the data agent audit still runs (line below) as a lightweight signal.
-        if mode in ('full', 'smart', 'crypto_only', 'weather_only', 'econ_prescan', 'crypto_1d'):
+        if mode in ('full', 'smart', 'crypto_only', 'crypto_1d'):
             try:
                 from agents.ruppert.data_scientist.data_agent import run_post_scan_audit
                 _audit = run_post_scan_audit(mode='post_cycle')

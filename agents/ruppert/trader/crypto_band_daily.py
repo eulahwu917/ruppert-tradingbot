@@ -228,7 +228,7 @@ def _execute_band_trades(new_crypto, trader, total_capital, crypto_daily_cap,
             'ticker': t['ticker'], 'title': t['title'], 'side': t['side'],
             'action': 'buy', 'yes_price': t['price'] if t['side'] == 'yes' else 100 - t['price'],
             'no_ask': t.get('no_ask'),               # ISSUE-017: explicit no_ask (robustness)
-            'market_prob': t['price'] / 100, 'noaa_prob': None,
+            'market_prob': t['price'] / 100,
             'edge': t['edge'], 'confidence': t.get('confidence', t['edge']),
             'model_prob':   t['prob_model'],
             'model_source': 'log_normal_band',

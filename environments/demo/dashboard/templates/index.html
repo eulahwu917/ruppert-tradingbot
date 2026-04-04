@@ -317,53 +317,6 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       </div>
     </div>
 
-    <!-- ⚽ Sports Odds -->
-    <div class="card" style="border-left:3px solid #f59e0b;">
-      <div style="padding:16px;">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
-          <span style="font-size:18px;">⚽</span>
-          <span style="font-size:13px;font-weight:700;color:#fff;">Sports Odds</span>
-        </div>
-        <!-- Row 1: Open P&L | Closed P&L | Win Rate -->
-        <div style="display:flex;align-items:center;margin-bottom:14px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Open P&amp;L</div>
-            <div class="pnl-neu" id="sports-open-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
-          </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
-              Closed P&amp;L
-              <select id="sports-period" onchange="setModulePeriod('sports',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
-                <option value="month" selected>This Month</option>
-                <option value="year">This Year</option>
-                <option value="all">All Time</option>
-              </select>
-            </div>
-            <div class="pnl-neu" id="sports-pnl" style="font-size:22px;font-weight:700;letter-spacing:-0.5px;">--</div>
-          </div>
-          <div style="flex:1;padding-left:12px;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;">Win Rate</div>
-            <div style="font-size:22px;font-weight:700;color:#888;" id="sports-winrate">--</div>
-          </div>
-        </div>
-        <!-- Row 2: Open Deployed | Open Trades | Total Trades -->
-        <div style="display:flex;border-top:1px solid #1a1a1a;padding-top:12px;">
-          <div style="flex:1;padding-right:12px;border-right:1px solid #222;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Deployed</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="sports-open-dep">--</div>
-          </div>
-          <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Open Trades</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="sports-open-cnt">--</div>
-          </div>
-          <div style="flex:1;padding-left:12px;text-align:center;">
-            <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:3px;">Total Trades</div>
-            <div style="font-size:15px;font-weight:700;color:#888;" id="sports-total-trades">--</div>
-          </div>
-        </div>
-      </div>
-    </div>
-
     <!-- 🌍 Geo -->
     <div class="card" style="border-left:3px solid #2dd4bf;">
       <div style="padding:16px;">
@@ -661,14 +614,14 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 // ── Module Cards ──────────────────────────────────────────────────────────────
 // id prefix map: 'weather' → 'weather', 'fed' → 'fed', etc.
 const MODULE_ID = {
-  weather: 'weather', fed: 'fed', geo: 'geo', sports: 'sports',
+  weather: 'weather', fed: 'fed', geo: 'geo',
   crypto_dir_15m: 'crypto_dir_15m', crypto_threshold_daily: 'crypto_threshold_daily',
   crypto_band_daily: 'crypto_band_daily', crypto_1d: 'crypto_1d'
 };
 
 window._moduleData   = {};
 window._modulePeriod = {
-  weather: 'month', fed: 'month', geo: 'month', sports: 'month',
+  weather: 'month', fed: 'month', geo: 'month',
   crypto_dir_15m: 'month', crypto_threshold_daily: 'month', crypto_band_daily: 'month', crypto_1d: 'month'
 };
 
@@ -1312,7 +1265,7 @@ function renderState(state) {
 
   // ── Module cards ────────────────────────────────────────────────────────────
   window._moduleData = modules;
-  ['weather','fed','geo','sports','crypto_dir_15m','crypto_threshold_daily','crypto_band_daily','crypto_1d'].forEach(m => {
+  ['weather','fed','geo','crypto_dir_15m','crypto_threshold_daily','crypto_band_daily','crypto_1d'].forEach(m => {
     if (modules[m]) renderModuleCard(m);
   });
 
@@ -1427,7 +1380,7 @@ async function loadClosedPnl() {
     // Module cards
     if (pnl.modules) {
       window._moduleData = pnl.modules;
-      ['weather','fed','geo','sports','crypto_dir_15m','crypto_threshold_daily','crypto_band_daily','crypto_1d'].forEach(m => {
+      ['weather','fed','geo','crypto_dir_15m','crypto_threshold_daily','crypto_band_daily','crypto_1d'].forEach(m => {
         if (window._moduleData[m]) renderModuleCard(m);
       });
     }

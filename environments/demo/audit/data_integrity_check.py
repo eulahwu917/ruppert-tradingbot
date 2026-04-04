@@ -84,16 +84,6 @@ def check_pnl_cache():
     print("  pnl_cache.json removed — P&L computed live from logs — OK")
 
 
-def check_shadow_log():
-    """Verify YES shadow log exists and is growing."""
-    shadow_log = LOGS_DIR / "weather_yes_shadow.jsonl"
-    if not shadow_log.exists():
-        warnings.append("weather_yes_shadow.jsonl missing — YES shadow logging may not be wired correctly")
-        return
-    lines = shadow_log.read_text(encoding="utf-8", errors="ignore").strip().splitlines()
-    print(f"  weather_yes_shadow.jsonl: {len(lines)} entries — OK")
-
-
 def check_trade_schema():
     """Verify today's trade log has required fields."""
     from datetime import date
@@ -149,9 +139,6 @@ def main():
 
     print("Checking P&L cache...")
     check_pnl_cache()
-
-    print("Checking YES shadow log...")
-    check_shadow_log()
 
     print("Checking trade schema...")
     check_trade_schema()

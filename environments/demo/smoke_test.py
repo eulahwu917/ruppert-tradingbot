@@ -106,7 +106,7 @@ try:
 
     # Check delegation imports work
     try:
-        from agents.ruppert.trader.post_trade_monitor import run_monitor, check_settlements, check_weather_position, check_crypto_position
+        from agents.ruppert.trader.post_trade_monitor import run_monitor, check_settlements, check_crypto_position
         ok("post_trade_monitor delegation imports")
     except Exception as e:
         fail("post_trade_monitor delegation imports", str(e))

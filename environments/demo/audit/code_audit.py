@@ -53,12 +53,12 @@ def check_hardcoded_capital():
 
 def check_duplicate_thresholds():
     """Detect MIN_EDGE or MIN_CONFIDENCE defined outside strategy.py and config.py."""
-    ALLOWED = {"strategy.py", "config.py", "fed_client.py", "code_audit.py"}
+    ALLOWED = {"strategy.py", "config.py", "code_audit.py"}
     for f in ALL_FILES:
         if f.name in ALLOWED:
             continue
         text = f.read_text(encoding="utf-8", errors="ignore")
-        for pattern in [r'^MIN_EDGE\s*=', r'^MIN_CONFIDENCE\s*=', r'^FED_MIN_EDGE\s*=']:
+        for pattern in [r'^MIN_EDGE\s*=', r'^MIN_CONFIDENCE\s*=']:
             for match in re.finditer(pattern, text, re.MULTILINE):
                 line_num = text[:match.start()].count("\n") + 1
                 line = text.splitlines()[line_num - 1].strip()

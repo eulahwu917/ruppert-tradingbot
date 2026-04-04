@@ -31,12 +31,9 @@ $taskFiles = @(
     "Ruppert-Demo-10PM.xml",
     "Ruppert-Demo-3PM.xml",
     "Ruppert-Demo-7AM.xml",
-    "Ruppert-Econ-Prescan.xml",
     "Ruppert-PostTrade-Monitor.xml",
     "Ruppert-Research-Weekly.xml",
     "Ruppert-SettlementChecker.xml",
-    "Ruppert-SportsOdds.xml",
-    "Ruppert-Weather-7PM.xml",
     "Ruppert-WS-Persistent.xml",
     "Ruppert-WS-Watchdog.xml",
     "RuppertDashboard.xml"

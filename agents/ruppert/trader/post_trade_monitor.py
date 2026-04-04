@@ -446,53 +446,6 @@ def get_market_data(ticker):
         return None
 
 
-def check_weather_position(pos, market):
-    """Check weather exit conditions. Returns (action, reason) or (None, None)."""
-    side = pos.get('side', 'no')
-    entry_price = normalize_entry_price(pos)
-
-    no_ask = market.get('no_ask') or 50
-    yes_ask = market.get('yes_ask') or 50
-    cur_price = no_ask if side == 'no' else yes_ask
-    contracts = pos.get('contracts', 0)
-    pnl = round((cur_price - entry_price) * contracts / 100, 2) if entry_price else 0
-
-    # 95c rule: guaranteed profit lock
-    if side == 'no' and no_ask >= 95:
-        return 'auto_exit', f'95c rule: no_ask={no_ask}c P&L=${pnl:+.2f}', cur_price, contracts, pnl
-    if side == 'yes' and yes_ask >= 95:
-        return 'auto_exit', f'95c rule: yes_ask={yes_ask}c P&L=${pnl:+.2f}', cur_price, contracts, pnl
-
-    # Gain exit rule (config-driven threshold)
-    _exit_gain_pct = getattr(config, 'EXIT_GAIN_PCT', 0.70)
-    if entry_price and entry_price < 100:
-        gain_pct = (cur_price - entry_price) / (100 - entry_price) if (100 - entry_price) > 0 else 0
-        if gain_pct >= _exit_gain_pct:
-            return 'auto_exit', f'{_exit_gain_pct:.0%} gain: {gain_pct:.0%} gain P&L=${pnl:+.2f}', cur_price, contracts, pnl
-
-    # Ensemble prob flip check (weather-specific)
-    try:
-        from agents.ruppert.data_analyst.openmeteo_client import get_full_weather_signal
-        from agents.ruppert.strategist.edge_detector import parse_date_from_ticker, parse_threshold_from_ticker
-
-        ticker = pos.get('ticker', '')
-        if 'KXHIGH' in ticker:
-            series_ticker = ticker.split('-')[0].upper()
-            threshold_f = parse_threshold_from_ticker(ticker)
-            target_date = parse_date_from_ticker(ticker)
-            if threshold_f is None:
-                print(f'  WARN: {ticker}: parse_threshold_from_ticker returned None — skipping ensemble check')
-            else:
-                sig = get_full_weather_signal(series_ticker, threshold_f, target_date)
-                ens_prob = sig.get('final_prob', 0.5) or 0.5
-                if side == 'no' and ens_prob > 0.80:
-                    return 'alert', f'ensemble {ens_prob:.0%} against NO position P&L=${pnl:+.2f}', cur_price, contracts, pnl
-    except Exception:
-        pass
-
-    return None, None, cur_price, contracts, pnl
-
-
 def check_crypto_position(pos, market):
     """Check crypto exit conditions. Returns (action, reason) or (None, None)."""
     side = pos.get('side', 'no')
@@ -527,30 +480,6 @@ def check_crypto_position(pos, market):
         gain_pct = (cur_price - entry_price) / (100 - entry_price) if (100 - entry_price) > 0 else 0
         if gain_pct >= _exit_gain_pct:
             return 'auto_exit', f'{_exit_gain_pct:.0%} gain: {gain_pct:.0%} gain P&L=${pnl:+.2f}', cur_price, contracts, pnl
-
-    return None, None, cur_price, contracts, pnl
-
-
-def check_alert_only_position(pos, market):
-    """Check econ/geo/fed exit conditions — alert only, no auto-exit."""
-    side = pos.get('side', 'no')
-    entry_price = normalize_entry_price(pos)
-
-    no_ask = market.get('no_ask') or 50
-    yes_ask = market.get('yes_ask') or 50
-    cur_price = no_ask if side == 'no' else yes_ask
-    contracts = pos.get('contracts', 0)
-    pnl = round((cur_price - entry_price) * contracts / 100, 2) if entry_price else 0
-
-    # Price moved > 15c against entry direction
-    if entry_price and (entry_price - cur_price) > 15:
-        return 'alert_against', f'price moved {entry_price - cur_price:.0f}c against entry P&L=${pnl:+.2f}', cur_price, contracts, pnl
-
-    # Gain > 50% from entry — consider taking profit
-    if entry_price and entry_price < 100:
-        gain_pct = (cur_price - entry_price) / (100 - entry_price) if (100 - entry_price) > 0 else 0
-        if gain_pct >= 0.50:
-            return 'alert_profit', f'50%+ gain ({gain_pct:.0%}) — consider taking profit P&L=${pnl:+.2f}', cur_price, contracts, pnl
 
     return None, None, cur_price, contracts, pnl
 
@@ -621,15 +550,13 @@ def run_monitor():
         pnl = 0
 
         try:
-            if source in ('weather', 'bot') or 'KXHIGH' in ticker:
-                action, reason, cur_price, pos_contracts, pnl = check_weather_position(pos, market)
-            elif source == 'crypto' or any(ticker.upper().startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXSOL', 'KXDOGE')):
+            if source in ('bot', 'crypto') or any(ticker.upper().startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXSOL', 'KXDOGE')):
                 action, reason, cur_price, pos_contracts, pnl = check_crypto_position(pos, market)
-            elif source in ('econ', 'geo', 'fed'):
-                action, reason, cur_price, pos_contracts, pnl = check_alert_only_position(pos, market)
             else:
-                # Unknown module — run basic alert-only check
-                action, reason, cur_price, pos_contracts, pnl = check_alert_only_position(pos, market)
+                # Unknown/unsupported source — skip
+                print(f"  SKIP: {ticker} unsupported source '{source}'")
+                skipped += 1
+                continue
         except Exception as e:
             print(f"  ERROR: {ticker} check failed: {e}")
             skipped += 1

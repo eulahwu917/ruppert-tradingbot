@@ -96,73 +96,6 @@ class KalshiClient:
                 time.sleep(delay)
                 delay *= 2
 
-    def search_markets(self, keyword):
-        """
-        Search for open weather markets using the public API.
-        No auth needed for market data — uses requests directly.
-        Orderbook prices are enriched per-market (real bid/ask from orderbook endpoint).
-        """
-        import requests
-        # Single source of truth: derive series list from openmeteo_client.CITIES
-        # This ensures search_markets() and the weather signal engine stay in sync.
-        from agents.ruppert.data_analyst.openmeteo_client import CITIES as _CITIES
-        weather_series = list(_CITIES.keys())
-        all_markets = []
-
-        for series in weather_series:
-            try:
-                url = 'https://api.elections.kalshi.com/trade-api/v2/markets'
-                params = {'series_ticker': series, 'status': 'open', 'limit': 30}
-                resp = _get_with_retry(url, params=params, timeout=10)
-                if resp is not None and resp.status_code == 200:
-                    data = resp.json()
-                    markets = data.get('markets', [])
-
-                    # Enrich each market with real orderbook prices.
-                    # The REST /markets list endpoint returns null for yes_ask/yes_bid/
-                    # no_ask/no_bid; the orderbook endpoint (orderbook_fp) has the live
-                    # bid/ask via no_dollars and yes_dollars (float-dollar fractions, 0–1).
-                    # volume/open_interest come from the market list response directly.
-                    # TODO: Kalshi may rename volume → volume_dollars, open_interest → open_interest_dollars
-                    # (FixedPointDollars strings) when legacy fields are dropped. Update parsing when that happens.
-                    for market in markets:
-                        ticker = market.get('ticker', '')
-                        if not ticker:
-                            continue
-                        try:
-                            ob_url = f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}/orderbook'
-                            ob_resp = _get_with_retry(ob_url, timeout=5)
-                            if ob_resp is None:
-                                print(f"  [Warning] Orderbook fetch exhausted retries for {ticker} — bid/ask will be null")
-                            elif ob_resp.status_code == 200:
-                                ob = ob_resp.json().get('orderbook_fp', {})
-                                no_bids  = ob.get('no_dollars', [])   # [[price_str, vol_str], ...]
-                                yes_bids = ob.get('yes_dollars', [])
-                                # Best NO bid = highest price someone will pay for NO
-                                if no_bids:
-                                    best_no_bid = max(float(p) for p, v in no_bids)
-                                    market['no_bid']  = int(round(best_no_bid * 100))
-                                    market['yes_ask'] = 100 - market['no_bid']  # implied
-                                # Best YES bid = highest price someone will pay for YES
-                                if yes_bids:
-                                    best_yes_bid = max(float(p) for p, v in yes_bids)
-                                    market['yes_bid'] = int(round(best_yes_bid * 100))
-                                    market['no_ask']  = 100 - market['yes_bid']  # implied
-                                if not no_bids and not yes_bids:
-                                    print(f"  [Warning] Empty orderbook for {ticker} — bid/ask will be null")
-                            else:
-                                print(f"  [Warning] Orderbook fetch failed for {ticker}: HTTP {ob_resp.status_code} — bid/ask will be null")
-                        except Exception as e:
-                            print(f"  [Warning] Orderbook error for {ticker}: {e} — bid/ask will be null")
-                        time.sleep(0.1)  # 20 req/sec rate limit
-
-                    all_markets.extend(markets)
-            except Exception as e:
-                print(f"  [Warning] Could not fetch {series}: {e}")
-            time.sleep(0.1)  # inter-series courtesy delay — 10 req/sec for series-level calls
-
-        return all_markets
-
     def get_markets_metadata(self, series_ticker, status='open'):
         """
         Paginate through ALL markets for a series and return raw dicts
@@ -458,8 +391,4 @@ if __name__ == '__main__':
     client = KalshiClient()
     balance = client.get_balance()
     print(f"Balance: ${balance:.2f}")
-    markets = client.search_markets('temperature')
-    print(f"Found {len(markets)} weather markets")
-    for m in markets[:5]:
-        print(f"  - {m.get('ticker')}: {m.get('title')}")
 

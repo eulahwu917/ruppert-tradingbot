@@ -16,17 +16,6 @@ def test_kalshi_client_initializes():
     assert hasattr(client, 'get_market')
 
 
-def test_kalshi_weather_markets_have_prices():
-    client = KalshiClient()
-    markets = client.get_markets('KXHIGHNY', status='open', limit=5)
-    if not markets:
-        pytest.skip('KXHIGHNY has no open markets — series may be inactive')
-    for m in markets:
-        assert m.get('yes_ask') is not None, f"yes_ask missing on {m.get('ticker')}"
-        assert isinstance(m['yes_ask'], int), f"yes_ask not int on {m.get('ticker')}"
-        assert m['yes_ask'] > 0, f"yes_ask <= 0 on {m.get('ticker')}"
-
-
 def test_kalshi_get_market_returns_prices():
     client = KalshiClient()
     markets = client.get_markets('KXHIGHNY', status='open', limit=1)

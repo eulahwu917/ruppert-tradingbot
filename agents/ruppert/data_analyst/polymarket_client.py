@@ -2,7 +2,7 @@
 polymarket_client.py — Shared Polymarket signal layer for Ruppert trading bot.
 
 READ-ONLY signal data only. No trading (geo-locked).
-Imported by: crypto_client.py, geopolitical_scanner.py, sports_odds_collector.py
+Imported by: crypto_client.py, geopolitical_scanner.py
 
 DS — 2026-03-31
 """
@@ -539,59 +539,6 @@ def get_crypto_daily_consensus(asset: str) -> Optional[dict]:
     except Exception as exc:
         logger.warning("polymarket get_crypto_daily_consensus('%s') failed: %s", asset, exc)
         return None
-
-
-_GEO_DEFAULT_KEYWORDS = [
-    "ceasefire", "war", "invasion", "sanctions", "conflict", "nuclear"
-]
-
-
-def _fetch_geo_signals(keywords: list[str]) -> list[dict]:
-    """Raw fetch for get_geo_signals."""
-    seen_questions: set[str] = set()
-    results = []
-
-    for kw in keywords:
-        markets = get_markets_by_keyword(kw, limit=15)
-        for m in markets:
-            q = m.get("question", "")
-            if q in seen_questions:
-                continue
-            seen_questions.add(q)
-            results.append({
-                "question":  q,
-                "yes_price": m.get("yes_price"),
-                "volume_24h": m.get("volume_24h", 0.0),
-                "end_date":  m.get("end_date"),
-                "category":  "geo",
-            })
-
-    return results
-
-
-def get_geo_signals(keywords: list[str] = None) -> list[dict]:
-    """
-    Get active geo/conflict Polymarket markets.
-
-    Default keywords: ceasefire, war, invasion, sanctions, conflict, nuclear
-
-    Returns list of dicts:
-        question, yes_price, volume_24h, end_date, category='geo'
-
-    Cache: 10 minutes (keyed on sorted keyword list).
-    Returns [] on any error.
-    """
-    kws = sorted(keywords) if keywords else sorted(_GEO_DEFAULT_KEYWORDS)
-    cache_key = f"geo_signals:{','.join(kws)}"
-    try:
-        return _cached(
-            cache_key,
-            lambda: _fetch_geo_signals(kws),
-            ttl_seconds=600,  # 10 minutes
-        )
-    except Exception as exc:
-        logger.warning("polymarket get_geo_signals failed: %s", exc)
-        return []
 
 
 # ─── Macro / Economics signals ───────────────────────────────────────────────

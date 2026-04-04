@@ -63,11 +63,6 @@ ECONOMICS_SERIES = [
     'KXRECESSION', 'KXMORTGAGE', 'KXGAS',
 ]
 
-GEOPOLITICAL_SERIES = [
-    'KXUKRAINE', 'KXRUSSIA', 'KXISRAEL', 'KXIRAN', 'KXTAIWAN',
-    'KXNATO', 'KXCHINA', 'KXNKOREA', 'KXCEASEFIRE',
-]
-
 TECH_GAMING_SERIES = [
     'KXAAPLWATCH', 'KXOAIANTH', 'KXRAMPBREX', 'KXDEELRIP',
 ]
@@ -90,76 +85,9 @@ def find_series_by_keywords(keywords, limit=500):
         return []
 
 
-GEO_TITLE_KEYWORDS = [
-    'war', 'election', 'president', 'congress', 'sanction', 'trade',
-    'nato', 'china', 'russia', 'iran', 'nuclear', 'ukraine', 'israel',
-    'ceasefire', 'taiwan', 'military', 'troops', 'invasion',
-]
-
-
-def search_geo_markets(kalshi_client, max_markets=50):
-    """
-    Fetch open geo/political markets via KalshiClient.
-    1. Pull from known GEOPOLITICAL_SERIES via KalshiClient.get_markets()
-    2. Also discover series by keyword search and fetch those too
-    3. Deduplicate, filter to open markets with orderbook data
-    Returns up to max_markets market dicts with live yes_ask/yes_bid prices.
-    """
-    from agents.ruppert.data_scientist.logger import log_activity
-    seen_tickers = set()
-    all_markets = []
-
-    # Step 1: fetch from known geo series
-    for series_ticker in GEOPOLITICAL_SERIES:
-        try:
-            markets = kalshi_client.get_markets(series_ticker, status='open', limit=30)
-            for m in markets:
-                ticker = m.get('ticker', '')
-                if ticker and ticker not in seen_tickers:
-                    seen_tickers.add(ticker)
-                    all_markets.append(m)
-        except Exception as e:
-            log_activity(f"[GeoSearch] Error fetching {series_ticker}: {e}")
-        if len(all_markets) >= max_markets:
-            break
-
-    # Step 2: discover additional series by keyword search
-    if len(all_markets) < max_markets:
-        try:
-            discovered = find_series_by_keywords(GEO_TITLE_KEYWORDS, limit=500)
-            # Filter out series we already fetched
-            known_set = set(GEOPOLITICAL_SERIES)
-            new_series = [s for s in discovered if s['ticker'] not in known_set]
-            for s in new_series[:20]:
-                try:
-                    markets = kalshi_client.get_markets(s['ticker'], status='open', limit=20)
-                    for m in markets:
-                        ticker = m.get('ticker', '')
-                        title_lower = (m.get('title') or '').lower()
-                        # Only include if title contains a geo keyword
-                        if ticker and ticker not in seen_tickers and any(kw in title_lower for kw in GEO_TITLE_KEYWORDS):
-                            seen_tickers.add(ticker)
-                            all_markets.append(m)
-                except Exception as e:
-                    log_activity(f"[GeoSearch] Error fetching discovered series {s['ticker']}: {e}")
-                if len(all_markets) >= max_markets:
-                    break
-        except Exception as e:
-            log_activity(f"[GeoSearch] Keyword discovery error: {e}")
-
-    log_activity(f"[GeoSearch] Found {len(all_markets)} open geo markets")
-    return all_markets[:max_markets]
-
-
 if __name__ == '__main__':
     import sys, io
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-
-    print("=== ECONOMICS SERIES ===")
-    econ = find_series_by_keywords(['cpi', 'inflation', 'fed rate', 'fomc', 'unemployment', 'gdp', 'payroll', 'recession', 'interest rate'])
-    for s in econ[:20]:
-        title = (s.get('title') or '').encode('ascii', 'replace').decode()
-        print(f"  [{s['ticker']}] {title[:70]}")
 
     print("\n=== TECH/GAMING SERIES ===")
     tech = find_series_by_keywords(['apple', 'openai', 'microsoft', 'gaming', 'xbox', 'playstation', 'nintendo', 'game release', 'gta', 'activision'])
@@ -167,8 +95,3 @@ if __name__ == '__main__':
         title = (s.get('title') or '').encode('ascii', 'replace').decode()
         print(f"  [{s['ticker']}] {title[:70]}")
 
-    print("\n=== GEOPOLITICAL SERIES ===")
-    geo = find_series_by_keywords(['ukraine', 'russia', 'ceasefire', 'israel', 'iran', 'taiwan', 'china', 'war', 'nato'])
-    for s in geo[:20]:
-        title = (s.get('title') or '').encode('ascii', 'replace').decode()
-        print(f"  [{s['ticker']}] {title[:70]}")

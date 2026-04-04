@@ -69,27 +69,13 @@ CRYPTO_THRESHOLD_DAILY_ETH_DAILY_CAP_PCT = 0.10
 CRYPTO_THRESHOLD_DAILY_SOL_DAILY_CAP_PCT = 0.10
 
 # Legacy keys (kept for reference / future re-enable)
-# WEATHER_DAILY_CAP_PCT = 0.07   # removed Phase 2
 CRYPTO_DAILY_CAP_PCT  = 0.07   # daily cap for crypto module (legacy fallback)
-# ECON_DAILY_CAP_PCT    = 0.04   # removed Phase 2
-# FED_DAILY_CAP_PCT     = 0.03   # removed Phase 2
 # CRYPTO_15M_DAILY_CAP_PCT = 0.10 # removed Phase 2
 
 # New taxonomy keys (also removed Phase 2)
-# WEATHER_BAND_DAILY_CAP_PCT      = 0.07   # removed Phase 2
-# WEATHER_THRESHOLD_DAILY_CAP_PCT = 0.07   # removed Phase 2
 # CRYPTO_1H_BAND_DAILY_CAP_PCT    = 0.07   # removed Phase 2
 # CRYPTO_1H_DIR_DAILY_CAP_PCT     = 0.15   # removed Phase 2
 # CRYPTO_15M_DIR_DAILY_CAP_PCT    = 0.10   # removed Phase 2
-# ECON_CPI_DAILY_CAP_PCT          = 0.04   # removed Phase 2
-# ECON_UNEMPLOYMENT_DAILY_CAP_PCT = 0.04   # removed Phase 2
-# ECON_FED_RATE_DAILY_CAP_PCT     = 0.03   # removed Phase 2
-# ECON_RECESSION_DAILY_CAP_PCT    = 0.04   # removed Phase 2
-# GEO_DAILY_CAP_PCT               = 0.04   # removed Phase 2
-
-# GEO_DAILY_CAP_PCT still needed — it was in strategy gate checks only,
-# and with caps removed, strategy.py will log a warning and allow through.
-# (No value needed; getattr fallback of None in should_enter() = no enforcement)
 
 # Per-trade position size cap — percentage of total capital
 MAX_POSITION_PCT = 0.01   # 1% of capital per trade (replaces fixed $25 caps)
@@ -101,34 +87,12 @@ MAX_ADD_ALLOCATION = 50.0   # Maximum total allocation per add-on position ($)
 MAX_POSITION_SIZE   = 100.0   # P0-1 fix: was deleted; restored for trader.py legacy path
 MAX_DAILY_EXPOSURE  = 700.0   # P0-1 fix: was deleted; restored for trader.py legacy path
 
-# Risk settings - Weather / Economics
-MIN_EDGE_THRESHOLD = 0.12      # Min edge (12%) to trigger a trade
-MIN_MARKET_LIQUIDITY = 100.00  # Min $ volume in market to trade
-
-# Risk settings - Crypto (separate budget, FULLY AUTO like weather)
-CRYPTO_MIN_EDGE_THRESHOLD = 0.12   # 12% min edge (consistent with weather)
+# Risk settings - Crypto
+CRYPTO_MIN_EDGE_THRESHOLD = 0.12   # 12% min edge
 CRYPTO_SIGNAL_THRESHOLD   = 3.5    # bull/bear score threshold to declare directional signal
 
 # Auto-trade settings
-# Weather + Crypto + Geo = fully autonomous in DEMO (data collection)
-# Geo = ON in DEMO for data gathering — LLM pipeline (Haiku screen + Sonnet estimate)
-WEATHER_AUTO_TRADE  = False  # HALTED 2026-04-01 - focus on crypto only
 CRYPTO_AUTO_TRADE   = True   # Bot executes without asking
-GEO_AUTO_TRADE      = False  # HALTED 2026-04-01 - focus on crypto only
-ECON_AUTO_TRADE       = False   # HALTED 2026-04-01 - focus on crypto only
-ECON_MIN_EDGE         = 0.12   # 12% min edge to trigger a trade
-ECON_MIN_VOLUME       = 100    # minimum market volume (contracts) to consider
-ECON_FAR_DATED_MIN_EDGE = 0.20 # 20% min edge for contracts >60 days out
-ECON_MAX_ENTRY_PRICE  = 0.65   # No entries above 65c (poor risk/reward)
-ECON_MAX_POSITION     = 25.00  # kept for ruppert_cycle.py budget checks
-ECON_MAX_DAILY_EXPOSURE = 100.00  # kept for ruppert_cycle.py budget checks
-
-# Risk settings - Geopolitical (separate budget, LLM-estimated edges)
-GEO_MAX_POSITION_SIZE    = 25.00   # kept for ruppert_cycle.py budget checks
-GEO_MAX_DAILY_EXPOSURE   = 100.00  # kept for ruppert_cycle.py budget checks
-GEO_MIN_EDGE_THRESHOLD   = 0.15    # 15% min edge (higher than weather/crypto - geo harder to model)
-GEO_MAX_CONFIDENCE       = 0.85    # Cap - LLM estimates less calibrated than ensemble weather
-GEO_MIN_DAYS_TO_EXPIRY   = 1       # No same-day expiry for geo markets
 
 # Loss circuit breaker — halt trading if realized losses exceed this % of capital today
 LOSS_CIRCUIT_BREAKER_PCT = 0.05  # 5% of capital
@@ -161,8 +125,6 @@ MIN_HOURS_ENTRY = {
 
 # Minimum confidence thresholds per module
 MIN_CONFIDENCE = {
-    'weather_band':               0.25,
-    'weather_threshold':          0.25,
     'crypto_band_daily_btc':      0.50,
     'crypto_band_daily_eth':      0.50,
     'crypto_band_daily_xrp':      0.50,
@@ -176,11 +138,6 @@ MIN_CONFIDENCE = {
     'crypto_dir_15m_sol':         0.40,
     'crypto_dir_15m_xrp':         0.40,
     'crypto_dir_15m_doge':        0.40,
-    'econ_cpi':                   0.55,
-    'econ_unemployment':          0.55,
-    'econ_fed_rate':              0.55,
-    'econ_recession':             0.55,
-    'geo':                        0.50,
 }
 
 # ── Volume-Tier Edge Discounting ──────────────────────────────────────────────
@@ -193,10 +150,6 @@ VOLUME_DISCOUNT_THIN = 0.65   # edge × 0.65 (35% discount)
 
 # Minimum yes_ask price to enter (skip penny markets with no orderbook)
 MIN_YES_ASK = 5  # cents — skip markets priced at 1-4c
-
-# Maximum model vs market divergence for unvalidated cities
-# If |model_prob - market_prob| > this threshold, skip (market is telling us something)
-MAX_MODEL_MARKET_DIVERGENCE = 0.70  # 70% gap = market likely knows better
 
 # Optimizer thresholds
 OPTIMIZER_MIN_TRADES         = 30    # minimum trades per module before optimizer runs
@@ -298,11 +251,6 @@ CRYPTO_1D_MAX_STRIKE_DISTANCE_PCT  = 0.02   # max abs(strike - spot) / spot befo
 # Active series prefixes — only cache tickers matching these.
 # Update this list when adding new market series (no code change needed).
 WS_ACTIVE_SERIES = [
-    # Weather
-    'KXHIGHT', 'KXHIGHNY', 'KXHIGHMI', 'KXHIGHCH',
-    'KXHIGHDE', 'KXHIGHAT', 'KXHIGHLAX', 'KXHIGHAUS',
-    'KXHIGHSE', 'KXHIGHSF', 'KXHIGHPH', 'KXHIGHLV',
-    'KXHIGHSA', 'KXHIGHMIA',
     # Crypto hourly bands
     'KXBTC', 'KXETH', 'KXXRP', 'KXDOGE', 'KXSOL',
     # Crypto 15m direction
@@ -310,13 +258,6 @@ WS_ACTIVE_SERIES = [
     # Crypto long-horizon (monthly/annual)
     'KXBTCMAXM', 'KXBTCMAXY', 'KXBTCMINY', 'KXBTC2026250', 'KXBTCMAX100',
     'KXETHMAXM', 'KXETHMINY', 'KXETHMAXY',
-    # Econ
-    'KXCPI', 'KXPCE', 'KXJOBS', 'KXUNEMPLOYMENT', 'KXGDP',
-    # Fed
-    'KXFED', 'KXFOMC',
-    # Geo — P2-7 fix: added so ws_feed monitors geo positions for real-time exits
-    'KXUKRAINE', 'KXRUSSIA', 'KXISRAEL', 'KXIRAN', 'KXTAIWAN',
-    'KXNATO', 'KXCHINA', 'KXNKOREA', 'KXCEASEFIRE',
 ]
 WS_CACHE_STALE_SECONDS = 60      # trigger REST fallback after this many seconds
 WS_CACHE_PURGE_SECONDS = 86400   # purge dead entries after this many seconds (24h)
@@ -333,61 +274,6 @@ LONG_HORIZON_VOL_MULT_NEUTRAL   = 1.0    # vol multiplier in neutral regime
 LONG_HORIZON_VOL_MULT_BEAR      = 1.4    # vol multiplier in bear regime
 LONG_HORIZON_BARRIER_BOOST      = 1.5    # barrier reflection principle boost cap
 LONG_HORIZON_FAT_TAIL_ADDEND    = 0.03   # additive fat-tail correction for extreme strikes
-
-# ── Expanded Cities (Weather) ────────────────────────────────────────────────
-# Disable trading on cities with unvalidated bias corrections (0.0 bias).
-# Re-enable after GHCND analysis validates bias offsets for each city.
-EXPANDED_CITIES_ENABLED = False
-
-# ── New City Gate ────────────────────────────────────────────────────────────
-# Prevent bot from picking up brand-new cities it has never traded before.
-# Existing cities (any trade history in logs/trades/) are always allowed.
-# Set True only when existing cities have 30+ scored trades each.
-ALLOW_NEW_CITIES = False
-
-# Cities to skip when EXPANDED_CITIES_ENABLED = False
-# These have 0.0 bias correction (not yet calibrated from GHCND data)
-EXPANDED_CITIES_SKIP = [
-    "KXHIGHTDC",    # Washington DC
-    "KXHIGHPHIL",   # Philadelphia
-    "KXHIGHDEN",    # Denver
-    "KXHIGHTMIN",   # Minneapolis
-    "KXHIGHTLV",    # Las Vegas
-    "KXHIGHTNOU",   # New Orleans
-    "KXHIGHTOKC",   # Oklahoma City
-    "KXHIGHTSEA",   # Seattle
-    "KXHIGHTSATX",  # San Antonio
-    "KXHIGHTATL",   # Atlanta
-]
-
-# ── T-Type Weather Markets ────────────────────────────────────────────────────
-# Margin-based signal thresholds (°F from threshold)
-TTYPE_MARGIN_NO_TRADE = 2.0    # Below this margin: skip (coin flip territory)
-TTYPE_MARGIN_WEAK     = 5.0    # Below this: weak confidence
-TTYPE_MARGIN_STRONG   = 8.0    # Above this: strong confidence
-
-# Confidence levels per margin tier
-TTYPE_CONF_WEAK       = 0.50   # 2–5°F margin → 50% confidence
-TTYPE_CONF_STANDARD   = 0.75   # 5–8°F margin → 75% confidence
-TTYPE_CONF_STRONG     = 0.90   # ≥8°F margin → 90% confidence
-
-# Sizing — DEMO data collection phase
-TTYPE_PER_TRADE_SIZE      = 50.0    # $50 per T-type trade
-TTYPE_MAX_DAILY           = 500.0   # $500/day hard cap across all T-type trades
-TTYPE_PER_CITY_DAILY_MAX  = 100.0   # $100/city/day (across upper + lower threshold)
-
-# Enable T-type in DEMO (set False to disable without code changes)
-TTYPE_ENABLED = True
-
-# ── T-Type Soft Prior (edge_detector.py) ─────────────────────────────────────
-# Batch-3 config keys (previously hardcoded in edge_detector.py)
-TTYPE_SOFT_PRIOR_EDGE_THRESHOLD = 0.30   # apply soft prior when |edge| <= this value
-TTYPE_SOFT_PRIOR_NO_MULT        = 1.15   # confidence multiplier for NO side (longshot bias boost)
-TTYPE_SOFT_PRIOR_YES_MULT       = 0.85   # confidence multiplier for YES side (longshot bias penalty)
-
-# ── Weather Ensemble (edge_detector.py) ──────────────────────────────────────
-WEATHER_MIN_ENSEMBLE_CONFIDENCE = 0.5    # minimum ensemble confidence to proceed
-WEATHER_NWS_CONFIDENCE_PENALTY  = 0.15  # subtract this from confidence when NWS unavailable
 
 # ── Capital Fallback ─────────────────────────────────────────────────────────
 CAPITAL_FALLBACK = 10000.0  # fallback capital when API unavailable
@@ -437,16 +323,9 @@ SETTLEMENT_GUARD_WINDOW_SECS = 90   # seconds before/after close_time to guard
 # ── Minimum Edge per Module (strategy gate) ───────────────────────────────────
 # These are the STRATEGY GATE minimums — a secondary check in should_enter().
 # Individual modules may also have local edge gates (e.g. CRYPTO_15M_MIN_EDGE).
-MIN_EDGE_WEATHER_BAND               = 0.12
-MIN_EDGE_WEATHER_THRESHOLD          = 0.12
 MIN_EDGE_CRYPTO_BAND_DAILY          = 0.12   # applies to crypto_band_daily_* modules
 MIN_EDGE_CRYPTO_DIR_15M             = 0.12   # strategy gate; local gate = CRYPTO_15M_MIN_EDGE (0.02)
 MIN_EDGE_CRYPTO_THRESHOLD_DAILY     = 0.08   # applies to crypto_threshold_daily_* modules
-MIN_EDGE_GEO                        = 0.15
-MIN_EDGE_ECON_CPI                   = 0.12
-MIN_EDGE_ECON_UNEMPLOYMENT          = 0.12
-MIN_EDGE_ECON_FED_RATE              = 0.12
-MIN_EDGE_ECON_RECESSION             = 0.12
 
 # ── Strategy Gate Scalars ─────────────────────────────────────────────────────
 STRATEGY_MIN_CONFIDENCE_FLOOR = 0.25   # universal fallback when module not in MIN_CONFIDENCE dict

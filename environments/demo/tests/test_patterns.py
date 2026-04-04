@@ -20,7 +20,7 @@ def _repo_py_files():
 
 # ── Test 1: No direct Kalshi API calls outside allowed modules ───────────────
 
-ALLOWED_KALSHI_API_FILES = {'kalshi_client.py', 'kalshi_market_search.py', 'check_markets.py', 'check_austin.py', 'backtest_weather.py', 'qa_health_check.py', 'security_audit.py', 'api.py', 'ws_feed.py', 'connection.py'}
+ALLOWED_KALSHI_API_FILES = {'kalshi_client.py', 'kalshi_market_search.py', 'check_markets.py', 'check_austin.py', 'qa_health_check.py', 'security_audit.py', 'api.py', 'ws_feed.py', 'connection.py'}
 
 
 def test_no_direct_kalshi_api_calls():
@@ -62,7 +62,7 @@ def test_all_scanners_route_through_strategy():
 
 # ── Test 3: All modes handled in ruppert_cycle.py ───────────────────────────
 
-REQUIRED_MODES = ['check', 'econ_prescan', 'weather_only', 'crypto_only']
+REQUIRED_MODES = ['check', 'crypto_only']
 
 
 def test_all_modes_handled():

@@ -32,44 +32,6 @@ TRADES_DIR = _paths['trades']
 LOGS_DIR = _paths['logs']
 OUTPUT_FILE = LOGS_DIR / 'scored_predictions.jsonl'
 
-# Ticker prefix -> city name mapping for weather module
-TICKER_CITY_MAP = {
-    "KXHIGHMIA":   "Miami",
-    "KXHIGHLAX":   "Los Angeles",
-    "KXHIGHLA":    "Los Angeles",
-    "KXHIGHCHI":   "Chicago",
-    "KXHIGHHOU":   "Houston",
-    "KXHIGHPHX":   "Phoenix",
-    "KXHIGHNY":    "New York",
-    "KXHIGHTDC":   "Washington DC",
-    "KXHIGHPHIL":  "Philadelphia",
-    "KXHIGHDEN":   "Denver",
-    "KXHIGHTMIN":  "Minneapolis",
-    "KXHIGHTLV":   "Las Vegas",
-    "KXHIGHTNOU":  "New Orleans",
-    "KXHIGHTOKC":  "Oklahoma City",
-    "KXHIGHTSEA":  "Seattle",
-    "KXHIGHTSATX": "San Antonio",
-    "KXHIGHTATL":  "Atlanta",
-    "KXHIGHAUS":   "Austin",
-    "KXHIGHSFO":   "San Francisco",
-}
-
-
-def _extract_city(ticker: str, title: str) -> str | None:
-    """Extract city name from ticker prefix or title for weather module."""
-    series = ticker.split('-')[0].upper() if ticker else ''
-    for prefix, city in TICKER_CITY_MAP.items():
-        if series.startswith(prefix):
-            return city
-    # Fallback: parse from title
-    if title:
-        title_lower = title.lower()
-        for city in TICKER_CITY_MAP.values():
-            if city.lower() in title_lower:
-                return city
-    return None
-
 
 def _load_processed_keys() -> set:
     """Load set of (ticker, date) tuples already in scored_predictions.jsonl."""
@@ -156,15 +118,10 @@ def score_new_settlements():
                 )
 
         module = rec.get('module') or (buy_rec.get('module', '') if buy_rec else '')
-        city = None
-        if module == 'weather':
-            city = _extract_city(ticker, rec.get('title') or (buy_rec.get('title', '') if buy_rec else ''))
 
-        # Extract predicted probability: prefer noaa_prob from buy record, fall back to model_prob.
+        # Extract predicted probability: prefer model_prob from buy record.
         # If buy_rec is None (no matching buy found), predicted_prob stays None — do NOT corrupt.
-        predicted_prob = buy_rec.get('noaa_prob') if buy_rec else None
-        if predicted_prob is None:
-            predicted_prob = buy_rec.get('model_prob') if buy_rec else None
+        predicted_prob = buy_rec.get('model_prob') if buy_rec else None
         if predicted_prob is None:
             predicted_prob = buy_rec.get('market_prob') if buy_rec else None
 

@@ -104,25 +104,6 @@ def _append_jsonl(log_path, record: dict) -> None:
             f.write(line)
 
 
-def _build_ensemble_components(opportunity: dict) -> dict | None:
-    """Extract per-model probabilities and divergence from opportunity dict."""
-    models_used = opportunity.get('models_used')
-    if not models_used:
-        return None
-    model_map = {m['model']: m for m in models_used}
-    ecmwf = model_map.get('ecmwf_ifs025', {})
-    gfs   = model_map.get('gfs_seamless', {})
-    icon  = model_map.get('icon_global', {})
-    means = [m.get('mean_f') for m in models_used if m.get('mean_f') is not None]
-    divergence_f = round(max(means) - min(means), 1) if len(means) >= 2 else None
-    return {
-        'ecmwf_prob':   ecmwf.get('prob'),
-        'gfs_prob':     gfs.get('prob'),
-        'icon_prob':    icon.get('prob'),
-        'divergence_f': divergence_f,
-    }
-
-
 def build_trade_entry(opportunity, size, contracts, order_result, **extra_fields):
     """Build a standardized trade entry dict with all required fields.
 
@@ -179,16 +160,11 @@ def build_trade_entry(opportunity, size, contracts, order_result, **extra_fields
         'action_detail': raw_action,
         'source':       source,
         'module':       module,
-        'noaa_prob':    opportunity.get('noaa_prob'),
         'market_prob':  opportunity.get('market_prob'),
         'edge':         opportunity.get('edge'),
         'confidence':   opportunity.get('confidence') if opportunity.get('confidence') is not None
                         else abs(opportunity.get('edge') or 0),
-        # ── Weather ensemble audit fields (None for non-weather trades) ────────
-        'ensemble_temp_forecast_f': opportunity.get('ensemble_mean'),
-        'model_source':             opportunity.get('model_source'),
-        'ensemble_components':      _build_ensemble_components(opportunity),
-        'entry_price':  entry_price_val,          # ← NEW: was absent
+        'entry_price':  entry_price_val,
         'size_dollars': size,
         'contracts':    contracts,
         'scan_contracts': opportunity.get('scan_contracts'),
@@ -551,26 +527,13 @@ def get_parent_module(module_name: str) -> str:
     never needs its own classification logic.
 
     Mapping:
-        weather_band, weather_threshold              → 'weather'
         crypto_dir_15m_*, crypto_threshold_daily_*,
           crypto_band_daily_*                        → 'crypto'
-        econ_cpi, econ_unemployment,
-          econ_fed_rate, econ_recession              → 'econ'
-        geo                                          → 'geo'
-        sports_odds                                  → 'sports'
         manual, other                                → 'other'
     """
     m = (module_name or '').lower()
-    if m.startswith('weather'):
-        return 'weather'
     if m.startswith('crypto'):
         return 'crypto'
-    if m.startswith('econ'):
-        return 'econ'
-    if m == 'geo':
-        return 'geo'
-    if m.startswith('sports'):
-        return 'sports'
     return 'other'
 
 
@@ -579,9 +542,7 @@ def classify_module(src: str, ticker: str) -> str:
 
     Single source of truth - imported by dashboard/api.py to stay in sync.
 
-    Module taxonomy (2026-04-01 — Phase A rename):
-      weather_band              KXHIGH*-B*  (ticker contains '-B')
-      weather_threshold         KXHIGH*-T*  (ticker contains '-T')
+    Module taxonomy:
       crypto_dir_15m_btc        KXBTC15M
       crypto_dir_15m_eth        KXETH15M
       crypto_dir_15m_sol        KXSOL15M
@@ -597,19 +558,9 @@ def classify_module(src: str, ticker: str) -> str:
       crypto_band_daily_xrp     KXXRP
       crypto_band_daily_doge    KXDOGE
       crypto_band_daily_sol     KXSOL
-      econ_cpi                  KXCPI*
-      econ_unemployment         KXJOBLESSCLAIMS, KXECONSTATU3, KXUE
-      econ_fed_rate             KXFED, KXFOMC
-      econ_recession            KXWRECSS
-      geo                       geopolitical series (unchanged)
+      manual                    manual trades
     """
     t = (ticker or '').upper()
-
-    # ── Weather ───────────────────────────────────────────────────────────
-    if t.startswith('KXHIGH'):
-        if '-T' in t:
-            return 'weather_threshold'
-        return 'weather_band'  # default: B-type band
 
     # ── Crypto 15-min direction ───────────────────────────────────────────
     # NOTE: 15M prefixes (KXBTC15M) must be checked BEFORE base prefixes (KXBTC)
@@ -656,31 +607,6 @@ def classify_module(src: str, ticker: str) -> str:
         return 'crypto_band_daily_sol'
     if src == 'crypto':
         return 'crypto_band_daily_btc'
-
-    # ── Econ subcategories ────────────────────────────────────────────────
-    if t.startswith('KXCPI'):
-        return 'econ_cpi'
-    if any(t.startswith(p) for p in ('KXJOBLESSCLAIMS', 'KXECONSTATU3', 'KXUE')):
-        return 'econ_unemployment'
-    if src == 'fed' or any(t.startswith(p) for p in ('KXFED', 'KXFOMC')):
-        return 'econ_fed_rate'
-    if t.startswith('KXWRECSS'):
-        return 'econ_recession'
-    if src == 'econ':
-        return 'econ_cpi'  # fallback for unknown econ tickers
-
-    # ── Geo ───────────────────────────────────────────────────────────────
-    if src == 'geo' or any(t.startswith(p) for p in (
-        'KXUKRAINE', 'KXRUSSIA', 'KXISRAEL', 'KXIRAN', 'KXTAIWAN',
-        'KXNATO', 'KXCHINA', 'KXNKOREA', 'KXCEASEFIRE',
-    )):
-        return 'geo'
-
-    # ── Sports ─────────────────────────────────────────────────────────────
-    if src == 'sports' or any(
-        t.startswith(p) for p in ('KXSPORT', 'KXML', 'KXNBA', 'KXNFL')
-    ):
-        return 'sports_odds'
 
     if src == 'manual':
         return 'manual'

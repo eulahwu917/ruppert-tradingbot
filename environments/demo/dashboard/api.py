@@ -32,8 +32,8 @@ _pnl_cache: dict = {"ts": 0.0, "data": None}
 _positions_cache: dict = {"ts": 0.0, "data": None}
 
 # ─── Source classification helpers (ISSUE-064: module-scope for reuse) ───────
-_AUTO_PREFIXES   = ('bot', 'weather', 'crypto', 'ws_')
-_MANUAL_PREFIXES = ('economics', 'geo', 'manual')
+_AUTO_PREFIXES   = ('bot', 'crypto', 'ws_')
+_MANUAL_PREFIXES = ('manual',)
 
 def _is_auto(source: str) -> bool:
     """Return True if source is an autonomous/bot source (prefix match)."""
@@ -117,18 +117,6 @@ def read_all_trades():
                     _logger.warning("[dashboard] JSON parse error in %s: %s", path, e)
     return all_trades
 
-
-def read_geo_log():
-    log_path = LOGS_DIR / "geopolitical_scanner.jsonl"
-    entries = []
-    if log_path.exists():
-        with open(log_path, encoding='utf-8') as f:
-            for line in f:
-                try: entries.append(json.loads(line))
-                except Exception as e:
-                    _logger.warning("[dashboard] JSON parse error in %s: %s", log_path, e)
-    today = str(date.today())
-    return [e for e in entries if e.get('date') == today]
 
 
 def read_crypto_15m_summary() -> dict:
@@ -356,12 +344,12 @@ def compute_module_closed_stats_from_logs() -> dict:
     Period fields (closed_pnl_day, closed_pnl_week, closed_pnl_month, closed_pnl_year)
     are computed using the close record timestamp or settlement date parsed from ticker.
 
-    Manual sources (economics, geo, manual) are excluded.
+    Manual sources are excluded.
     """
     from datetime import date as _date, datetime as _dt, timedelta as _td
     _today = _date.today()
     _week_start = _today - _td(days=_today.weekday())
-    _MANUAL_SRC = ('economics', 'geo', 'manual')
+    _MANUAL_SRC = ('manual',)
 
     all_trades = read_all_trades()
 
@@ -527,9 +515,8 @@ def get_account():
                 )
     trades = list(entries.values())
 
-    # Bot = weather + crypto (fully autonomous, Ruppert decides)
-    # Manual = economics + geo (David approves)
-    # Gaming removed entirely
+    # Bot = crypto (fully autonomous, Ruppert decides)
+    # Manual = manual (David approves)
     # _is_auto / _is_manual are now module-level helpers (ISSUE-064)
 
     # Only count OPEN (not-yet-settled) positions in deployed capital
@@ -693,7 +680,7 @@ def get_trades():
 
         closed.append(t)
     # Exclude manual trades from the closed trades table display
-    _MANUAL_EXCL = ('manual', 'economics', 'geo')
+    _MANUAL_EXCL = ('manual',)
     closed = [t for t in closed if t.get('source', 'bot') not in _MANUAL_EXCL]
     return closed
 
@@ -758,7 +745,6 @@ def get_active_positions():
                     "edge":        None,
                     "date":        '',
                     "close_time":  '',
-                    "noaa_prob":   None,
                     "market_prob": None,
                 })
             # Recompute pos_ratio with total_cost
@@ -836,7 +822,6 @@ def get_active_positions():
             "edge":        round(edge, 3) if edge else None,
             "date":        t.get('date') or t.get('_date', ''),
             "close_time":  t.get('close_time', ''),
-            "noaa_prob":   t.get('noaa_prob'),
             "market_prob": t.get('market_prob'),
         })
 
@@ -921,40 +906,6 @@ def get_position_statuses():
     return statuses
 
 
-@app.get("/api/kalshi/weather")
-def get_weather_markets():
-    """
-    Weather markets — served from scanner cache for speed.
-    Background scanner (ruppert_cycle.py) writes logs/weather_scan.jsonl.
-    Fallback: stale indicator (no direct REST calls from dashboard).
-    """
-    # 1. Try cache first (written by background scanner)
-    cache = LOGS_DIR / "weather_scan.jsonl"
-    if cache.exists():
-        from datetime import datetime, timezone
-        age = (datetime.now(timezone.utc).timestamp() - cache.stat().st_mtime)
-        if age < 14400:  # < 4 hours old
-            markets = []
-            for line in cache.read_text(encoding='utf-8').splitlines():
-                try: markets.append(json.loads(line))
-                except Exception as e:
-                    _logger.warning("[dashboard] Bad line in weather_scan.jsonl: %s", e)
-            if markets:
-                return markets
-
-    # 2. Cache unavailable — return stale indicator
-    return {"markets": [], "is_stale": True, "note": "Weather scan cache unavailable. Run ruppert_cycle.py to refresh."}
-
-
-@app.get("/api/scout/geo")
-def get_geo_scout():
-    """Geopolitical markets — includes settlement rules."""
-    entries = read_geo_log()
-    for e in entries:
-        if not e.get('kalshi_url'):
-            e['kalshi_url'] = f"https://kalshi.com/markets/{e.get('ticker','')}"
-        e['rules_available'] = bool(e.get('rules'))
-    return entries
 
 
 # ─── Dashboard ────────────────────────────────────────────────────────────────
@@ -1134,7 +1085,7 @@ def get_pnl_history():
     for ticker, t in settled_tickers.items():
         try:
             src = t.get('source', 'bot')
-            is_manual = src in ('economics', 'geo', 'manual')
+            is_manual = src in ('manual',)
             position_cost = float(t.get('size_dollars') or 0)
             if is_manual:
                 manual_cost_basis += position_cost
@@ -1323,7 +1274,7 @@ def get_pnl_history():
     module_open_stats = {m: {'open_deployed': 0.0, 'open_trades': 0, 'open_pnl': 0.0} for m in module_keys}
     for ticker, t in open_tickers.items():
         src = t.get('source', 'bot')
-        if src in ('economics', 'geo', 'manual'):
+        if src in ('manual',):
             continue
         mod = classify_module(src, ticker)
         _ob = _stat_bucket(mod)
@@ -1366,7 +1317,7 @@ def get_pnl_history():
             if pnl > 0: open_wins += 1
 
             src = t.get('source', 'bot')
-            if src in ('economics', 'geo', 'manual'):
+            if src in ('manual',):
                 open_by_source['manual'] += pnl
             else:
                 open_by_source['bot'] += pnl
@@ -1613,7 +1564,6 @@ def _build_state():
                 'cost':        round(cost, 2),
                 'contracts':   contracts,
                 'edge':        round(edge_val, 3) if edge_val else None,
-                'noaa_prob':   t.get('noaa_prob'),
                 'market_prob': t.get('market_prob'),
                 'status':      status,
                 'close_time':  t.get('close_time', ''),
@@ -1659,7 +1609,7 @@ def _build_state():
     for ticker, t in settled_tickers.items():
         try:
             src = t.get('source', 'bot')
-            is_manual = src in ('economics', 'geo', 'manual')
+            is_manual = src in ('manual',)
 
             side2 = t.get('side', 'no')
             cr = _close_recs_state.get((ticker, side2))
@@ -1863,37 +1813,6 @@ def _build_state():
         'smart_money': smart_money,
     }
 
-
-@app.get("/api/sports")
-def api_sports():
-    today = date.today().isoformat()
-    sports_log = LOGS_DIR / "sports_odds_log.jsonl"
-    records = []
-    if not sports_log.exists():
-        return []
-    with open(sports_log, 'r', encoding='utf-8') as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                rec = json.loads(line)
-            except Exception:
-                continue
-            if rec.get('event_type') != 'odds_snapshot':
-                continue
-            if not rec.get('logged_at', '').startswith(today):
-                continue
-            records.append({
-                'sport': rec.get('sport'),
-                'matchup': rec.get('matchup'),
-                'game_time': rec.get('game_time'),
-                'kalshi_yes_price': rec.get('kalshi_yes_price'),
-                'vegas_prob': rec.get('vegas_prob'),
-                'gap': rec.get('gap'),
-            })
-    records.sort(key=lambda r: r.get('gap') or 0, reverse=True)
-    return records
 
 
 @app.get("/api/state")

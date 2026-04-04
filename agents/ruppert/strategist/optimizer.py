@@ -32,12 +32,8 @@ import config as _config
 from agents.ruppert.data_scientist.capital import get_capital as _get_capital
 _capital = _get_capital()
 DAILY_CAP = _capital * (
-    getattr(_config, 'WEATHER_DAILY_CAP_PCT', 0.07) +
     getattr(_config, 'CRYPTO_DAILY_CAP_PCT', 0.07) +
-    getattr(_config, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04) +
-    getattr(_config, 'GEO_DAILY_CAP_PCT', 0.04) +
-    getattr(_config, 'ECON_DAILY_CAP_PCT', 0.04) +
-    getattr(_config, 'FED_DAILY_CAP_PCT', 0.03)
+    getattr(_config, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04)
 )
 MIN_TRADES             = getattr(_config, 'OPTIMIZER_MIN_TRADES', 30)
 DOMAIN_THRESHOLD       = 10  # Fine-grained domains (e.g. crypto_dir_15m_btc) — lowered from 30
@@ -59,18 +55,10 @@ CONFIDENCE_TIERS = [
 
 def detect_module(ticker: str) -> str:
     t = ticker.upper()
-    if t.startswith("KXHIGH"):
-        return "weather"
     for kw in ("BTC", "ETH", "SOL"):
         if kw in t:
             return "crypto"
-    for kw in ("FED", "FOMC"):
-        if kw in t:
-            return "fed"
-    for kw in ("GDP", "CPI", "PCE", "NFP", "UNEMP"):
-        if kw in t:
-            return "econ"
-    return "geo"
+    return "crypto"
 
 
 def load_trades() -> list:
@@ -182,9 +170,9 @@ def enrich_trades(trades: list, outcomes: dict) -> list:
         if "confidence" not in rec or rec["confidence"] is None:
             edge = rec.get("edge", 0.0)
             rec["confidence"] = abs(edge) if edge is not None else 0.0
-        # Win prob (noaa_prob or win_prob)
+        # Win prob
         if "win_prob" not in rec:
-            rec["win_prob"] = rec.get("noaa_prob", None)
+            rec["win_prob"] = rec.get("model_prob", None)
         # Outcome from scored_predictions
         ticker = rec.get("ticker", "")
         outcome_records = outcomes.get(ticker, [])
@@ -208,7 +196,7 @@ def analyze_win_rate_by_module(trades: list):
     """Returns dict: module -> {trades, wins, win_rate}"""
     module_data = defaultdict(lambda: {"trades": 0, "wins": 0})
     for t in trades:
-        mod = t.get("module", "geo")
+        mod = t.get("module", "crypto")
         outcome = t.get("outcome")
         module_data[mod]["trades"] += 1
         if outcome == 1:
@@ -295,15 +283,10 @@ def analyze_brier_score(trades: list):
     """Returns {brier_score, count} for trades with win_prob and outcome.
 
     IMPORTANT: This function requires ENRICHED trades as input (output of enrich_trades()).
-    Calling it on raw trade log records will silently exclude all pre-2026-03-26 records
-    that only have 'noaa_prob' (not 'win_prob') as a direct field.
     """
     squared_errors = []
     for t in trades:
         wp = t.get("win_prob")
-        if wp is None:
-            # Fallback: accept noaa_prob for records that weren't enriched
-            wp = t.get("noaa_prob")
         outcome = t.get("outcome")
         if wp is None or outcome is None:
             continue
@@ -350,7 +333,7 @@ def analyze_sizing_review(trades: list):
     """Returns dict: module -> {count, avg_size}."""
     module_sizes = defaultdict(list)
     for t in trades:
-        mod = t.get("module", "geo")
+        mod = t.get("module", "crypto")
         size = t.get("size_dollars")
         if size is not None:
             try:

@@ -268,8 +268,6 @@ def main():
             module = 'crypto_dir_15m_btc'
         elif 'crypto_1h' in module_raw or module_raw in ('crypto', 'crypto_1h_band'):
             module = 'crypto_band_daily_btc'
-        elif 'weather' in module_raw:
-            module = 'weather'
         else:
             module = module_raw
         

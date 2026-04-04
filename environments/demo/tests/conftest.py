@@ -14,7 +14,7 @@ def sample_market():
 def sample_signal():
     return {
         'edge': 0.25, 'win_prob': 0.75, 'confidence': 0.70,
-        'hours_to_settlement': 18.0, 'module': 'weather',
+        'hours_to_settlement': 18.0, 'module': 'crypto_band_daily_btc',
         'vol_ratio': 1.0, 'yes_ask': 15, 'yes_bid': 14,
         'open_position_value': 0.0,
     }

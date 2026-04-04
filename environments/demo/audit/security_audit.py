@@ -143,12 +143,9 @@ apis = {
     "api.elections.kalshi.com":    "Kalshi trading API (official)",
     "demo-api.elections.kalshi.com": "Kalshi demo API (official)",
     "api.open-meteo.com":          "Open-Meteo weather (free, no key)",
-    "api.weather.gov":             "NOAA NWS (US government)",
     "api.kraken.com":              "Kraken crypto prices (public)",
     "data-api.polymarket.com":     "Polymarket positions (public read)",
     "gamma-api.polymarket.com":    "Polymarket markets (public read)",
-    "api.bls.gov":                 "Bureau of Labor Statistics (US gov)",
-    "api.stlouisfed.org":          "FRED / St Louis Fed (US gov)",
     "api.binance.com":             "Binance prices (geo-blocked, fallback only)",
     "api.coingecko.com":           "CoinGecko prices (public)",
 }

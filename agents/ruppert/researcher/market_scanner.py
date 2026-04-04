@@ -23,11 +23,9 @@ if str(_WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKSPACE_ROOT))
 
 
-# California-restricted series: sports and election prediction markets
+# California-restricted series: election prediction markets
 # Geo restriction applies to all California-based participants.
 CA_RESTRICTED_SERIES = {
-    # Sports
-    'KXNBA', 'KXNHL', 'KXMLB', 'KXNFL',
     # Elections
     'KXPRES', 'KXSEC', 'KXHOUSE', 'KXSENATE',
 }
@@ -36,14 +34,8 @@ CA_RESTRICTED_SERIES = {
 # Categories currently traded by Ruppert
 # -----------------------------------------------------------------------
 CURRENTLY_TRADED_SERIES_PREFIXES = {
-    # Weather (high temp)
-    'KXHIGH',
     # Crypto
     'KXBTC', 'KXETH', 'KXSOL', 'KXXRP',
-    # Economics / Fed
-    'KXFOMC', 'KXFED', 'KXCPI', 'KXUNRATE',
-    # Geo / Geopolitical (passively scanning)
-    'KXUKR',
 }
 
 # Known Kalshi series to probe for new opportunities
@@ -61,7 +53,7 @@ CANDIDATE_SERIES_TO_SCAN = [
     'KXOIL', 'KXGAS',
     # Tech events
     'KXAI', 'KXAPPLE', 'KXNVIDIA',
-    # NOTE: CA_RESTRICTED_SERIES (sports + elections) intentionally excluded
+    # NOTE: CA_RESTRICTED_SERIES (elections) intentionally excluded
 ]
 
 # Public API — no auth needed for market discovery
@@ -267,38 +259,9 @@ def classify_opportunity(result: dict) -> dict:
 def check_economic_calendar_gaps() -> list[dict]:
     """
     Identify economic indicator categories on Kalshi that we don't cover.
-    Known series list is manually maintained — update when new Kalshi econ series are discovered.
-    Returns list of gap findings.
+    Returns list of gap findings (currently empty — econ modules removed).
     """
-    gaps = []
-
-    covered_econ_series = {'KXFOMC', 'KXFED', 'KXCPI', 'KXUNRATE'}
-
-    # Known Kalshi econ series — manually maintained, update as new series are listed on Kalshi
-    # Last reviewed: 2026-03-29
-    # To add a new series: append {'KXSERIES': 'description'} and add to CANDIDATE_SERIES_TO_SCAN
-    known_econ_series = {
-        'KXGDP': 'GDP growth rate',
-        'KXPCE': 'PCE inflation',
-        'KXPPI': 'Producer Price Index',
-        'KXNFP': 'Non-Farm Payrolls',
-        'KXJOBLESSCLAIMS': 'Initial Jobless Claims',  # was KXISA (incorrect) — corrected 2026-03-29
-        'KXCPI': 'CPI (covered)',
-        'KXFOMC': 'FOMC rate decision (covered)',
-        'KXUNRATE': 'Unemployment rate (covered)',
-        'KXFED': 'Fed funds rate (covered)',
-    }
-
-    for series, description in known_econ_series.items():
-        if series not in covered_econ_series:
-            gaps.append({
-                'series': series,
-                'description': description,
-                'gap_type': 'uncovered_econ_series',
-                'hypothesis': f'We have BLS/FRED data for {description} — could build edge model similar to CPI scanner',
-            })
-
-    return gaps
+    return []
 
 
 def generate_signal_hypotheses() -> list[dict]:
@@ -327,7 +290,7 @@ def generate_signal_hypotheses() -> list[dict]:
             'category': 'NFP (Non-Farm Payrolls)',
             'signal_sources': ['ADP employment report', 'weekly jobless claims', 'ISM employment subindex'],
             'hypothesis': 'ADP payroll data releases 2 days before NFP and is correlated. If ADP surprised high/low, NFP Kalshi markets may not have updated. Early-mover edge possible.',
-            'data_source_needed': 'BLS ADP data (free), already partially covered in environments/demo/economics_client.py — not yet importable from researcher package',
+            'data_source_needed': 'BLS ADP data (free)',
             'effort': 'low',
             'priority': 'high',
         },

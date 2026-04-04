@@ -478,8 +478,7 @@ def run_polling_scan(client: KalshiClient, run_settlement_check: bool = True):
     """
     # Import position check functions from existing module
     from agents.ruppert.trader.post_trade_monitor import (
-        check_settlements, check_weather_position, check_crypto_position,
-        check_alert_only_position
+        check_settlements, check_crypto_position,
     )
     
     print(f"  [Polling Scan] Starting at {ts()}")
@@ -520,12 +519,11 @@ def run_polling_scan(client: KalshiClient, run_settlement_check: bool = True):
         reason = None
         
         try:
-            if source in ('weather', 'bot') or 'KXHIGH' in ticker:
-                action, reason, cur_price, contracts, pnl = check_weather_position(pos, market)
-            elif source == 'crypto' or any(ticker.upper().startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXSOL', 'KXDOGE')):
+            if source in ('bot', 'crypto') or any(ticker.upper().startswith(p) for p in ('KXBTC', 'KXETH', 'KXXRP', 'KXSOL', 'KXDOGE')):
                 action, reason, cur_price, contracts, pnl = check_crypto_position(pos, market)
             else:
-                action, reason, cur_price, contracts, pnl = check_alert_only_position(pos, market)
+                print(f"  [Polling] SKIP: {ticker} unsupported source '{source}'")
+                continue
         except Exception as e:
             print(f"  [Polling] Error checking {ticker}: {e}")
             continue
