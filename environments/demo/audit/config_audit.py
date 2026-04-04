@@ -127,7 +127,7 @@ def check_capital_sot():
 def check_secrets_not_hardcoded():
     """Verify secrets are loaded from files, not hardcoded."""
     SECRETS_DIR = _WORKSPACE_ROOT / "secrets"
-    required_secrets = ["kalshi_config.json", "cme_config.json"]
+    required_secrets = ["kalshi_config.json"]
     for secret in required_secrets:
         path = SECRETS_DIR / secret
         if not path.exists():

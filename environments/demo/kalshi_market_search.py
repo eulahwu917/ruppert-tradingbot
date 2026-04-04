@@ -56,13 +56,6 @@ def get_markets_by_tickers(series_tickers):
     return all_markets
 
 
-# Known series tickers by category
-ECONOMICS_SERIES = [
-    'KXCPI', 'KXCORECPI', 'KXUNRATE', 'KXFOMC', 'KXFEDRATE',
-    'KXNFP', 'KXGDP', 'KXPCE', 'KXSPX', 'KXNDX',
-    'KXRECESSION', 'KXMORTGAGE', 'KXGAS',
-]
-
 TECH_GAMING_SERIES = [
     'KXAAPLWATCH', 'KXOAIANTH', 'KXRAMPBREX', 'KXDEELRIP',
 ]

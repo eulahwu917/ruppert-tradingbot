@@ -2,7 +2,7 @@
 polymarket_client.py — Shared Polymarket signal layer for Ruppert trading bot.
 
 READ-ONLY signal data only. No trading (geo-locked).
-Imported by: crypto_client.py, geopolitical_scanner.py
+Imported by: crypto_client.py
 
 DS — 2026-03-31
 """
@@ -541,7 +541,7 @@ def get_crypto_daily_consensus(asset: str) -> Optional[dict]:
         return None
 
 
-# ─── Macro / Economics signals ───────────────────────────────────────────────
+# ─── Macro signals ───────────────────────────────────────────────────────────
 
 _MACRO_KEYWORDS: list[str] = [
     "fed rate", "interest rate", "inflation", "CPI",

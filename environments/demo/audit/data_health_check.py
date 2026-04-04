@@ -95,34 +95,6 @@ def _push_alert(message: str):
         logger.error(f"Failed to push alert to pending_alerts.json: {e}")
 
 
-def check_nws(results: dict):
-    """Check NWS API reachable and temp in seasonal range for Miami."""
-    try:
-        r = requests.get(
-            "https://api.weather.gov/gridpoints/MFL/106,51/forecast",
-            timeout=10, headers={"User-Agent": "ruppert-healthcheck"}
-        )
-        if r.status_code != 200:
-            _push_alert(f"NWS API returned {r.status_code}")
-            results["nws"] = "warn"
-            return
-        periods = r.json().get("properties", {}).get("periods", [])
-        if not periods:
-            _push_alert("NWS returned empty forecast periods")
-            results["nws"] = "warn"
-            return
-        temp = periods[0].get("temperature", 0)
-        month = datetime.now().month
-        lo, hi = _TEMP_BOUNDS.get(month, (0, 130))
-        if not (lo <= temp <= hi):
-            _push_alert(f"NWS Miami temp {temp}F out of seasonal range ({lo}-{hi}F)")
-            results["nws"] = "warn"
-        else:
-            results["nws"] = "ok"
-    except Exception as e:
-        _push_alert(f"NWS check failed: {e}")
-        results["nws"] = "fail"
-
 
 def check_kraken(results: dict):
     """Check Kraken API reachable and BTC price sensible."""
@@ -141,31 +113,6 @@ def check_kraken(results: dict):
         _push_alert(f"Kraken check failed: {e}")
         results["kraken"] = "fail"
 
-
-def check_openmeteo(results: dict):
-    """Check Open-Meteo ensemble returns members for Miami."""
-    try:
-        r = requests.get(
-            "https://ensemble-api.open-meteo.com/v1/ensemble",
-            params={
-                "latitude": 25.7959, "longitude": -80.2870,
-                "hourly": "temperature_2m",
-                "models": "ecmwf_ifs025",
-                "forecast_days": 2,
-                "temperature_unit": "fahrenheit",
-            },
-            timeout=15,
-        )
-        r.raise_for_status()
-        member_keys = [k for k in r.json().get("hourly", {}) if "member" in k]
-        if len(member_keys) < 10:
-            _push_alert(f"Open-Meteo returned only {len(member_keys)} ensemble members (expected 50+)")
-            results["openmeteo"] = "warn"
-        else:
-            results["openmeteo"] = "ok"
-    except Exception as e:
-        _push_alert(f"Open-Meteo check failed: {e}")
-        results["openmeteo"] = "fail"
 
 
 def check_capital(results: dict):
@@ -187,9 +134,7 @@ def main():
     logger.info("=== Daily Data Health Check starting ===")
     results = {}
 
-    check_nws(results)
     check_kraken(results)
-    check_openmeteo(results)
     check_capital(results)
 
     # Summary

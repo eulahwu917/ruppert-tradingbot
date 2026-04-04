@@ -142,7 +142,6 @@ print("\n[5] External APIs in use (whitelist):")
 apis = {
     "api.elections.kalshi.com":    "Kalshi trading API (official)",
     "demo-api.elections.kalshi.com": "Kalshi demo API (official)",
-    "api.open-meteo.com":          "Open-Meteo weather (free, no key)",
     "api.kraken.com":              "Kraken crypto prices (public)",
     "data-api.polymarket.com":     "Polymarket positions (public read)",
     "gamma-api.polymarket.com":    "Polymarket markets (public read)",

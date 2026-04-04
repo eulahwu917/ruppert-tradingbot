@@ -31,10 +31,9 @@ BONFERRONI_THRESHOLD = 0.05 / BONFERRONI_N  # ~0.0083
 import config as _config
 from agents.ruppert.data_scientist.capital import get_capital as _get_capital
 _capital = _get_capital()
-DAILY_CAP = _capital * (
-    getattr(_config, 'CRYPTO_DAILY_CAP_PCT', 0.07) +
-    getattr(_config, 'CRYPTO_15M_DAILY_CAP_PCT', 0.04)
-)
+# Use circuit breaker daily loss limit as reporting baseline (informational only)
+_CB_DAILY_PCT = getattr(_config, 'LOSS_CIRCUIT_BREAKER_PCT', 0.05)
+DAILY_CAP = _capital * _CB_DAILY_PCT
 MIN_TRADES             = getattr(_config, 'OPTIMIZER_MIN_TRADES', 30)
 DOMAIN_THRESHOLD       = 10  # Fine-grained domains (e.g. crypto_dir_15m_btc) — lowered from 30
 LOW_WIN_RATE_THRESHOLD = getattr(_config, 'OPTIMIZER_LOW_WIN_RATE', 0.60)
@@ -52,13 +51,6 @@ CONFIDENCE_TIERS = [
     (0.80, 1.01, "80%+"),
 ]
 
-
-def detect_module(ticker: str) -> str:
-    t = ticker.upper()
-    for kw in ("BTC", "ETH", "SOL"):
-        if kw in t:
-            return "crypto"
-    return "crypto"
 
 
 def load_trades() -> list:
@@ -113,8 +105,9 @@ def get_domain_trade_counts() -> dict[str, int]:
     """
     Reads scored_predictions.jsonl and returns count of scored trades per domain.
     Domain is read from the stored 'domain' field (fine-grained classify_module name).
-    Falls back to detect_module(ticker) for legacy records without a domain field.
+    Falls back to classify_module() for legacy records without a domain field.
     """
+    from agents.ruppert.data_scientist.logger import classify_module
     counts = defaultdict(int)
     scored_path = LOGS_DIR / "scored_predictions.jsonl"
     if not scored_path.exists():
@@ -129,7 +122,7 @@ def get_domain_trade_counts() -> dict[str, int]:
                 ticker = rec.get("ticker", "")
                 # Use stored domain (fine-grained classify_module name) if present;
                 # fall back to detect_module for legacy records without domain field.
-                domain = rec.get("domain") or detect_module(ticker)
+                domain = rec.get("domain") or classify_module(rec.get("source", ""), ticker)
                 if domain:
                     counts[domain] += 1
             except json.JSONDecodeError:

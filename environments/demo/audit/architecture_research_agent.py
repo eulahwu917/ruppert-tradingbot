@@ -26,12 +26,9 @@ SECRETS_DIR  = Path(__file__).parent.parent / "secrets"
 
 # ── Current Ruppert Architecture Summary (injected into Opus prompt) ──────────
 ARCHITECTURE_SUMMARY = """
-Ruppert is a Kalshi prediction market trading bot with 5 trading domains:
-1. Weather: 19 cities, Open-Meteo 3-model ensemble (ECMWF 40%+GFS 40%+ICON 20%), NWS official station, NO-only direction filter, airport station coords
-2. Crypto: BTC/ETH/XRP/SOL/DOGE price bands, Kraken prices, band probability model, smart money wallet tracker
-3. Fed Rate: CME FedWatch API (65%) + Polymarket FOMC (35%) + FRED sanity gate, 2-7 day signal window
-4. Geo/Political: GDELT + Haiku screening + Sonnet estimation
-5. Economics/CPI: BLS/FRED + Sonnet analysis
+Ruppert is a Kalshi prediction market trading bot focused on crypto trading:
+- Crypto: BTC/ETH/XRP/SOL/DOGE price bands, Kraken prices, band probability model, smart money wallet tracker
+  - Modules: crypto_dir_15m (directional 15-min), crypto_band_daily (price bands), crypto_threshold_daily (threshold)
 
 Architecture principles:
 - LLMs generate signals, deterministic math executes (strategy.py)
@@ -45,7 +42,6 @@ Architecture principles:
 Current gaps being watched:
 - Brier score calibration not yet validated (accumulating data)
 - Per-domain autoresearch threshold not yet reached
-- Baseline comparisons being tracked (always-NO weather, follow-CME Fed, uniform sizing)
 """
 
 

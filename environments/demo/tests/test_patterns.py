@@ -62,7 +62,7 @@ def test_all_scanners_route_through_strategy():
 
 # ── Test 3: All modes handled in ruppert_cycle.py ───────────────────────────
 
-REQUIRED_MODES = ['check', 'crypto_only']
+REQUIRED_MODES = ['check', 'crypto_only', 'crypto_1d', 'report']
 
 
 def test_all_modes_handled():

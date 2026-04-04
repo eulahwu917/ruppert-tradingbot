@@ -316,7 +316,7 @@ def run_exposure_reconciliation(logs_dir, capital, buying_power):
 
 
 def run_position_check(client, state):
-    """Check all open positions, trigger weather alerts.
+    """Check all open positions.
 
     Mutates state.traded_tickers (adds auto-exited tickers).
     Returns list of (action, ticker, side, price, contracts, pnl) tuples for actions taken.
@@ -907,7 +907,7 @@ def run_cycle(mode):
             buying_power=buying_power,
         )
 
-        # Only run historical audit on substantive modes — skip for lightweight check/report/weather-only
+        # Only run historical audit on substantive modes — skip for lightweight check/report
         if mode == 'full':
             try:
                 from agents.ruppert.data_scientist.data_agent import run_historical_audit

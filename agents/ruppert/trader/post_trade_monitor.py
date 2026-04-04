@@ -274,7 +274,6 @@ def check_settlements(client):
             "entry_edge": pos.get("edge", None),
             "confidence": pos.get("confidence", None),
             "hold_duration_hours": round((datetime.now() - entry_dt).total_seconds() / 3600, 2) if entry_dt else None,
-            "noaa_prob": None,
             "market_prob": None,
             "scan_contracts": None,
             "fill_contracts": contracts,
@@ -580,7 +579,7 @@ def run_monitor():
                 exit_opp = {
                     'ticker': ticker, 'title': pos.get('title', ticker),
                     'side': side, 'action': 'exit',
-                    'market_prob': cur_price / 100, 'noaa_prob': None, 'edge': None,
+                    'market_prob': cur_price / 100, 'edge': None,
                     'size_dollars': round(pos_contracts * cur_price / 100, 2),
                     'contracts': pos_contracts, 'source': source,
                     'timestamp': ts(), 'date': str(date.today()),

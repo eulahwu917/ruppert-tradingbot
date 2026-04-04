@@ -41,8 +41,6 @@ CURRENTLY_TRADED_SERIES_PREFIXES = {
 # Known Kalshi series to probe for new opportunities
 # These are categories we don't currently have dedicated scanners for
 CANDIDATE_SERIES_TO_SCAN = [
-    # Weather — humidity / precipitation
-    'KXPRECIP', 'KXSNOW', 'KXRAIN',
     # Macro
     'KXGDP', 'KXPCE', 'KXPPI', 'KXNFP', 'KXJOBLESSCLAIMS',
     # Market / Equities
@@ -259,7 +257,7 @@ def classify_opportunity(result: dict) -> dict:
 def check_economic_calendar_gaps() -> list[dict]:
     """
     Identify economic indicator categories on Kalshi that we don't cover.
-    Returns list of gap findings (currently empty — econ modules removed).
+    Returns list of gap findings.
     """
     return []
 
@@ -297,9 +295,9 @@ def generate_signal_hypotheses() -> list[dict]:
         {
             'category': 'Precipitation / snow markets',
             'signal_sources': ['NOAA QPF (quantitative precip forecast)', 'NWS point forecasts', 'GFS ensemble'],
-            'hypothesis': 'We already have NOAA station access via ghcnd_client. QPF endpoint provides precip probability. Could extend weather scanner to cover precipitation markets.',
-            'data_source_needed': 'NOAA Weather.gov API (free, already partially integrated)',
-            'effort': 'low',
+            'hypothesis': 'QPF endpoint provides precip probability. Could build a weather scanner to cover precipitation markets.',
+            'data_source_needed': 'NOAA Weather.gov API (free)',
+            'effort': 'medium',
             'priority': 'medium',
         },
         {

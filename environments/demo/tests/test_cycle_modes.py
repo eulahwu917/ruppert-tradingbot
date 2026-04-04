@@ -7,7 +7,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
-REQUIRED_MODES = ['check', 'crypto_only', 'report']
+REQUIRED_MODES = ['check', 'crypto_only', 'crypto_1d', 'report']
 FALLTHROUGH_MODES = {'full'}
 
 
@@ -35,6 +35,7 @@ def test_mode_handler_functions_exist():
     expected = {
         'check': 'run_check_mode',
         'crypto_only': 'run_crypto_only_mode',
+        'crypto_1d': 'run_crypto_1d_mode',
         'report': 'run_report_mode',
     }
     missing = []
