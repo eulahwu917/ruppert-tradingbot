@@ -89,9 +89,9 @@ _Affects crypto_threshold_daily / crypto_band_daily, analytics pipelines, data q
 | ISSUE-066 | ✅ COMPLETE (d02db9f) `closed_win_rate` uses ticker-dedup instead of trade_id | Win/loss counts collapse multiple same-ticker trades; rate wrong | `dashboard/api.py` |
 | ISSUE-072 | ✅ COMPLETE (d02db9f) 19 exception swallows in dashboard API → all errors silently hidden | Dashboard returns wrong data with no indication anything failed | `dashboard/api.py` |
 | ISSUE-036 | ✅ COMPLETE (ae558f1) `data_integrity_check.py` checks `logs/` not `logs/trades/` → never validated since migration | Audit tool returns false "OK" on every run; gives false confidence | `data_integrity_check.py` |
-| ISSUE-037 | `code_audit.py` scans `audit/` instead of `demo/` → misses every production module | Code audit tool sees no production code; entirely useless | `code_audit.py` |
-| ISSUE-038 | `qa_self_test.py` has hardcoded absolute Windows path → breaks everywhere else | QA tests cannot run in CI or on any other machine | `qa_self_test.py` |
-| ISSUE-100 | `qa_self_test.py` deprecated file check scans wrong directory → always passes falsely | QA passes on deprecated-file check even when they exist | `qa_self_test.py` |
+| ISSUE-037 | ✅ COMPLETE (ae558f1) `code_audit.py` scans `audit/` instead of `demo/` → misses every production module | Code audit tool sees no production code; entirely useless | `code_audit.py` |
+| ISSUE-038 | ✅ COMPLETE (ae558f1) `qa_self_test.py` has hardcoded absolute Windows path → breaks everywhere else | QA tests cannot run in CI or on any other machine | `qa_self_test.py` |
+| ISSUE-100 | ✅ COMPLETE (ae558f1) `qa_self_test.py` deprecated file check scans wrong directory → always passes falsely | QA passes on deprecated-file check even when they exist | `qa_self_test.py` |
 | ISSUE-034 | ✅ COMPLETE (07d3eba) `position_monitor WS_ENABLED=True` raises RuntimeError immediately | Enabling WS mode crashes monitor before polling fallback can run | `position_monitor.py` |
 | ISSUE-045 | ✅ COMPLETE (8a32658) Legacy positions assigned `entry_secs_in_window=120` → always most conservative stop tier | Positions missing this field get tightest stops regardless of actual entry time | `position_tracker.py` |
 | ISSUE-048 | `crypto_long` routing conflict → `data_agent` auto-fix loop writes records repeatedly | Data agent keeps rewriting module labels; corrupts trade log analytics | `data_agent.py`, `logger.py` |
@@ -126,12 +126,12 @@ _Affects crypto_threshold_daily / crypto_band_daily, analytics pipelines, data q
 ## P2 — Fix Before Going Live
 _⚠️ Live environment archived 2026-04-03 — will be rebuilt from scratch later._
 _Autoresearch archived 2026-04-03 — will be replaced with new backtest engine._
-_ISSUE-090 and ISSUE-119 remain active (demo-relevant config issues)._
+_ISSUE-090 and ISSUE-119 were active; both now resolved._
 
 | ID | Title | Why P2 | File |
 |----|-------|--------|------|
-| ISSUE-090 | `CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED=False` — no daily dollar ceiling for 15m module | 96 windows × 5 assets can consume entire daily budget without any 15m-level ceiling | `config.py` |
-| ISSUE-119 | Missing `{MODULE}_DAILY_CAP_PCT` constant → new modules fail-open | Any module added without its cap constant can consume entire 70% global budget | `strategy.py`, `config.py` |
+| ISSUE-090 | ✅ COMPLETE (ae558f1) `CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED=False` — no daily dollar ceiling for 15m module | 96 windows × 5 assets can consume entire daily budget without any 15m-level ceiling | `config.py` |
+| ISSUE-119 | ✅ COMPLETE (ae558f1) Missing `{MODULE}_DAILY_CAP_PCT` constant → new modules fail-open | Any module added without its cap constant can consume entire 70% global budget | `strategy.py`, `config.py` |
 
 ### Archived / Deferred (2026-04-03)
 _These issues are removed from the active list. Live env will be rebuilt from scratch; autoresearch replaced with new backtest engine._
@@ -174,14 +174,14 @@ _Disabled modules, edge cases, dead code, cosmetics_
 | ISSUE-092 | `fetch_fear_greed()` no error handling → aborts long-horizon scan | crypto_long_horizon not active | `crypto_long_horizon.py` |
 | ISSUE-097 | Long-horizon Kelly formula has extra `market_prob` denominator → 5–10× oversize | crypto_long_horizon not active | `crypto_long_horizon.py` |
 | ISSUE-106 | KXPCE* tickers fall to `module=other` — PCE trades untracked by module analytics | Econ module disabled | Module classifier |
-| ISSUE-109 | `logger._logged_trade_fingerprints` set never pruned → memory leak long-running | Low risk at current scale | `logger.py` |
-| ISSUE-115 | `poly_nudge` computed then unconditionally zeroed — dead code | Misleading but harmless | `crypto_15m.py` |
+| ISSUE-109 | ✅ COMPLETE (b19e548) `logger._logged_trade_fingerprints` set never pruned → memory leak long-running | Low risk at current scale | `logger.py` |
+| ISSUE-115 | ✅ COMPLETE (b19e548) `poly_nudge` computed then unconditionally zeroed — dead code | Misleading but harmless | `crypto_15m.py` |
 | ISSUE-120 | GHCND bias computed at city-center but forecast at airport → miscalibrated edge | Weather module disabled | `ghcnd_client.py` |
-| ISSUE-122 | Capital threshold inconsistency: $100 in data_health_check vs $1,000 in config_audit | Minor monitoring discrepancy | `data_health_check.py`, `config_audit.py` |
-| ISSUE-124 | `win_prob` stripped by `build_trade_entry()` — never logged | Historical win probability unrecoverable; nice-to-have analytics | `logger.py` |
-| ISSUE-125 | `timestamp` has 3+ different formats across modules | Parsing inconsistency; low immediate impact | Multiple |
+| ISSUE-122 | ✅ COMPLETE (b19e548) Capital threshold inconsistency: $100 in data_health_check vs $1,000 in config_audit | Minor monitoring discrepancy | `data_health_check.py`, `config_audit.py` |
+| ISSUE-124 | ✅ COMPLETE (b19e548) `win_prob` stripped by `build_trade_entry()` — never logged | Historical win probability unrecoverable; nice-to-have analytics | `logger.py` |
+| ISSUE-125 | ✅ COMPLETE (b19e548) `timestamp` has 3+ different formats across modules | Parsing inconsistency; low immediate impact | Multiple |
 | ISSUE-127 | 10 magic numbers should be moved to config | Code hygiene | Multiple |
-| ISSUE-128 | Background `create_task` tasks not tracked or cancelled on reconnect | Latent resource leak; low current risk | `ws_feed.py` |
+| ISSUE-128 | ✅ COMPLETE (b19e548) Background `create_task` tasks not tracked or cancelled on reconnect | Latent resource leak; low current risk | `ws_feed.py` |
 | ISSUE-130 | MACD EMA cold-start — noisy for first ~26 bars after restart | Known limitation; low frequency impact | `crypto_15m.py` |
 | ISSUE-131 | CME OAuth error logs full response body → may expose auth fields | Fed module disabled; log hygiene | `fed_client.py` |
 | ISSUE-132 | Ensemble median off-by-one for even member counts | Weather disabled; sub-degree impact | `openmeteo_client.py` |

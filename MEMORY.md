@@ -59,6 +59,16 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 - System Map audit deferred until ALL P1-P3 sprints complete (currently at v1.4 as of Sprint 5 P0)
 - Daily modules stay OFF until Strategist shadow WR > 45% over 50+ trades
 
+### P2+P3 Sprints COMPLETE (2026-04-03 evening)
+- **P2+P3-1** ✅ Config, Risk + Audit Tools — ISSUE-036, 037, 038, 100, 119, 090 — ae558f1
+- **P2+P3-2** ✅ Logger, WS Feed + Code Hygiene — ISSUE-109, 124, 125, 122, 115, 128 — b19e548
+- ISSUE-071 deferred (no CI pipeline exists; import pattern works fine)
+- Live env archived to `environments/archive/live/` — will rebuild from scratch
+- Autoresearch archived — will be replaced with new backtest engine
+- System Map v2.1: live env + autoresearch removed
+- Remaining open: P3 disabled-module issues (weather/econ/geo/fed) — skip until modules re-enabled
+- **Next session:** Strip inactive modules (weather/econ/geo/fed) from demo + restart trading
+
 **Notable P1 findings:**
 - ISSUE-023 confirmed already resolved in Sprint 3 (log_exit alias was public wrapper all along)
 - ISSUE-017 root cause was threshold module only — band module was never broken (indirect price encoding)
