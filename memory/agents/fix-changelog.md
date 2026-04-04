@@ -15,6 +15,56 @@ _Every fix must be logged here with issue ID, summary, and commit hash_
 
 ---
 
+## Batch 5 — Settlement Naive Datetime, P&L Divergence, date.today() Sweep, CRYPTO_15M_SERIES (2026-04-04)
+
+| Issue ID | Title | Fix Summary | Commit |
+|----------|-------|-------------|--------|
+| B5-DS-1 | settlement_checker naive datetime | Removed .split('+')[0]; naive-tz fallback; datetime.now(timezone.utc) | 286268c |
+| B5-DS-2 | /api/state vs /api/pnl diverge | Shared _build_close_records() helper; SUM accumulation for multi-leg | 286268c |
+| B5-DS-3 | date.today() sweep (22 sites) | data_agent (14), api.py (6), crypto_15m (2), utils.py (1) — all replaced with PDT-aware | 286268c |
+| B5-DS-3i | load_traded_tickers() dedup failure | utils.py _today_pdt() added; load_traded_tickers uses it — dedup now correct at UTC midnight | 286268c |
+| B5-DS-4 | CRYPTO_15M_SERIES duplicate definitions | Canonical in utils.py; removed from crypto_15m + position_monitor; both import from utils | 286268c |
+
+---
+
+## Batch 4 — WS TZ, Window Guard, Retry Logic, Persistent Mode Cleanup, KXSOL15M, R9 Macro Filter (2026-04-04)
+
+| Issue ID | Title | Fix Summary | Commit |
+|----------|-------|-------------|--------|
+| B4-TRD-1 | WS heartbeat naive TZ | Both ws_feed + watchdog now use datetime.now(timezone.utc) | 24682b6 |
+| B4-TRD-2 | _prune_window_guard strips tzinfo | Removed .replace(tzinfo=None); UTC-aware ISO strings throughout | 24682b6 |
+| B4-TRD-3 | Window marked evaluated before eval | Deferred write until after eval; _window_retry_after dict + one retry on REST None | 24682b6 |
+| B4-TRD-4 | --persistent crashes (retired function) | Deleted run_persistent_ws_mode(); --persistent now calls ws_feed.run() + sys.exit(1) | 24682b6 |
+| B4-TRD-5 | KXSOL15M missing from position_monitor | Added to CRYPTO_15M_SERIES; crypto_15m.py hardcoded tuple replaced with constant ref | 24682b6 |
+| B4-STR-1 | R9 macro filter dead code | Implemented has_macro_event_within() in utils.py; 40-entry 2026 calendar; conditional import in crypto_15m | 24682b6 |
+
+---
+
+## Batch 3 — NO-side Price, dry_run Tag, Exposure Error Handling, CB Locking, Daily Stop Gate (2026-04-04)
+
+| Issue ID | Title | Fix Summary | Commit |
+|----------|-------|-------------|--------|
+| B3-DS-1 | normalize_entry_price NO-side fallback | Side-aware fallback: NO uses (1-market_prob)*100, YES uses market_prob*100 | bbab631 |
+| B3-DS-2 | post_trade_monitor hardcoded dry_run: True | Replaced with not _is_live_enabled() + added env_config import | bbab631 |
+| B3-DS-3 | get_daily_exposure() swallows errors | capital.py raises; 11 call sites in 7 files now log+skip instead of 0.0 fallback | bbab631 |
+| B3-STR-1 | CB get/set_module_state bypass file lock | Both routed through _rw_locked() using mutable-cell pattern | bbab631 |
+| B3-STR-2 | loss_today $0 display diagnostic | Added logger.info() in check_global_net_loss() to surface count + pnl sum | bbab631 |
+| B3-TRD-1 | Daily stop-loss fires for NO positions | Added and side == 'yes' gate to outer if; comment explains NO-side exclusion | bbab631 |
+
+---
+
+## Batch 2 — PDT Date Fixes + Dead Code Cleanup (2026-04-04)
+
+| Issue ID | Title | Fix Summary | Commit |
+|----------|-------|-------------|--------|
+| B2-STR-1 | circuit_breaker date.today() at line 263 | Replaced with _today_pdt() — CB now reads correct PDT trade file all day | 538b25d |
+| B2-STR-2 | crypto_15m date.today() at lines 155+1232 | Replaced with circuit_breaker._today_pdt() — daily wager resets at PDT midnight | 538b25d |
+| B2-DS-1 | settlement_checker date.today() at lines 237-238 | Replaced with _pdt_today() imported from logger — settle records stamped correctly | 538b25d |
+| B2-DS-2 | position_tracker date.today() at line 884 | Replaced with date.fromisoformat(_today_pdt()) — idempotency guard reads correct file | 538b25d |
+| B2-DS-3 | push_alert NameError in dashboard/api.py | Removed dead push_alert block (lines 63-68) — _logger.error() sufficient | 538b25d |
+
+---
+
 ## Sprint P2+P3-2 — Logger, WS Feed + Code Hygiene (2026-04-03)
 
 | Issue ID | Title | Fix Summary | Commit |

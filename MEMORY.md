@@ -6,6 +6,48 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 
 ---
 
+## 2026-04-04 — Batches 2-5 Complete (10:00-12:00 PDT)
+
+### All 4 batches complete — trading ready to restart
+Full pipeline (domain expert specs → adversarial review → revise → Dev → QA → commit) run for every batch.
+
+**Batch 2** (`538b25d`) — PDT date fixes + dead code
+- circuit_breaker.py, crypto_15m.py, settlement_checker.py, position_tracker.py, api.py
+- 5 files, 7 insertions / 13 deletions
+
+**Batch 3** (`bbab631`) — NO-side price, dry_run tag, exposure error handling, CB locking, daily stop gate
+- 11 files, 100 insertions / 46 deletions
+- Notable: B3-DS-3 required full spec rewrite — 11 call sites across 7 files, capital.py now raises instead of returning 0.0
+
+**Batch 4** (`24682b6`) — WS TZ, window guard retry, persistent mode cleanup, KXSOL15M, R9 macro filter
+- 5 files, 193 insertions / 44 deletions
+- Notable: B4-TRD-4 found run_persistent_ws_mode() unconditionally raises — deleted entirely
+- R9 implemented properly: 40-entry 2026 FOMC/CPI/NFP calendar in utils.py
+- B4-STR-2 diagnosis corrected by Strategist: loss_today key was already correct, $0 display is a separate data issue
+
+**Batch 5** (`286268c`) — Settlement naive datetime, P&L divergence, date.today() sweep (22 sites), CRYPTO_15M_SERIES
+- 6 files, all pushed to GitHub
+- Critical find (adversarial): load_traded_tickers() in utils.py was dedup-failing at UTC midnight — fixed
+- CRYPTO_15M_SERIES consolidated to single canonical definition in utils.py
+
+### System state after batches 2-5: READY TO RESTART TRADING
+- Batches 1-5 all complete and pushed ✅
+- Next: re-enable WS feed + watchdog (crypto 15m only)
+- Daily modules: REMAIN OFF until Strategist shadow WR > 45% over 50+ trades + R9 + R1 vol gate
+
+### Key architectural finding (Batch 3, B3-STR-2)
+- Strategist confirmed $0 CB loss display is NOT a key mismatch bug — strategy.py already translates net_loss_today → loss_today
+- Root cause is likely missing pnl fields on trade log records or wrong file path — diagnostic log added in check_global_net_loss()
+
+### Adversarial catches across all batches (notable)
+- B2-DS-3: wrong line range would have caused dashboard import SyntaxError
+- B3-DS-3: spec named wrong function (get_available_capital vs get_buying_power); 11 call sites missed
+- B4-TRD-4: fallback to polling path was permanently retired code (unconditional RuntimeError)
+- B4-STR-1: NFP May 8 adversarial flag was itself wrong — BLS confirmed May 8 correct
+- B5-DS-3: load_traded_tickers() dedup failure missed in initial sweep — adversarial caught it
+
+---
+
 ## 2026-04-04 — Post-Cleanup P1/P2 Fix Sprints + Trading Restart
 
 ### All 5 post-cleanup sprints complete (00:00-01:00 PDT)
