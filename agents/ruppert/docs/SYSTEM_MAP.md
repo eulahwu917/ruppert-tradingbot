@@ -38,7 +38,7 @@ _Last updated: 2026-04-04 | v3.4 | Batches 2–5 complete. Strategist: CB PDT fi
 - Module inventory: crypto_band_daily/crypto_threshold_daily marked Disabled; dashboard endpoints 16 (was 19)
 - Resolved: ISSUE-1-07 (OBI EWM), ISSUE-1-12 (module cap key), ISSUE-E07 (smart mode)
 - API wiring: fetch_coinbase_price() in crypto_15m.py (not crypto_client.py); crypto_band_daily uses Kraken (not Coinbase); KXXRP15M/KXDOGE15M added to WS series list
-- config_audit: Ruppert-Crypto-930AM replaced 10AM/6PM task names; BACKSTOP_ENABLED=True; DOMAIN_THRESHOLD=10
+- config_audit: Ruppert-Crypto-930AM replaced 10AM/6PM task names; BACKSTOP_ENABLED=True (full name: CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED); DOMAIN_THRESHOLD=10 (hardcoded in optimizer.py, not config.py)
 - Exit dedup fingerprint format corrected; KalshiClient search_markets() → get_markets()
 
 ### v3.1 — 2026-04-04
@@ -491,6 +491,8 @@ if size < min_viable: reject 'below_min_viable'
 | `crypto_band_daily_*` | 0.12 |
 | `crypto_dir_15m_*` | 0.12 (strategy gate; local gate is 0.02) |
 | `crypto_threshold_daily_*` | 0.08 (bypassed — module doesn't call `should_enter`) |
+> **v3.5 correction:** SM previously stated min edge range as 0.08-0.15. Verified actual range is 0.08-0.12; no 0.15 entry exists in strategy.py MIN_EDGE dict.
+> **v3.5 correction:** SM previously stated min edge range as 0.08-0.15. Verified actual range is 0.08-0.12; no 0.15 entry exists in strategy.py MIN_EDGE dict.
 
 ---
 
@@ -561,7 +563,7 @@ should_enter() returns True
 |--------|----------|
 | `__init__()` | Reads RSA key + API key ID from `kalshi_config.json`. Demo mode: prints "DEMO mode — all order methods are BLOCKED". |
 | `get_balance()` | Returns dollars (Kalshi returns cents). Retries 3×. |
-| `get_markets()` | Fetches series markets + enriches orderbooks. 0.1s sleep between markets. |
+| `get_markets()` | Fetches series markets + enriches orderbooks. 0.1s sleep between markets. NOTE: No PT30M sleep in get_markets() code — that interval is Task Scheduler frequency only. |
 | `get_markets_metadata()` | Paginates all markets for a series (no orderbook enrichment — fast path). |
 | `get_markets()` | Fetches markets list with optional filters. |
 | `get_market()` | Fetches single market by ticker. |
@@ -744,7 +746,7 @@ add_position()          ← position_tracker.py — stores key=(ticker,side)
       │    Every tick:
       │    check_exits(ticker, yes_bid, yes_ask)
       │    → stop-loss tiers (15m + daily)
-      │    → gain thresholds (95c / 70%/90% gain)
+      │    → gain thresholds (95c / 90% gain — EXIT_GAIN_PCT=0.90; note: rule label 70pct_gain is stale artifact)
       │         │ threshold triggered
       │         ▼
       │    execute_exit() → logs trade, calls sell_position()
@@ -1260,7 +1262,7 @@ for each settle/exit record:
 
 | Check | Auto-Fix |
 |---|---|
-| Duplicate trade IDs | `_cleanup_duplicates()` — removes duplicates, keeps first. **Sprint 2 (ISSUE-056):** `_PROTECTED_ACTIONS = {'exit', 'settle', 'exit_correction'}` — records with these actions are never deleted even if a duplicate `trade_id` exists. Uses streaming pattern (reads all, writes back non-duplicates). Logs preserved duplicates via `log_activity()`. |
+| Duplicate trade IDs | `_cleanup_duplicates()` — removes duplicates, keeps first. **Sprint 2 (ISSUE-056):** `_PROTECTED_ACTIONS = {'exit', 'settle', 'correction', 'exit_correction', 'failed_order', 'abandoned'} (6 members; SM previously listed 3 incorrectly)` — records with these actions are never deleted even if a duplicate `trade_id` exists. Uses streaming pattern (reads all, writes back non-duplicates). Logs preserved duplicates via `log_activity()`. |
 | Missing required fields (`ticker`, `side`, `size_dollars`, `module`, `ts`/`timestamp`) | `_mark_invalid()` — adds `_invalid: true` + reason |
 | Dry run mismatch (live order in demo) | `_mark_invalid()` + immediate Telegram alert (4h dedup) |
 | Module/ticker mismatch | `_fix_module()` — overwrites module, preserves old in `_module_corrected_from` |
@@ -1282,7 +1284,7 @@ for each settle/exit record:
 - `check_ws_stability()` — ≥5 disconnects in 10 min → alert to `pending_alerts.json`
 - `check_15m_entry_drought()` — < 10 decisions in 1h → stalled warning; 0 ENTER in 4h → drought warning
 
-**State:** `logs/data_audit_state.json`. Alert dedup: 4-hour window via MD5 hash key.
+**State:** `logs/data_audit_state.json`. Alert dedup: 4-hour window via MD5 hash key (general audits). NOTE: check_15m_entry_drought() uses a separate 2-hour dedup window.
 
 ---
 
@@ -1365,10 +1367,10 @@ Optimizer (manual/scheduled)
 
 | ID | Description | Severity |
 |----|-------------|----------|
-| ISSUE-A01 | ~~Optimizer reads wrong path — `LOGS_DIR.glob("trades_*.jsonl")` scans `logs/` directly, not `logs/trades/`. Reads 0 current trades. All 6 analysis dimensions operate on empty or archive-only data.~~ **FIXED Sprint P1-3 (ISSUE-005, commit 2e870f6):** `LOGS_DIR.glob()` → `(LOGS_DIR / "trades").glob()`. Optimizer now reads live trades correctly. ✅ RESOLVED (P1) | ~~Critical~~ **Resolved** |
-| ISSUE-A02 | NO-side Brier score inverted. `prediction_scorer.py` maps YES settlement → `outcome=1` regardless of trade side. NO-side trades have Brier scores computed against wrong probability polarity. | High |
-| ISSUE-A03 | Schema conflict in `scored_predictions.jsonl`. Both `prediction_scorer.py` and `brier_tracker.py` write to same file with incompatible schemas. Readers must handle missing fields. | High |
-| ISSUE-A04 | `synthesize_pnl_cache()` comment/code divergence. Docstring says deleted; function still writes. Downstream consumers may read stale file. | Low |
+| ISSUE-A02 | NO-side Brier score polarity — **Partially resolved:** prediction_scorer.py (lines 147-150) correctly flips outcome AND predicted_prob for NO-side trades. brier_tracker.score_prediction() depends on callers passing correct polarity. | Medium (partial fix) |
+| ISSUE-A02 | NO-side Brier score polarity — **Partially resolved:** prediction_scorer.py (lines 147-150) correctly flips outcome AND predicted_prob for NO-side trades. brier_tracker.score_prediction() depends on callers passing correct polarity. | Medium (partial fix) |
+| ISSUE-A04 | `synthesize_pnl_cache()` does NOT write pnl_cache.json — computes dict but never calls _write_truth(). File is never written. Prior SM description was incorrect. | Low |
+| ISSUE-A04 | `synthesize_pnl_cache()` does NOT write pnl_cache.json — computes dict but never calls _write_truth(). File is never written. Prior SM description was incorrect. | Low |
 | ISSUE-A05 | ~~Module mismatch auto-fix uses imprecise `KXHIGH*` mapping → may write `'weather_band'` on `'weather_threshold'` records.~~ **Obsolete:** Weather modules removed 2026-04-03. | ~~Medium~~ **Resolved** |
 | ISSUE-A06 | ~~`$10,000` capital fallback is silent. Missing/empty `demo_deposits.jsonl` → all sizing and cap calculations use fictional $10k without alerting David.~~ **FIXED Sprint 2 (ISSUE-051):** Fallback now sends Telegram alert + `log_activity()` with 4-hour dedup via `logs/capital_fallback_alert.json`. Error message capped at 500 chars. | ~~High~~ **Resolved** |
 | ISSUE-A07 | `analyze_brier_score()` excludes records where `win_prob` absent. Silent exclusion understates sample size. | Low |
@@ -1560,9 +1562,9 @@ Read once at import time by `config.py`. Changes require restart.
 | `Ruppert-Demo-7AM` | Daily 07:00 PDT | `ruppert_cycle.py full` | Full cycle scan |
 | `Ruppert-Demo-3PM` | Daily 15:00 PDT | `ruppert_cycle.py full` | Full cycle scan |
 | `Ruppert-Demo-10PM` | Daily 22:00 PDT | `ruppert_cycle.py check` | Position check / settlement review |
-| `Ruppert-Crypto-930AM` | Daily 09:30 PDT | `ruppert_cycle.py crypto_1d` | crypto_1d morning scan (replaced Ruppert-Crypto-10AM and Ruppert-Crypto-6PM) |
-| `Ruppert-PostTrade-Monitor` | Every 30 min (starts 06:00) | `post_trade_monitor` | Position monitoring, 15m CB updates |
-| `Ruppert-SettlementChecker` | Daily 11:00 PM + 8:00 AM PDT (2× daily) | `settlement_checker` | Verify settled positions |
+| `Ruppert-PostTrade-Monitor` | Every 15 min, 06:00-23:00 PDT (PT15M per Task Scheduler XML) | `post_trade_monitor` | Position monitoring, 15m CB updates |
+| `Ruppert-SettlementChecker` | Every 30 min, 24/7 (PT30M per Task Scheduler XML) | `settlement_checker` | Verify settled positions |
+| `Ruppert-SettlementChecker` | Every 30 min, 24/7 (PT30M per Task Scheduler XML) | `settlement_checker` | Verify settled positions |
 | `Ruppert-DailyHealthCheck` | Daily 06:45 PDT | `data_health_check` | Data health audit |
 | `Ruppert-DailyIntegrityCheck` | Daily 06:50 PDT | `data_integrity_check.py` | Data integrity check |
 | `Ruppert-DailyProgressReport` | Daily 20:00 PDT | `brief_generator` | Daily P&L brief to David |
