@@ -1,9 +1,23 @@
 # Ruppert System Map
-_Last updated: 2026-04-04 | v3.1 | Sprint 1-5 hardening: exit locking, CB per-module-prefix thresholds, CB backstop gate, daily module disable guards, TZ fixes, optimizer cleanup, dead remnant removal._
+_Last updated: 2026-04-04 | v3.2 | 22 corrections from overnight audit (pass 1+2 corroboration). DEMO vs LIVE summary added._
 
 ---
 
 ## Changelog
+
+### v3.2 — 2026-04-04
+- **22 corrections** from overnight audit final report (Section 4) — values, function names, issue statuses, gate ordering, module inventory
+- **New section:** DEMO vs LIVE summary (references 41-item checklist in overnight report)
+- Signal weights: clarified config vs code fallback defaults (W_TFI=0.50/0.42, W_OI=0.10/0.18)
+- Timing gates: 120s/660s/0.08 (was 90s/800s/0.02)
+- Risk filters: R2=8c, R3=0.003, R4=0.25 (was 25c/0.0005/0.01); R9 marked STUB/DEAD CODE
+- Gate order: CB backstop moved to gate #2; `_pdt_today()` → `_pdt_today()` throughout
+- Settlement checker: 2× daily (was 3×); ISSUE-I01 consistently UNRESOLVED; ISSUE-023 partial resolution noted
+- Module inventory: crypto_band_daily/crypto_threshold_daily marked Disabled; dashboard endpoints 16 (was 19)
+- Resolved: ISSUE-1-07 (OBI EWM), ISSUE-1-12 (module cap key), ISSUE-E07 (smart mode)
+- API wiring: fetch_coinbase_price() in crypto_15m.py (not crypto_client.py); crypto_band_daily uses Kraken (not Coinbase); KXXRP15M/KXDOGE15M added to WS series list
+- config_audit: Ruppert-Crypto-930AM replaced 10AM/6PM task names; BACKSTOP_ENABLED=True; DOMAIN_THRESHOLD=10
+- Exit dedup fingerprint format corrected; KalshiClient search_markets() → get_markets()
 
 ### v3.1 — 2026-04-04
 - **Exit safety:** `execute_exit()` now acquires file-based lock (`acquire_exit_lock`) coordinating with `post_trade_monitor`; `check_settlements()` uses `_append_jsonl()` for JSONL writes
@@ -97,7 +111,7 @@ External Data Sources
     ws_feed.py         settlement_checker.py   post_trade_monitor.py
   (WS exit engine)     (batch settlement)      (position monitor)
   stop-loss tiers      catches WS misses       every 30 min
-  gain thresholds      3× daily (11PM, 8AM, 6AM)
+  gain thresholds      2× daily (11PM, 8AM)
   check_expired_pos()
          │                    │
          ▼                    ▼
@@ -130,8 +144,8 @@ External Data Sources
 | Module Name | Type | Status | Description |
 |---|---|---|---|
 | `crypto_15m.py` | Entry | Active | 15-min Kalshi binary direction (BTC/ETH/XRP/DOGE/SOL). OKX microstructure, 4 z-scored signals (TFI/OBI/MACD/OI), Half-Kelly sizing. Data-collection thresholds in Phase 2. |
-| `crypto_threshold_daily.py` | Entry | Active (Phase 1/2) | Daily above/below (BTC/ETH, SOL gated). 5-signal composite (momentum, funding, ATR, OI regime, Polymarket). Bypasses `should_enter()`. |
-| `crypto_band_daily.py` | Entry | Active | Daily band/range (BTC/ETH/XRP/SOL/DOGE). Log-normal probability model. Uses `should_enter()` for sizing. Trade execution isolated in `_execute_band_trades()` with portalocker cap lock (ISSUE-053). |
+| `crypto_threshold_daily.py` | Entry | Disabled (`CRYPTO_THRESHOLD_DAILY_ENABLED=False`) | Daily above/below (BTC/ETH, SOL gated). 5-signal composite (momentum, funding, ATR, OI regime, Polymarket). Bypasses `should_enter()`. |
+| `crypto_band_daily.py` | Entry | Disabled (`CRYPTO_BAND_DAILY_ENABLED=False`) | Daily band/range (BTC/ETH/XRP/SOL/DOGE). Log-normal probability model. Uses `should_enter()` for sizing. Trade execution isolated in `_execute_band_trades()` with portalocker cap lock (ISSUE-053). |
 | `crypto_long_horizon.py` | Entry | Active | Monthly/annual Kalshi markets (KXBTCMAXM, KXBTCMAXY, etc.). Fear & Greed regime + log-normal touch probability. $50 hard cap, 1/6 Kelly. Called in `full` mode from `ruppert_cycle.py`. |
 | `strategy.py` | Strategy Gate | Active | Capital allocation brain. Edge/confidence/exposure/module-cap/reentry gates. Kelly sizing with tiered confidence fractions. Shim at `environments/demo/bot/strategy.py`. |
 | `KalshiClient` | Execution | Active | All Kalshi API calls. Demo mode blocks orders silently. Live RSA/PSS auth. Enriches orderbooks. |
@@ -154,7 +168,7 @@ External Data Sources
 | `config.py` | Infrastructure | Active | All constants. 100+ entries covering sizing, risk, thresholds, circuit breakers, stop-losses, scheduling. |
 | `mode.json` | Infrastructure | Active | Single-field runtime mode switch: `{"mode": "demo"}`. Requires restart to take effect. |
 | `ws_feed_watchdog.py` | Infrastructure | Active (double-spawn issue) | Monitors ws_feed heartbeat. Restarts if stale >180s. Two copies exist (workspace root = active; demo/scripts = stale). |
-| `dashboard/api.py` | Dashboard | Active | FastAPI on port 8765. Read-only DEMO mode. 30s in-process cache. 19 endpoints. |
+| `dashboard/api.py` | Dashboard | Active | FastAPI on port 8765. Read-only DEMO mode. 30s in-process cache. 16 endpoints. |
 | `brief_generator.py` | Reporting | Active | CEO daily brief. Telegram + markdown report. Two conflicting P&L methods in same output. |
 | `daily_progress_report.py` | Reporting | Deprecated | Shim that delegates to `brief_generator.py`. |
 
@@ -223,7 +237,7 @@ Trade logging (log_trade / log_activity) + Decision log (JSONL)
 
 All four signals are z-scored against their own 4-hour rolling window (48 × 5-min buckets, `ROLLING_WINDOW = 48`). The `_z_score()` helper clips to `[-3.0, 3.0]` by default (OI uses `[-2.0, 2.0]`). Z-score is 0.0 if fewer than 5 values in the window.
 
-**Signal 1: Taker Flow Imbalance (TFI) — weight `W_TFI` (config: 0.50)**
+**Signal 1: Taker Flow Imbalance (TFI) — weight `W_TFI` (config: 0.50, code fallback: 0.42)**
 
 1. Fetch last 200 trades from OKX `/market/trades`.
 2. Group into 5-minute buckets by `ts` field.
@@ -239,7 +253,7 @@ All four signals are z-scored against their own 4-hour rolling window (48 × 5-m
 3. EWM over `_obi_snapshots[symbol]` (deque, maxlen=120): alpha ≈ 0.0328 (= 2/61, span=60).
 4. Z-score appended to `_rolling_obi[symbol]`.
 - `stale = True` if OKX snapshot timestamp is older than 30 seconds.
-- ⚠️ **See Known Issue 1.7:** EWM iterates backwards over deque — older values influence output more than expected.
+- ~~⚠️ **See Known Issue 1.7:** EWM iterates backwards over deque — older values influence output more than expected.~~ **RESOLVED (ISSUE-087):** EWM now seeds from oldest value and iterates forward.
 
 **Signal 3: MACD Histogram — weight `W_MACD` (config: 0.15)**
 
@@ -249,7 +263,7 @@ All four signals are z-scored against their own 4-hour rolling window (48 × 5-m
 4. Returns early with `stale=True` if fewer than 26 candles available.
 - `stale = True` if last candle timestamp is older than 600 seconds (10 min).
 
-**Signal 4: Open Interest Delta Conviction — weight `W_OI` (config: 0.10)**
+**Signal 4: Open Interest Delta Conviction — weight `W_OI` (config: 0.10, code fallback: 0.18)**
 
 1. Fetch current OI from OKX. Compare to 600s-cached previous OI.
 1a. **Near-zero guard (Fixed P1-1 / ISSUE-129):** If `prev_oi < 1e-6`, skip computation — returns 0.0 to prevent z-score explosion on near-zero denominator.
@@ -274,28 +288,28 @@ P_final = max(0.05, min(0.95, P_biased + poly_nudge))  [poly_nudge always 0.0]
 ```
 
 **Timing Gates:**
-- `elapsed < 90s` → EARLY_WINDOW skip
-- `90s ≤ elapsed ≤ 480s` → primary window, base `min_edge = 0.02`
-- `480s < elapsed ≤ 800s` → secondary window, `min_edge = 0.02 * 1.25 = 0.025`
-- `elapsed > 800s` → LATE_WINDOW skip
+- `elapsed < 120s` → EARLY_WINDOW skip
+- `120s ≤ elapsed ≤ 480s` → primary window, base `min_edge = 0.08`
+- `480s < elapsed ≤ 660s` → secondary window, `min_edge = 0.08 * 1.25 = 0.10`
+- `elapsed > 660s` → LATE_WINDOW skip
 
 #### Ten Risk Filters (`check_risk_filters`)
 
 | Filter | Name | Condition | Block Reason |
 |--------|------|-----------|--------------|
 | R1 | Extreme realized vol | `vol_5m > 3.0 * avg_price_vol_30d` | `EXTREME_VOL` |
-| R2 | Wide spread | `(yes_ask - yes_bid) > 25¢` | `WIDE_SPREAD` |
-| R3 | Thin Kalshi book | `book_depth_usd < max(dollar_oi * 0.0005, 20.0)` | `LOW_KALSHI_LIQUIDITY` |
-| R4 | Thin underlying volume | `okx_volume_pct < 0.01` | `THIN_MARKET` |
+| R2 | Wide spread | `(yes_ask - yes_bid) > 8¢` | `WIDE_SPREAD` |
+| R3 | Thin Kalshi book | `book_depth_usd < max(dollar_oi * 0.003, 20.0)` | `LOW_KALSHI_LIQUIDITY` |
+| R4 | Thin underlying volume | `okx_volume_pct < 0.25` | `THIN_MARKET` |
 | R5a | Stale TFI | `tfi['stale'] == True` | `TFI_STALE` |
 | R5b | Stale OBI | `obi['stale'] == True` | `OBI_STALE` |
 | R6 | Extreme funding | `abs(fr_z) > 3.0` | `EXTREME_FUNDING` |
 | R7 | Low conviction | `abs(raw_score) < 0.05` | `LOW_CONVICTION` |
 | R8 | Session drawdown | `session_pnl < -0.05 * capital` | `DRAWDOWN_PAUSE` |
-| R9 | Macro event | `has_macro_event_within(minutes=30)` | `MACRO_EVENT_RISK` |
+| R9 | Macro event | `has_macro_event_within(minutes=30)` | `MACRO_EVENT_RISK` | **⚠️ STUB/DEAD CODE:** `has_macro_event_within()` does not exist in `ruppert_cycle`. Import silently caught; R9 never fires. |
 | R10 | Basis risk | `abs(coinbase_price - okx_price) / okx_price > 0.0015` | `BASIS_RISK` |
 
-Note: R2, R3, R4 thresholds are relaxed for Phase 2 data-collection mode (see Known Issue 1.11).
+Note: R2, R3, R4 values above reflect current config overrides (tightened from Phase 2 data-collection defaults of 25¢/0.0005/0.01). See Known Issue 1.11.
 
 #### crypto_15m Own Sizing (overrides strategy size)
 
@@ -374,7 +388,7 @@ direction: P_above > 0.54 → 'above'; P_above < 0.46 → 'below'; else 'no_trad
 
 | Data | Source |
 |------|--------|
-| Spot prices | Coinbase `GET /v2/prices/<ASSET>-USD/spot` (30s cache) |
+| Spot prices | Kraken API (not Coinbase) for spot prices |
 | All market metadata | Kalshi `KalshiClient.get_markets_metadata()` |
 | Orderbook (per market) | Kalshi `KalshiClient.enrich_orderbook()` (parallel, 10 workers) |
 | Composite confidence | `crypto_client.compute_composite_confidence()` |
@@ -404,7 +418,7 @@ edge = max(edge_yes, edge_no)
 
 **Sprint 2 P2 — Disable guard:** `run_crypto_scan()` raises `RuntimeError` if `CRYPTO_BAND_DAILY_ENABLED` is `False`. Code-level kill switch.
 
-Uses `should_enter()` and respects `decision['size']` (unlike crypto_15m which ignores it). Module daily cap (7%) enforced before the loop. ⚠️ **Module daily cap config key `CRYPTO_BAND_DAILY_BTC_DAILY_CAP_PCT` does not exist in config** — strategy gate fails open, relies on module's own 7% check (see Known Issue 1.12).
+Uses `should_enter()` and respects `decision['size']` (unlike crypto_15m which ignores it). Module daily cap (7%) enforced before the loop. ~~⚠️ **Module daily cap config key `CRYPTO_BAND_DAILY_BTC_DAILY_CAP_PCT` does not exist in config**~~ **RESOLVED (Issue 1.12):** Key exists at `config.py:71`.
 
 ---
 
@@ -420,15 +434,15 @@ Uses `should_enter()` and respects `decision['size']` (unlike crypto_15m which i
 | Gate | Check | Rejection Reason |
 |------|-------|-----------------|
 | 1 | `hours_to_settlement < min_hours` (default 0.5h; crypto_15m: 0.04h) | `too_close_to_settlement` |
-| 2 | `confidence < per_module_threshold` (0.40–0.55 by module) | `low_confidence` |
-| 3 | `edge < module_min_edge` (0.08–0.15 by module) | `insufficient_edge` |
-| 4 | `open_position_value >= capital * 0.70` | `global_exposure_cap_reached` |
-| 5 | `module_deployed_pct >= module_cap_pct` (if cap exists in config) | `module_cap_exceeded` | **Fixed P1-1 (ISSUE-104):** `_module_cap_missing = False` initialized before the `if module is not None:` block. Previously, `module=None` caused `NameError` (variable used before assignment). Now safely defaults to `False` in all paths. |
-| 6 | `ticker in traded_tickers` | `same_day_reentry` |
-| 7 | `check_daily_cap(capital, deployed_today) <= 0` | `daily_cap_reached` |
-| 8 | Circuit breaker tripped for module (Sprint 2 P2 — defensive backstop) | `circuit_breaker_tripped` |
+| 2 | Circuit breaker tripped for module (Sprint 2 P2 — defensive backstop) | `circuit_breaker_tripped` |
+| 3 | `confidence < per_module_threshold` (0.40–0.55 by module) | `low_confidence` |
+| 4 | `edge < module_min_edge` (0.08–0.15 by module) | `insufficient_edge` |
+| 5 | `open_position_value >= capital * 0.70` | `global_exposure_cap_reached` |
+| 6 | `module_deployed_pct >= module_cap_pct` (if cap exists in config) | `module_cap_exceeded` | **Fixed P1-1 (ISSUE-104):** `_module_cap_missing = False` initialized before the `if module is not None:` block. Previously, `module=None` caused `NameError` (variable used before assignment). Now safely defaults to `False` in all paths. |
+| 7 | `ticker in traded_tickers` | `same_day_reentry` |
+| 8 | `check_daily_cap(capital, deployed_today) <= 0` | `daily_cap_reached` |
 
-> **Sprint 2 P2 — CB backstop gate:** Gate 8 is a defensive layer in `should_enter()` that catches modules which forget their own CB check before calling the strategy layer. Prevents entries when the module's circuit breaker is already tripped.
+> **Sprint 2 P2 — CB backstop gate:** Gate 2 is a defensive layer in `should_enter()` that catches modules which forget their own CB check before calling the strategy layer. Prevents entries when the module's circuit breaker is already tripped. Runs early (after time gate) to fail-fast.
 
 #### Sizing
 
@@ -523,7 +537,7 @@ should_enter() returns True
 |--------|----------|
 | `__init__()` | Reads RSA key + API key ID from `kalshi_config.json`. Demo mode: prints "DEMO mode — all order methods are BLOCKED". |
 | `get_balance()` | Returns dollars (Kalshi returns cents). Retries 3×. |
-| `search_markets()` | Fetches series markets + enriches orderbooks. 0.1s sleep between markets. |
+| `get_markets()` | Fetches series markets + enriches orderbooks. 0.1s sleep between markets. |
 | `get_markets_metadata()` | Paginates all markets for a series (no orderbook enrichment — fast path). |
 | `get_markets()` | Fetches markets list with optional filters. |
 | `get_market()` | Fetches single market by ticker. |
@@ -577,7 +591,7 @@ should_enter() returns True
 |---|---|---|
 | `trade_id` | str (uuid4) | Generated fresh |
 | `timestamp` | str (ISO) | `opportunity.get('timestamp')` or now |
-| `date` | str (YYYY-MM-DD) | `opportunity.get('date')` or `_today_pdt()` — **Sprint 5 (ISSUE-044):** uses PDT timezone via `_today_pdt()` helper; replaces `str(date.today())` which used system/local TZ. **Sprint 4 P2:** all 3 remaining `date.today()` call sites (`build_trade_entry`, `get_daily_summary`, `rotate_logs`) replaced with `_pdt_today()`. |
+| `date` | str (YYYY-MM-DD) | `opportunity.get('date')` or `_pdt_today()` — **Sprint 5 (ISSUE-044):** uses PDT timezone via `_pdt_today()` helper; replaces `str(date.today())` which used system/local TZ. **Sprint 4 P2:** all 3 remaining `date.today()` call sites (`build_trade_entry`, `get_daily_summary`, `rotate_logs`) replaced with `_pdt_today()`. |
 | `ticker` | str | Required |
 | `title` | str | Fallback to ticker |
 | `side` | str | Required |
@@ -606,7 +620,7 @@ should_enter() returns True
 
 **Dedup check (buy records):** Fingerprint = `(ticker, side, date, entry_price, contracts)`. Session-level in-memory set — **resets on process restart** (see Known Issue 2.4).
 
-**Dedup check (exit/settle records — Sprint 3 / ISSUE-023):** `_logged_exit_fingerprints` set. `log_exit()` and `log_settle()` compute a fingerprint from `(ticker, side, action, date, contracts)` before writing. Duplicate exit/settle writes within the same process are silently dropped. Persists for the lifetime of the process.
+**Dedup check (exit/settle records — Sprint 3 / ISSUE-023):** `_logged_exit_fingerprints` set. `log_exit()` and `log_settle()` compute a fingerprint string `"ticker::side::date::exit::exit_price"` before writing. Duplicate exit/settle writes within the same process are silently dropped. Persists for the lifetime of the process.
 
 **Key logger functions:**
 
@@ -852,9 +866,9 @@ settle_loss: pnl = -size_dollars  (cost-basis approach)
 
 Note: `edge` and `confidence` fields added by **Fixed P1-5 (ISSUE-074)** — forwarded from position dict by `post_trade_monitor.py` exits. WS-path exits via `position_tracker.execute_exit()` may not populate these unless the position dict has them.
 
-**Sprint 3 (ISSUE-023):** All exit writes now route through `logger.log_exit()` wrapper, which enforces unified schema and dedup fingerprint via `_logged_exit_fingerprints`.
+**Sprint 3 (ISSUE-023):** Exit writes route through `logger.log_exit()` wrapper, which enforces unified schema and dedup fingerprint via `_logged_exit_fingerprints`. **⚠️ Note:** `post_trade_monitor` and `settlement_checker` settle writes bypass `log_settle()` — partial resolution only.
 
-**Sprint 5 (ISSUE-044):** `date` field now uses `_today_pdt()` helper (PDT timezone) instead of `str(date.today())` (system TZ).
+**Sprint 5 (ISSUE-044):** `date` field now uses `_pdt_today()` helper (PDT timezone) instead of `str(date.today())` (system TZ).
 
 After logging: calls `_update_daily_cb()`, removes position, records 5-min cooldown.
 
@@ -912,7 +926,7 @@ run_ws_feed()
 Processes only `type == 'ticker'` messages. Price conversion: WS sends dollar strings → cent integers.
 
 - Every tick: `market_cache.update()` + `_safe_check_exits()` (background task)
-- `KXBTC15M`, `KXETH15M`, `KXSOL15M`, etc. prefix → `_safe_eval_15m()` (15m entry evaluation) — **KXSOL15M added Sprint 4 (ISSUE-001)**
+- `KXBTC15M`, `KXETH15M`, `KXSOL15M`, `KXXRP15M`, `KXDOGE15M` prefix → `_safe_eval_15m()` (15m entry evaluation) — 5 series total. **KXSOL15M added Sprint 4 (ISSUE-001); KXXRP15M, KXDOGE15M also active.**
 - `KXBTC`, `KXETH`, etc. prefix (NOT 15m) → `_safe_eval_hourly()` (daily/hourly band entry, runs in executor)
 - The `elif` logic ensures 15m tickers are NOT double-evaluated by the hourly handler.
 - All evaluation tasks are fire-and-forget (`asyncio.create_task`); feed yields every 100 messages.
@@ -937,7 +951,7 @@ Processes only `type == 'ticker'` messages. Price conversion: WS sends dollar st
 ### 3.4 settlement_checker.py — Batch Settlement Resolver
 
 **Location:** `environments/demo/settlement_checker.py`  
-**Scheduled:** Task Scheduler at 11:00 PM PDT, 8:00 AM PDT, and 6:00 AM PDT (3× daily).
+**Scheduled:** Task Scheduler at 11:00 PM PDT and 8:00 AM PDT (2× daily).
 
 #### load_all_unsettled() — Identifying Open Positions
 
@@ -975,7 +989,7 @@ else:
 - **position_tracker `check_expired_positions()` path (sparse):** Lacks `entry_date`, `hold_duration_hours`, `entry_edge`, `confidence`, `size_dollars`. Has `timestamp`, `date`, `title`, `action_detail`, `source`, `module`.
 Downstream readers must handle missing fields when consuming settle records from either path.
 
-**Sprint 3 (ISSUE-023):** All settle writes from both paths now route through `logger.log_settle()` wrapper, which enforces dedup fingerprint.
+**Sprint 3 (ISSUE-023):** Settle writes route through `logger.log_settle()` wrapper for dedup fingerprint. **⚠️ Partial resolution:** `post_trade_monitor.check_settlements()` and `settlement_checker` both bypass `log_settle()` — they write settle records directly. Only `position_tracker.check_expired_positions()` uses the wrapper.
 
 **Sprint 1 P2:** `post_trade_monitor.check_settlements()` now uses `_append_jsonl()` for JSONL writes (was raw `open()`), gaining cross-process file locking.
 
@@ -1179,7 +1193,7 @@ for each settle/exit record:
 
 **Sprint 5 P2 — `DAILY_CAP` updated:** Now uses `LOSS_CIRCUIT_BREAKER_PCT` (0.05) instead of previously-removed stale constants.
 
-**Domain eligibility:** ≥ 30 scored trades. `run_domain_experiments()` is a **no-op placeholder** (see Known Issue 4.8).
+**Domain eligibility:** ≥ 10 scored trades (`DOMAIN_THRESHOLD = 10`). `run_domain_experiments()` is a **no-op placeholder** (see Known Issue 4.8).
 
 ---
 
@@ -1363,7 +1377,7 @@ _Source: `memory/agents/sysmap-section5-infrastructure.md`_
 | `CRYPTO_15M_CIRCUIT_BREAKER_ADVISORY` | False | Hard stop |
 | `CRYPTO_1H_CIRCUIT_BREAKER_N` | 3 | 1h CB |
 | `CRYPTO_DAILY_CIRCUIT_BREAKER_N` | 5 | Daily CB |
-| `CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED` | False | Phase 2: disabled |
+| `CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED` | True | Enabled |
 
 #### Stop-Loss Constants — 15m Direction
 
@@ -1471,7 +1485,7 @@ Read once at import time by `config.py`. Changes require restart.
 
 **Restart logic:** Reads `ws_feed_heartbeat.json` every 60s. If stale or missing → 2s delay → spawn new ws_feed process (Windows flags: `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`). Logs to `logs/watchdog.log`.
 
-~~**⚠️ Double-spawn issue:** Two Task Scheduler tasks both launch ws_feed at boot. At boot, watchdog may see stale heartbeat (ws_feed just started, hasn't written yet) and spawn a second instance. Two ws_feed processes compete for the same WS connection.~~ **FIXED Sprint 1 (ISSUE-049, commit ceba350):** `kill_existing_ws_feed()` is now called before every spawn in `ws_feed_watchdog.py`. This terminates any existing ws_feed process before launching a new one, eliminating the double-spawn race at boot. **Status: Resolved.**
+**⚠️ Double-spawn issue (UNRESOLVED):** Two Task Scheduler tasks both launch ws_feed at boot. At boot, watchdog may see stale heartbeat (ws_feed just started, hasn't written yet) and spawn a second instance. Two ws_feed processes compete for the same WS connection. The `kill_existing_ws_feed()` fix exists only in the **stale** copy at `environments/demo/scripts/ws_feed_watchdog.py` — it has NOT been ported to the active `scripts/ws_feed_watchdog.py`.
 
 ---
 
@@ -1486,9 +1500,9 @@ Read once at import time by `config.py`. Changes require restart.
 | `Ruppert-Demo-7AM` | Daily 07:00 PDT | `ruppert_cycle.py full` | Full cycle scan |
 | `Ruppert-Demo-3PM` | Daily 15:00 PDT | `ruppert_cycle.py full` | Full cycle scan |
 | `Ruppert-Demo-10PM` | Daily 22:00 PDT | `ruppert_cycle.py check` | Position check / settlement review |
-| `Ruppert-Crypto-930AM` | Daily 09:30 PDT | `ruppert_cycle.py crypto_1d` | crypto_1d morning scan |
+| `Ruppert-Crypto-930AM` | Daily 09:30 PDT | `ruppert_cycle.py crypto_1d` | crypto_1d morning scan (replaced Ruppert-Crypto-10AM and Ruppert-Crypto-6PM) |
 | `Ruppert-PostTrade-Monitor` | Every 30 min (starts 06:00) | `post_trade_monitor` | Position monitoring, 15m CB updates |
-| `Ruppert-SettlementChecker` | Daily 11:00 PM + 8:00 AM PDT | `settlement_checker` | Verify settled positions |
+| `Ruppert-SettlementChecker` | Daily 11:00 PM + 8:00 AM PDT (2× daily) | `settlement_checker` | Verify settled positions |
 | `Ruppert-DailyHealthCheck` | Daily 06:45 PDT | `data_health_check` | Data health audit |
 | `Ruppert-DailyIntegrityCheck` | Daily 06:50 PDT | `data_integrity_check.py` | Data integrity check |
 | `Ruppert-DailyProgressReport` | Daily 20:00 PDT | `brief_generator` | Daily P&L brief to David |
@@ -1496,6 +1510,8 @@ Read once at import time by `config.py`. Changes require restart.
 | `Ruppert-MidnightRestart` | Daily 00:00 PDT (via WS-Watchdog) | re-enables disabled tasks + restarts ws_feed/dashboard | Daily system reset |
 
 **Removed tasks (2026-04-03):** `Ruppert-Weather-7PM`, `Ruppert-Econ-Prescan`, `Ruppert-SportsOdds`, `Ruppert-Research-Weekly`, `Ruppert-Crypto-8AM` through `8PM` (7 hourly tasks replaced by focused schedule above).
+
+**⚠️ config_audit note:** `config_audit.py` still references stale task names `Ruppert-Crypto-10AM` and `Ruppert-Crypto-6PM`. These were replaced by `Ruppert-Crypto-930AM`. The audit script will report false failures until updated.
 
 **All tasks run from:** `C:\Users\David Wu\.openclaw\workspace`  
 **Python path:** `C:\Users\David Wu\AppData\Local\Programs\Python\Python312\python.exe`
@@ -1522,7 +1538,7 @@ Read once at import time by `config.py`. Changes require restart.
 
 | ID | Description | Severity |
 |----|-------------|----------|
-| ISSUE-I01 | Watchdog double-spawn at boot. Two Task Scheduler tasks launch ws_feed. Watchdog may see stale heartbeat and spawn second instance. Two ws_feed processes compete for WS connection. Unresolved. | High |
+| ISSUE-I01 | Watchdog double-spawn at boot. Two Task Scheduler tasks launch ws_feed. Watchdog may see stale heartbeat and spawn second instance. Two ws_feed processes compete for WS connection. **UNRESOLVED — `kill_existing_ws_feed()` fix exists only in stale copy at `environments/demo/scripts/ws_feed_watchdog.py`, NOT in active `scripts/ws_feed_watchdog.py`.** | High |
 | ISSUE-I02 | Stale watchdog copy at `environments/demo/scripts/ws_feed_watchdog.py` with different constants (300s/600s vs 60s/180s). Risk of confusion. | Low |
 | ISSUE-I03 | `mode.json` changes require process restart. No hot-reload. | Low |
 | ISSUE-I04 | ~~`Ruppert-PostTrade-Monitor` (every 30 min) may overlap with WS exit path. Exit locking was asymmetric.~~ **FIXED Sprint 1 P2:** `execute_exit()` in `position_tracker.py` now acquires `acquire_exit_lock()` before proceeding — both WS and post_trade_monitor paths hold the same file lock. Exit locking is now symmetric. | ~~Medium~~ **Resolved** |
@@ -1540,7 +1556,7 @@ _Source: `memory/agents/sysmap-section6-dashboard.md`_
 - **Data sources:** Trade log files in `logs/trades/` + market price cache. No live Kalshi REST calls in DEMO mode.
 - **Price cache:** `market_cache` module loaded at startup, refreshed every 60s by background daemon thread.
 - **Response caching:** 30s in-process cache for `/api/state`, `/api/pnl`, `/api/positions/active`.
-- **Fixed P1-4 (ISSUE-072):** 19 bare `except: pass` blocks replaced with `except Exception as e` with proper logging. `_cache_reload_loop()` is now guarded. Previously, many endpoint failures were silently discarded.
+- **Fixed P1-4 (ISSUE-072):** 19 bare `except: pass` blocks replaced with `except Exception as e` with proper logging. `_cache_reload_loop()` is now guarded. Previously, many endpoint failures were silently discarded. **Endpoint count: 16** (corrected from earlier reports of 19).
 
 ---
 
@@ -1683,10 +1699,10 @@ _Consolidated list of all known issues across all sections. Severity: Critical /
 | ISSUE-X01 | ~~Double-settle race condition. `check_expired_positions()` and `settlement_checker` can both process same position.~~ **FIXED Sprint 3 (ISSUE-025):** `_settle_record_exists()` guard added. | §3 Exit | ~~High~~ **Resolved** |
 | ISSUE-X03 | ~~Tracker not updated by cycle exits. Cycle-entered positions without `add_position()` get no WS stop-losses or gain exits.~~ **FIXED Sprint 2 (ISSUE-031):** `remove_position()` called in both paths of `run_position_check()`. | §3 Exit | ~~High~~ **Resolved** |
 | ISSUE-X09 | Global CB not updated by WS feed. `update_global_state()` must be called by trading cycle explicitly. CB may lag. | §3 Exit | **High** |
-| ISSUE-I01 | ~~Watchdog double-spawn at boot. Two ws_feed instances compete for WS connection.~~ **FIXED Sprint 1 (ISSUE-049, commit ceba350):** `kill_existing_ws_feed()` called before every spawn. | §5 Infrastructure | ~~High~~ **Resolved** |
+| ISSUE-I01 | Watchdog double-spawn at boot. Two ws_feed instances compete for WS connection. `kill_existing_ws_feed()` fix exists in stale copy only — NOT ported to active `scripts/ws_feed_watchdog.py`. | §5 Infrastructure | **High — UNRESOLVED** |
 | ISSUE-D05 | ~~`AUTO_SOURCES` / `MANUAL_SOURCES` undefined in `get_account()`. May raise `NameError` or wrong trade counts.~~ **FIXED P1-4 (ISSUE-018):** Replaced with `_is_auto()`/`_is_manual()` module-scope helpers. ✅ RESOLVED (P1) | §6 Dashboard | ~~High~~ **Resolved** |
 | ISSUE-D07 | Brief generator uses two conflicting P&L methods. Different fields, different scope. Not explained in output to David. | §6 Dashboard | **High** |
-| ISSUE-E07 | `smart` mode runs `check` mode — no smart logic implemented. | §2 Execution | **Medium** |
+| ISSUE-E07 | ~~`smart` mode runs `check` mode — no smart logic implemented.~~ **RESOLVED Sprint 4 P2:** Dead `smart` mode fully removed from dispatch, docstring, and audit gates. | §2 Execution | ~~Medium~~ **Resolved** |
 | ISSUE-E04 | Session-level dedup only. Process restarts allow re-logging same trade. | §2 Execution | **Medium** |
 | ISSUE-E05 | `strategy_size` missing → trade silently skipped + Telegram alert. | §2 Execution | **Medium** |
 | ISSUE-X02 | ~~99c vs 100c discrepancy. `settlement_checker` uses 99c for wins; `check_expired_positions` uses 100c. 1-cent-per-contract systematic difference.~~ **FIXED P1-2 (ISSUE-026, commit d3584bf):** `settlement_checker.py` now uses `exit_price=100`. **FIXED P1-5 (ISSUE-098, commit 8a32658):** `position_monitor.py` corrected for YES-win and NO-win paths. ✅ RESOLVED (P1) | §3 Exit | ~~Medium~~ **Resolved** |
@@ -1703,7 +1719,7 @@ _Consolidated list of all known issues across all sections. Severity: Critical /
 | ISSUE-D08 | Brief generator uses 7-day lookback for open positions. Multi-week positions appear as closed. | §6 Dashboard | **Medium** |
 | ISSUE-1-01 | `confidence` in crypto_15m is a z-score magnitude, NOT a probability. Strategy confidence gate compares it directly against probability-scale thresholds. | §1 Entry | **Medium** |
 | ISSUE-1-03 | `crypto_threshold_daily` bypasses `should_enter()` entirely. No strategy gate runs. | §1 Entry | **Medium** |
-| ISSUE-1-12 | Module daily cap config for `crypto_band_daily_*` absent. Strategy gate fails open; relies on module's own 7% check. | §1 Entry | **Medium** |
+| ISSUE-1-12 | ~~Module daily cap config for `crypto_band_daily_*` absent. Strategy gate fails open; relies on module's own 7% check.~~ **RESOLVED:** Key exists at `config.py:71`. | §1 Entry | ~~Medium~~ **Resolved** |
 | ISSUE-E06 | `get_daily_exposure()` START_DATE hardcoded to `'2026-03-26'`. Brittle on redeployment. | §2 Execution | **Low** |
 | ISSUE-E03 | `run_exit_scan()` raises `RuntimeError` unconditionally. Dead code in `main.py`. | §2 Execution | **Low** |
 | ISSUE-E08 | Demo mode blocks orders but `log_trade()` still writes buy records. Demo trades appear real in logs. | §2 Execution | **Low** |
@@ -1935,20 +1951,19 @@ _Added v3.0 — 2026-04-03. Documents how each active external API connects to t
 
 ---
 
-### 9.3 Coinbase API (Primary Spot Price Feed)
+### 9.3 Coinbase API (Spot Price Feed)
 
-**Connecting file:** `agents/ruppert/trader/crypto_client.py`
+**Connecting file:** `agents/ruppert/trader/crypto_15m.py` (lines 487, 510 — both `fetch_coinbase_price()` functions)
 
 **Endpoint:** `https://api.coinbase.com/v2/prices/{asset}-USD/spot`
 
 **Authentication:** None (public pricing endpoint).
 
-**Function:** `fetch_coinbase_price(asset: str) -> float | None` — current spot price in USD (30-sec cache TTL).
+**Function:** `fetch_coinbase_price(asset: str) -> float | None` — current spot price in USD (30-sec cache TTL). Located in `crypto_15m.py`, not `crypto_client.py`.
 
 **Integration:**
 - **crypto_15m:** Primary reference price for 15-min direction evaluation. Entry blocked with `COINBASE_UNAVAILABLE` if unavailable.
 - **Basis risk gate:** Coinbase vs OKX comparison — blocks if `|CB - OKX| / OKX > MAX_BASIS_PCT (0.15%)`.
-- **crypto_band_daily:** Spot price source for log-normal model.
 
 ---
 
@@ -2010,15 +2025,45 @@ Crypto long-horizon:  KXBTCMAXM, KXBTCMAXY, KXBTCMINY, KXBTC2026250, KXBTCMAX100
 
 ---
 
+## DEMO vs LIVE
+
+The system currently operates in **DEMO mode** (simulated orders, real market data). Transitioning to LIVE requires addressing 41 items across 4 categories. The full checklist is maintained in `memory/overnight-final-report-2026-04-04.md` Section 5.
+
+**Key differences:**
+
+| Area | DEMO | LIVE |
+|------|------|------|
+| Orders | `KalshiClient._demo_block()` returns stub | SDK `create_order()` with RSA auth |
+| Mode file | `{"mode": "demo"}` | `{"mode": "live", "enabled": true}` |
+| Environment | `RUPPERT_ENV=demo` (default) | `RUPPERT_ENV=live` required |
+| Capital | `demo_deposits.jsonl` + closed P&L | `KalshiClient().get_balance()` (real) |
+| DRY_RUN | True (19 guard sites, all safe-default) | False — flipped by mode.json |
+| sys.path | 6+ files hardcode `environments/demo` | Must be updated to resolve by `RUPPERT_ENV` |
+| Settlement | Writes tagged `dry_run: True` | Must use `not _is_live_enabled()` |
+| Watchdog | stdout/stderr → DEVNULL | Must redirect to log files |
+
+**Blockers before LIVE (P1):**
+1. **P1-1: Watchdog double-spawn** — active copy missing `kill_existing_ws_feed()`
+2. **P1-2: `date.today()` pervasive** — 50+ sites use system TZ instead of PDT; circuit breaker silently disabled during UTC/PDT gap
+3. **P1-3: `post_trade_monitor` multi-buy overwrite** — `entries_by_key[key] = rec` clobbers earlier legs
+4. **P1-4: Phantom settlement inference** — result inferred from bid alone without confirmed status
+5. **P1-5: `push_alert()` undefined** — `NameError` swallowed; price cache failure alerts never delivered
+6. **P1-6: R9 macro filter dead code** — `has_macro_event_within()` doesn't exist; documented protection is absent
+
+> See `memory/overnight-final-report-2026-04-04.md` for the complete 41-item transition checklist with file:line references and fix instructions.
+
+---
+
 _End of System Map_
 
 ---
 
 ## 10. Revision History
 
+- v3.2 (2026-04-04): **22 corrections from overnight audit.** Signal weights: noted config vs fallback defaults. Timing gates: 120s/660s/0.08. Risk filters: R2=8c, R3=0.003, R4=0.25; R9 marked STUB. Gate order: CB backstop→#2. `_pdt_today()` name corrected throughout. Settlement checker 2× daily. ISSUE-I01 consistently UNRESOLVED. ISSUE-023 partial resolution noted. Dashboard 16 endpoints. Module inventory: crypto_band_daily/crypto_threshold_daily Disabled. ISSUE-1-07, ISSUE-1-12, ISSUE-E07 marked RESOLVED. API wiring: fetch_coinbase_price() in crypto_15m.py; crypto_band_daily uses Kraken; 5 CRYPTO_15M_SERIES. BACKSTOP_ENABLED=True. DOMAIN_THRESHOLD=10. Exit dedup fingerprint format corrected. KalshiClient get_markets(). config_audit stale task names noted. Added DEMO vs LIVE summary section.
 - v1.0 (2026-04-02): Initial assembly from 6 research agents
 - v1.1 (2026-04-02): Corrections from 10-audit pass (12 factual errors fixed, 12 gaps filled)
-- v1.2 (2026-04-03): DS domain updated for Sprints 1-5. Changes: logger `_append_jsonl` portalocker (cross-process safety); `log_exit()`/`log_settle()` wrappers with `_logged_exit_fingerprints` dedup; `capital.py` fallback Telegram alert + 4-hour dedup (ISSUE-051); `settlement_checker` bid-only phantom settlement inference removed (ISSUE-028); `data_agent` `_has_close_record()` guard prevents settled position resurrection (ISSUE-055); `_PROTECTED_ACTIONS` prevents exit/settle/exit_correction deletion (ISSUE-056); exit/settle `date` fields use `_today_pdt()` PDT timezone (ISSUE-044); `exit_correction` action type counted by `compute_closed_pnl_from_logs()`; 5 known issues marked resolved (ISSUE-X01, ISSUE-X03, ISSUE-A06, ISSUE-I01, ISSUE-I05, ISSUE-E01).
+- v1.2 (2026-04-03): DS domain updated for Sprints 1-5. Changes: logger `_append_jsonl` portalocker (cross-process safety); `log_exit()`/`log_settle()` wrappers with `_logged_exit_fingerprints` dedup; `capital.py` fallback Telegram alert + 4-hour dedup (ISSUE-051); `settlement_checker` bid-only phantom settlement inference removed (ISSUE-028); `data_agent` `_has_close_record()` guard prevents settled position resurrection (ISSUE-055); `_PROTECTED_ACTIONS` prevents exit/settle/exit_correction deletion (ISSUE-056); exit/settle `date` fields use `_pdt_today()` PDT timezone (ISSUE-044); `exit_correction` action type counted by `compute_closed_pnl_from_logs()`; 5 known issues marked resolved (ISSUE-X01, ISSUE-X03, ISSUE-A06, ISSUE-I01, ISSUE-I05, ISSUE-E01).
 - v1.3 (2026-04-03): Trader domain updated for Sprints 1-5. Changes: NO-side entry_price flip removed from `add_position()` and `_load()` — price now stored as-is (ISSUE-042); `EXIT_GAIN_PCT` now required (ImportError if missing, ISSUE-043); Design D stops gated to `side='yes'` only, `side` resolved at top of `check_exits()` loop (ISSUE-042); `_exits_lock` asyncio.Lock for atomic exit dedup (ISSUE-002); 3-strike exit abandon with JSONL audit record (ISSUE-003, DS-NEW-001); stale position ref snapshots before await (ISSUE-107); CB file-locked via portalocker on all read-modify-write ops (ISSUE-076); CB WARNING log on trip with asset name (ISSUE-047); WS eval dedup via `_window_eval_lock` in `_safe_eval_15m()` and `_check_and_fire_fallback()` (ISSUE-015, ISSUE-060); blocking I/O moved to `run_in_executor` in `_safe_eval_hourly()` and `_rest_refresh_stale()` (ISSUE-014, ISSUE-061); exposure cap corrected to `DAILY_CAP_RATIO` (ISSUE-070); KXSOL15M added to WS series (ISSUE-001); OBI EWM direction corrected (ISSUE-087); 5 additional known issues marked resolved (ISSUE-X04, ISSUE-X05, ISSUE-1-07, and re-confirmed ISSUE-X01, ISSUE-X03).
 - v1.4 (2026-04-03): QA corrections. §2.7: ISSUE-E01 marked Resolved (Sprint 2, ISSUE-029/099, commit d286b28 — failed orders now use `action='failed_order'`). §5.4: Watchdog double-spawn marked Resolved (Sprint 1, ISSUE-049, commit ceba350 — `kill_existing_ws_feed()` called before every spawn). §7 index entry for ISSUE-I01 updated with commit reference.
 - v2.0 (2026-04-03): Applied 40+ corrections from P1 domain audits (DS, Trader, Strategist) verified by QA. All QA-verified P1 known issues marked ✅ RESOLVED. Key changes: settlement exit_price 99→100 (ISSUE-026/027/098); optimizer glob path fixed (ISSUE-005); WS reconnect changed to exponential backoff (ISSUE-096); S5 Polymarket switched to daily function + bounds gate (ISSUE-057/089); daily module cap lock via portalocker (ISSUE-053); exit records gain edge+confidence fields (ISSUE-074); dashboard issues D01/D02/D03/D05 resolved; brier_tracker dynamic paths (ISSUE-004); KXXRPD/KXDOGED added to TICKER_MODULE_MAP (ISSUE-102); signal weight validation at startup (ISSUE-114/069); OI delta near-zero guard (ISSUE-129); normalize_entry_price() in post_trade_monitor (ISSUE-079).

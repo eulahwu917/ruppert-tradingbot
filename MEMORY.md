@@ -35,6 +35,14 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 - Sprint 5: wrong constant name (CB_DAILY_LOSS_LIMIT_PCT → LOSS_CIRCUIT_BREAKER_PCT)
 - Sprint 5: CME config had plaintext API password — flagged David to rotate
 
+### Overnight audit findings (2026-04-04)
+- **6 P1 bugs** found across double-pass audit (7 agents + combined pass + adversarial + synthesis)
+- **Most critical:** date.today() at 50+ sites silently disables CB during UTC/PDT gap; watchdog double-spawn fix in wrong file; R9 macro filter dead code
+- **System is DEMO-safe, NOT LIVE-ready**
+- **System Map v3.2** — 22 corrections applied, new DEMO vs LIVE section added
+- **41-item DEMO→LIVE checklist** — memory/overnight-final-report-2026-04-04.md Section 5
+- **Full report for David:** memory/overnight-final-report-2026-04-04.md
+
 ### CME API key rotation (David's action)
 - `secrets/cme_config.json` deleted but contained `"api_password": "tnqdnYn#g#r9e3Ar$n*Rq7Q6"`
 - David to deactivate this key at CME Group when convenient
