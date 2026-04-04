@@ -474,9 +474,16 @@ def normalize_entry_price(pos: dict) -> float:
     Uses the NO-side convention: market_prob represents YES probability,
     so NO entry cost = (1 - market_prob) * 100.
     """
-    side        = pos.get('side', 'no')
-    raw_ep      = pos.get('entry_price')
-    entry_price = raw_ep if raw_ep is not None else pos.get('market_prob', 0.5) * 100
+    side   = pos.get('side', 'no')
+    raw_ep = pos.get('entry_price')
+    if raw_ep is not None:
+        entry_price = raw_ep
+    else:
+        market_prob = pos.get('market_prob', 0.5)
+        if side == 'no':
+            entry_price = (1 - market_prob) * 100
+        else:
+            entry_price = market_prob * 100
     if side == 'no':
         entry_price = entry_price if isinstance(entry_price, (int, float)) else 50
         # Normalize: if value looks like a probability (0-1), convert to cents

@@ -148,32 +148,39 @@ def get_module_state(module: str) -> dict:
 
     Returns dict with keys: consecutive_losses, last_window_ts,
                             last_window_result, date
+
+    Entire function is routed through _rw_locked() (Option A) so concurrent callers
+    (e.g. WS feed holding lock during increment) cannot race with a day-reset write.
     """
-    today = _today_pdt()
-    state = _read_full_state()
-    mod   = state.get(module, {})
+    today   = _today_pdt()
+    path    = _state_path()
+    _result = [None]  # mutable cell — inner fn stores the return value here
 
-    if not mod or mod.get('date') != today:
-        # New day or missing — reset
-        fresh = _default_module_state(today)
-        state[module] = fresh
-        try:
-            _write_full_state(state)
-        except Exception:
-            pass
-        return fresh
+    def _mutate(state):
+        mod = state.get(module, {})
+        if not mod or mod.get('date') != today:
+            # New day or missing — reset and write back
+            fresh          = _default_module_state(today)
+            state[module]  = fresh
+            _result[0]     = fresh
+        else:
+            _result[0] = dict(mod)
 
-    return dict(mod)
+    _rw_locked(path, _mutate)
+    return _result[0]
 
 
 def set_module_state(module: str, new_mod_state: dict) -> None:
     """
     Write state for a specific module key (atomic).
-    Merges into the full state file.
+    Merges into the full state file via _rw_locked() to prevent races.
     """
-    state = _read_full_state()
-    state[module] = new_mod_state
-    _write_full_state(state)
+    path = _state_path()
+
+    def _mutate(state):
+        state[module] = new_mod_state
+
+    _rw_locked(path, _mutate)
 
 
 def increment_consecutive_losses(module: str, window_ts: str) -> None:
@@ -265,6 +272,7 @@ def check_global_net_loss(capital: float) -> dict:
         return {'tripped': False, 'reason': 'no_trade_log', 'net_loss_today': 0.0}
 
     net_pnl = 0.0
+    _exit_settle_count = 0
     try:
         for line in trade_log.read_text(encoding='utf-8').splitlines():
             line = line.strip()
@@ -273,6 +281,7 @@ def check_global_net_loss(capital: float) -> dict:
             rec = json.loads(line)
             if rec.get('action') not in ('exit', 'settle'):
                 continue
+            _exit_settle_count += 1
             pnl = rec.get('pnl')
             if pnl is not None:
                 net_pnl += float(pnl)
@@ -283,6 +292,12 @@ def check_global_net_loss(capital: float) -> dict:
             'reason': f'log_read_error (fail-closed): {e}',
             'net_loss_today': 0.0,
         }
+
+    # Diagnostic: log record count and pnl sum to expose $0 display root cause
+    logger.info(
+        '[circuit_breaker] check_global_net_loss: found %d exit/settle record(s), pnl_sum=%.2f',
+        _exit_settle_count, net_pnl
+    )
 
     # net_loss_today is the magnitude of the net loss (positive number when losing)
     net_loss_today = -net_pnl if net_pnl < 0 else 0.0

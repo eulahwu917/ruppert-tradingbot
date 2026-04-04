@@ -140,8 +140,12 @@ def _execute_band_trades(new_crypto, trader, total_capital, crypto_daily_cap,
                       'crypto_band_daily_sol', 'crypto_band_daily_xrp',
                       'crypto_band_daily_doge')
         )
-    except Exception:
-        _crypto_deployed_this_cycle = 0.0
+    except Exception as _e:
+        import logging as _logging
+        _logging.getLogger(__name__).error(
+            '[crypto_band_daily] get_daily_exposure() failed in cap lock — skipping entry batch: %s', _e
+        )
+        return []
 
     if _crypto_deployed_this_cycle >= crypto_daily_cap:
         print(f"  [DailyCap] Crypto daily cap already reached: ${_crypto_deployed_this_cycle:.2f} deployed "
@@ -536,9 +540,12 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
             else:
                 print(f"  [CapCheck] Cap OK — ${_cap_remaining:.2f} remaining (${_deployed_today:.2f} deployed)")
         except Exception as e:
-            print(f"  [CapCheck] Cap check error: {e} — proceeding with caution")
-            _total_capital  = 10000.0
-            _deployed_today = 0.0
+            print(f"  [CapCheck] get_daily_exposure() failed — halting cycle: {e}")
+            import logging as _logging
+            _logging.getLogger(__name__).error(
+                '[crypto_band_daily] get_daily_exposure() failed in main entry loop — halting cycle: %s', e
+            )
+            return []
 
         _crypto_daily_cap = _total_capital * getattr(config, 'CRYPTO_DAILY_CAP_PCT', 0.07)
 

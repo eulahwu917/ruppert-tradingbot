@@ -125,10 +125,9 @@ def run_crypto_1d_scan(dry_run=True, traded_tickers=None, open_position_value=0.
             )
             _1d_cap = _capital * config.CRYPTO_1D_DAILY_CAP_PCT
         except Exception as _ce:
-            log_activity(f"[Crypto1D] Capital check error: {_ce} — using fallback")
-            _capital = getattr(config, 'CAPITAL_FALLBACK', 10000.0)
-            _1d_deployed = 0.0
-            _1d_cap = _capital * getattr(config, 'CRYPTO_1D_DAILY_CAP_PCT', 0.15)
+            log_activity(f"[Crypto1D] get_daily_exposure() failed — skipping cycle: {_ce}")
+            # Do not use 0.0 fallback — cap check would be invalid
+            return []
 
         if _1d_deployed >= _1d_cap:
             log_activity(f"[Crypto1D] Daily cap reached (${_1d_deployed:.2f} / ${_1d_cap:.0f}) — skipping")

@@ -319,7 +319,11 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     # Check daily cap
     capital = get_capital()
     daily_cap = capital * config.CRYPTO_DAILY_CAP_PCT
-    current_exposure = get_daily_exposure()
+    try:
+        current_exposure = get_daily_exposure()
+    except Exception as _e:
+        logger.error('[position_monitor] get_daily_exposure() failed — skipping entry: %s', _e)
+        return
 
     if current_exposure >= daily_cap:
         logger.debug(f"Crypto daily cap reached: ${current_exposure:.2f} >= ${daily_cap:.2f}")
@@ -385,8 +389,12 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     opp['open_position_value'] = max(0.0, _total - _bp)
 
     # Check entry via strategy
-    deployed_today = get_daily_exposure()
-    _module_deployed = get_daily_exposure('crypto')
+    try:
+        deployed_today = get_daily_exposure()
+        _module_deployed = get_daily_exposure('crypto')
+    except Exception as _e:
+        logger.error('[position_monitor] get_daily_exposure() failed — skipping entry: %s', _e)
+        return
     module_deployed_pct = _module_deployed / capital if capital > 0 else 0.0
     decision = should_enter(opp, capital, deployed_today, module='crypto', module_deployed_pct=module_deployed_pct, traded_tickers=None)
     if not decision['enter']:

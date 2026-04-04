@@ -351,7 +351,11 @@ def run_long_horizon_scan(client, dry_run: bool = True, traded_tickers: set = No
     spent = 0.0
 
     # Check if daily cap already hit
-    existing_exposure = get_daily_exposure()
+    try:
+        existing_exposure = get_daily_exposure()
+    except Exception as _e:
+        logger.error('[crypto_long_horizon] get_daily_exposure() failed — skipping scan: %s', _e)
+        return []
     if existing_exposure >= daily_cap:
         log_activity('[LongHorizon] Daily cap already hit — skipping scan')
         return []
@@ -386,8 +390,12 @@ def run_long_horizon_scan(client, dry_run: bool = True, traded_tickers: set = No
         _total = get_capital()
         _bp = get_buying_power()
         opp['open_position_value'] = max(0.0, _total - _bp)
-        _deployed_today = get_daily_exposure()
-        _crypto_long_deployed = get_daily_exposure('crypto_long_horizon')
+        try:
+            _deployed_today = get_daily_exposure()
+            _crypto_long_deployed = get_daily_exposure('crypto_long_horizon')
+        except Exception as _e:
+            logger.error('[crypto_long_horizon] get_daily_exposure() failed — skipping opportunity: %s', _e)
+            continue
         _module_deployed_pct = _crypto_long_deployed / _total if _total > 0 else 0.0
         se_decision = should_enter(opp, _total, _deployed_today, module='crypto_long_horizon', module_deployed_pct=_module_deployed_pct, traded_tickers=None)
         if not se_decision['enter']:

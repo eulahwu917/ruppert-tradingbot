@@ -515,7 +515,9 @@ async def check_exits(ticker: str, yes_bid: int | None, yes_ask: int | None,
         # Settlement time is parsed from the ticker (same helper as check_expired_positions).
         # Replaces prior hardcoded 21:00 UTC which was wrong for hourly contracts.
         _mod = pos.get('module', '')
-        if (_mod.startswith('crypto_threshold_daily_') or _mod.startswith('crypto_band_daily_')) and pos.get('added_at'):
+        if (_mod.startswith('crypto_threshold_daily_') or _mod.startswith('crypto_band_daily_')) and pos.get('added_at') and side == 'yes':
+            # YES-side only: all tier checks compare yes_bid < entry_price * pct.
+            # For NO-side, yes_bid rising = loss (inverse). NO-side exits handled by 'lte' threshold checks.
             if key in _exits_in_flight:
                 pass  # let threshold checks run instead
             else:

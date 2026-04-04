@@ -28,6 +28,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
 from agents.ruppert.env_config import get_paths as _get_paths
+from agents.ruppert.env_config import is_live_enabled as _is_live_enabled
 LOGS = _get_paths()['logs']
 LOGS.mkdir(exist_ok=True)
 LOGS_DIR = LOGS  # alias used by settlement checker
@@ -287,7 +288,7 @@ def check_settlements(client):
             "fill_contracts": contracts,
             "scan_price": entry_price,
             "fill_price": exit_price,
-            "order_result": {"dry_run": True, "status": "settled"},
+            "order_result": {"dry_run": not _is_live_enabled(), "status": "settled"},
         }
         try:
             _append_jsonl(log_path, settle_record)

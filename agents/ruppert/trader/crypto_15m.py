@@ -1138,7 +1138,11 @@ def evaluate_crypto_15m_entry(
 
     # Strategy gate: global 70% deployment cap + strategy filters
     from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_exp, get_daily_wager as _get_wager
-    _deployed_today  = _get_exp()
+    try:
+        _deployed_today = _get_exp()
+    except Exception as _e:
+        logger.error('[crypto_15m] get_daily_exposure() failed — skipping entry: %s', _e)
+        return
     _agg_wager_today = sum(_get_wager(m) for m in _ALL_CRYPTO_15M_MODULES)   # aggregate all crypto_dir_15m_* modules
     _module_deployed_pct = _agg_wager_today / capital if capital > 0 else 0.0    # passed to should_enter backstop
     from agents.ruppert.data_scientist.capital import get_buying_power as _get_bp

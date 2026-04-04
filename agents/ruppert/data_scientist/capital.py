@@ -126,8 +126,8 @@ def get_daily_exposure() -> float:
         from agents.ruppert.data_scientist.logger import get_daily_exposure as _get_daily_exposure
         return _get_daily_exposure()
     except Exception as e:
-        logger.warning(f"[Capital] get_daily_exposure() failed: {e}")
-        return 0.0
+        logger.error(f"[Capital] get_daily_exposure() FAILED — cannot determine deployed capital: {e}")
+        raise RuntimeError(f"get_daily_exposure() failed: {e}") from e
 
 
 def get_pnl() -> dict:

@@ -1020,10 +1020,12 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
         # get_daily_exposure may not support asset= kwarg — use module-only
         try:
             asset_daily_deployed = get_daily_exposure(module=_asset_module)
-        except Exception:
-            asset_daily_deployed = 0.0
-    except Exception:
-        asset_daily_deployed = 0.0
+        except Exception as _e:
+            logger.error('[crypto_threshold_daily] get_daily_exposure() failed — skipping entry: %s', _e)
+            return _skip(asset, window, 'exposure_read_error')
+    except Exception as _e:
+        logger.error('[crypto_threshold_daily] get_daily_exposure() failed — skipping entry: %s', _e)
+        return _skip(asset, window, 'exposure_read_error')
 
     per_asset_cap = capital * getattr(config, 'CRYPTO_1D_PER_ASSET_CAP_PCT', 0.03)
     if asset_daily_deployed >= per_asset_cap:
@@ -1031,8 +1033,9 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
 
     try:
         total_1d_deployed = sum(get_daily_exposure(module=m) for m in _ALL_CRYPTO_1D_MODULES)
-    except Exception:
-        total_1d_deployed = 0.0
+    except Exception as _e:
+        logger.error('[crypto_threshold_daily] get_daily_exposure() total failed — skipping entry: %s', _e)
+        return _skip(asset, window, 'exposure_read_error')
 
     daily_cap = capital * getattr(config, 'CRYPTO_1D_DAILY_CAP_PCT', 0.15)
     if total_1d_deployed >= daily_cap:
