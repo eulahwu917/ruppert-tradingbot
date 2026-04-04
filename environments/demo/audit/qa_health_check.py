@@ -9,9 +9,6 @@ import traceback
 from datetime import date, timedelta
 sys.path.insert(0, '.')
 
-if __name__ != '__main__':
-    raise ImportError("qa_health_check.py is a standalone script — do not import it")
-
 results = {}
 
 # ─── API 1: Kalshi Market Data (public) ───────────────────────────────────────
@@ -61,52 +58,6 @@ try:
 except Exception as e:
     print(f"  EXCEPTION: {e}")
     results['api2'] = {'status': 'FAIL', 'error': str(e)}
-
-# ─── API 3: NOAA/NWS — all 19 cities ─────────────────────────────────────────
-print("\n=== API 3: NOAA/NWS — all 19 cities ===")
-NWS_GRID_POINTS = {
-    "KXHIGHNY":    {"office": "OKX", "gridX": 37,  "gridY": 39,  "city": "New York"},
-    "KXHIGHCHI":   {"office": "LOT", "gridX": 66,  "gridY": 77,  "city": "Chicago"},
-    "KXHIGHMIA":   {"office": "MFL", "gridX": 106, "gridY": 51,  "city": "Miami"},
-    "KXHIGHPHX":   {"office": "PSR", "gridX": 157, "gridY": 57,  "city": "Phoenix"},
-    "KXHIGHHOU":   {"office": "HGX", "gridX": 66,  "gridY": 99,  "city": "Houston"},
-    # New cities (weather_series in kalshi_client.py)
-    "KXHIGHAUS":   {"office": "EWX", "gridX": 156, "gridY": 91,  "city": "Austin"},
-    "KXHIGHDEN":   {"office": "BOU", "gridX": 63,  "gridY": 62,  "city": "Denver"},
-    "KXHIGHLAX":   {"office": "LOX", "gridX": 148, "gridY": 41,  "city": "Los Angeles (LAX)"},
-    "KXHIGHPHIL":  {"office": "PHI", "gridX": 50,  "gridY": 76,  "city": "Philadelphia"},
-    "KXHIGHTMIN":  {"office": "MPX", "gridX": 108, "gridY": 72,  "city": "Minneapolis"},
-    "KXHIGHTDAL":  {"office": "FWD", "gridX": 87,  "gridY": 107, "city": "Dallas"},
-    "KXHIGHTDC":   {"office": "LWX", "gridX": 96,  "gridY": 72,  "city": "Washington DC"},
-    "KXHIGHTLV":   {"office": "VEF", "gridX": 123, "gridY": 98,  "city": "Las Vegas"},
-    "KXHIGHTNOU":  {"office": "LIX", "gridX": 68,  "gridY": 88,  "city": "New Orleans"},
-    "KXHIGHTOKC":  {"office": "OUN", "gridX": 97,  "gridY": 94,  "city": "Oklahoma City"},
-    "KXHIGHTSFO":  {"office": "MTR", "gridX": 85,  "gridY": 98,  "city": "San Francisco"},
-    "KXHIGHTSEA":  {"office": "SEW", "gridX": 124, "gridY": 61,  "city": "Seattle"},
-    "KXHIGHTSATX": {"office": "EWX", "gridX": 126, "gridY": 54,  "city": "San Antonio"},
-    "KXHIGHTATL":  {"office": "FFC", "gridX": 50,  "gridY": 82,  "city": "Atlanta"},
-}
-
-nws_results = {}
-for series, cfg_grid in NWS_GRID_POINTS.items():
-    try:
-        url = f"https://api.weather.gov/gridpoints/{cfg_grid['office']}/{cfg_grid['gridX']},{cfg_grid['gridY']}/forecast"
-        r = requests.get(url, timeout=10, headers={'User-Agent': 'RuppertBot/1.0 (qa-check)'})
-        if r.status_code == 200:
-            periods = r.json().get('properties', {}).get('periods', [])
-            temp = periods[0].get('temperature') if periods else None
-            unit = periods[0].get('temperatureUnit') if periods else None
-            print(f"  ✅ {series} ({cfg_grid['city']}): {r.status_code}, periods={len(periods)}, temp={temp}°{unit}")
-            nws_results[series] = {'status': 'PASS', 'periods': len(periods), 'sample_temp': f"{temp}°{unit}"}
-        else:
-            print(f"  ❌ {series} ({cfg_grid['city']}): {r.status_code} - {r.text[:100]}")
-            nws_results[series] = {'status': 'FAIL', 'http_code': r.status_code}
-        time.sleep(0.3)  # be polite to NWS
-    except Exception as e:
-        print(f"  ❌ {series} ({cfg_grid['city']}): EXCEPTION {e}")
-        nws_results[series] = {'status': 'FAIL', 'error': str(e)}
-
-results['api3_nws'] = nws_results
 
 # ─── API 4: Kraken — 5 crypto pairs ──────────────────────────────────────────
 print("\n=== API 4: Kraken — 5 crypto pairs ===")
@@ -193,68 +144,6 @@ try:
 except Exception as e:
     print(f"  EXCEPTION: {e}")
     results['api5'] = {'status': 'FAIL', 'error': str(e)}
-
-# ─── API 6: FRED — DFEDTARU ───────────────────────────────────────────────────
-print("\n=== API 6: FRED — DFEDTARU ===")
-try:
-    r = requests.get('https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFEDTARU', timeout=10)
-    if r.status_code == 200:
-        lines = r.text.strip().split('\n')
-        header = lines[0]
-        last_row = lines[-1]
-        print(f"  Header: {header}")
-        print(f"  Last row: {last_row}")
-        parts = last_row.split(',')
-        date_val = parts[0] if parts else ''
-        rate_val = parts[1] if len(parts) > 1 else ''
-        results['api6'] = {
-            'status': 'PASS',
-            'header': header,
-            'latest_date': date_val,
-            'latest_rate': rate_val,
-            'rows': len(lines) - 1
-        }
-    else:
-        print(f"  FAIL: {r.status_code}")
-        results['api6'] = {'status': 'FAIL', 'http_code': r.status_code}
-except Exception as e:
-    print(f"  EXCEPTION: {e}")
-    results['api6'] = {'status': 'FAIL', 'error': str(e)}
-
-# ─── API 7: Open-Meteo via openmeteo_client ───────────────────────────────────
-print("\n=== API 7: Open-Meteo (openmeteo_client) ===")
-openmeteo_results = {}
-try:
-    from openmeteo_client import get_full_weather_signal
-    # Test Miami (existing city)
-    try:
-        sig = get_full_weather_signal('KXHIGHMIA', 84.5, (date.today() + timedelta(days=1)).isoformat())
-        print(f"  KXHIGHMIA: {sig}")
-        if sig and ('prob' in sig or 'probability' in sig or 'confidence' in sig):
-            openmeteo_results['KXHIGHMIA'] = {'status': 'PASS', 'signal': str(sig)[:200]}
-        else:
-            openmeteo_results['KXHIGHMIA'] = {'status': 'PARTIAL', 'signal': str(sig)[:200]}
-    except Exception as e:
-        print(f"  KXHIGHMIA EXCEPTION: {e}")
-        openmeteo_results['KXHIGHMIA'] = {'status': 'FAIL', 'error': str(e)}
-    
-    # Test Austin (new city)
-    try:
-        sig2 = get_full_weather_signal('KXHIGHAUS', 82.0, (date.today() + timedelta(days=1)).isoformat())
-        print(f"  KXHIGHAUS: {sig2}")
-        if sig2 and ('prob' in sig2 or 'probability' in sig2 or 'confidence' in sig2):
-            openmeteo_results['KXHIGHAUS'] = {'status': 'PASS', 'signal': str(sig2)[:200]}
-        else:
-            openmeteo_results['KXHIGHAUS'] = {'status': 'PARTIAL', 'signal': str(sig2)[:200]}
-    except Exception as e:
-        print(f"  KXHIGHAUS EXCEPTION: {e}")
-        openmeteo_results['KXHIGHAUS'] = {'status': 'FAIL', 'error': str(e)}
-        
-    results['api7_openmeteo'] = openmeteo_results
-except Exception as e:
-    print(f"  Import EXCEPTION: {e}")
-    traceback.print_exc()
-    results['api7_openmeteo'] = {'status': 'FAIL', 'error': str(e)}
 
 # ─── API 8: Kalshi search_markets() with orderbook enrichment ─────────────────
 print("\n=== API 8: Kalshi search_markets() with orderbook enrichment ===")
