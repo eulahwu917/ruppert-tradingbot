@@ -88,7 +88,7 @@ _Affects crypto_threshold_daily / crypto_band_daily, analytics pipelines, data q
 | ISSUE-065 | ✅ COMPLETE (d02db9f) Settled positions appear as open — dashboard misses `action='settle'` | Settled positions show as open in dashboard indefinitely | `dashboard/api.py`, `settlement_checker.py` |
 | ISSUE-066 | ✅ COMPLETE (d02db9f) `closed_win_rate` uses ticker-dedup instead of trade_id | Win/loss counts collapse multiple same-ticker trades; rate wrong | `dashboard/api.py` |
 | ISSUE-072 | ✅ COMPLETE (d02db9f) 19 exception swallows in dashboard API → all errors silently hidden | Dashboard returns wrong data with no indication anything failed | `dashboard/api.py` |
-| ISSUE-036 | `data_integrity_check.py` checks `logs/` not `logs/trades/` → never validated since migration | Audit tool returns false "OK" on every run; gives false confidence | `data_integrity_check.py` |
+| ISSUE-036 | ✅ COMPLETE (ae558f1) `data_integrity_check.py` checks `logs/` not `logs/trades/` → never validated since migration | Audit tool returns false "OK" on every run; gives false confidence | `data_integrity_check.py` |
 | ISSUE-037 | `code_audit.py` scans `audit/` instead of `demo/` → misses every production module | Code audit tool sees no production code; entirely useless | `code_audit.py` |
 | ISSUE-038 | `qa_self_test.py` has hardcoded absolute Windows path → breaks everywhere else | QA tests cannot run in CI or on any other machine | `qa_self_test.py` |
 | ISSUE-100 | `qa_self_test.py` deprecated file check scans wrong directory → always passes falsely | QA passes on deprecated-file check even when they exist | `qa_self_test.py` |
