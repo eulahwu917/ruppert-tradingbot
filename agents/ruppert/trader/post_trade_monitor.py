@@ -108,8 +108,8 @@ def check_settlements(client):
         logs_to_check.append(TRADES_DIR / f"trades_{log_date.isoformat()}.jsonl")
 
     # Build open positions (same logic as load_open_positions)
-    entries_by_key = {}
-    exit_keys = set()
+    entries_by_key = {}      # (ticker, side) → list of buy records
+    exit_count_by_key = {}   # (ticker, side) → count of exit/settle records
     settle_keys = set()  # already settled this cycle — track from logs
 
     for trade_log in logs_to_check:
@@ -128,18 +128,23 @@ def check_settlements(client):
             action = rec.get('action', 'buy')
             key = (ticker, side)
             if action in ('exit', 'settle'):
-                exit_keys.add(key)
+                exit_count_by_key[key] = exit_count_by_key.get(key, 0) + 1
                 if action == 'settle':
                     settle_keys.add(key)
             else:
-                entries_by_key[key] = rec
+                if key not in entries_by_key:
+                    entries_by_key[key] = []
+                entries_by_key[key].append(rec)
 
     # Sync tracker: remove any positions that already have settle records
     # (handles cases where tracker cleanup was missed on prior runs)
     for (s_ticker, s_side) in settle_keys:
         position_tracker.remove_position(s_ticker, s_side)
 
-    open_positions = [rec for key, rec in entries_by_key.items() if key not in exit_keys]
+    open_positions = []
+    for key, recs in entries_by_key.items():
+        exits = exit_count_by_key.get(key, 0)
+        open_positions.extend(recs[exits:])
 
     if not open_positions:
         print(f"  [Settlement Checker] no open positions to check")
@@ -193,16 +198,19 @@ def check_settlements(client):
         yes_bid = market.get('yes_bid', 50)
 
         if result in ('yes', 'no'):
-            pass  # resolved via result field
-        elif status == 'finalized':
-            # Infer result from yes_bid
-            result = 'yes' if yes_bid >= 99 else 'no'
-        elif yes_bid >= 99:
-            result = 'yes'
-        elif yes_bid <= 1:
-            result = 'no'
+            pass  # resolved via explicit result field
+        elif status in ('settled', 'finalized'):
+            # Status confirms settlement — infer from bid only when unambiguous
+            if (yes_bid or 0) >= 99:
+                result = 'yes'
+            elif (yes_bid or 0) <= 1:
+                result = 'no'
+            else:
+                # Finalized but bid is ambiguous — cannot safely infer
+                print(f"  [Settlement Checker] WARN: {ticker} status={status} but yes_bid={yes_bid} is ambiguous — skipping")
+                continue
         else:
-            # Not yet resolved — skip silently
+            # Not settled/finalized — skip (do NOT infer from bid alone)
             continue
 
         # Compute entry price
@@ -412,8 +420,8 @@ def load_open_positions():
     # P1-2 fix: key by (ticker, side) tuple instead of ticker alone.
     # Previously keyed by ticker only, so holding both YES and NO on the same
     # market would cause the second entry to overwrite the first.
-    entries_by_key = {}
-    exit_keys = set()
+    entries_by_key = {}      # (ticker, side) → list of buy records
+    exit_count_by_key = {}   # (ticker, side) → count of exit/settle records
 
     for trade_log in logs_to_check:
         if not trade_log.exists():
@@ -431,12 +439,19 @@ def load_open_positions():
             action = rec.get('action', 'buy')
             key = (ticker, side)
             if action in ('exit', 'settle'):
-                exit_keys.add(key)
+                exit_count_by_key[key] = exit_count_by_key.get(key, 0) + 1
             else:
-                entries_by_key[key] = rec
+                if key not in entries_by_key:
+                    entries_by_key[key] = []
+                entries_by_key[key].append(rec)
 
-    # Return only positions that haven't been exited
-    return [rec for key, rec in entries_by_key.items() if key not in exit_keys]
+    # NOTE: DEMO-safe. For LIVE, run_monitor() processes each leg independently —
+    # add dedup/aggregation before exit execution when deploying live.
+    result = []
+    for key, recs in entries_by_key.items():
+        exits = exit_count_by_key.get(key, 0)
+        result.extend(recs[exits:])
+    return result
 
 
 def get_market_data(ticker):
