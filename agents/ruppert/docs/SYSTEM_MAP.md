@@ -1,9 +1,24 @@
 # Ruppert System Map
-_Last updated: 2026-04-04 | v3.3 | Batch 1 trading-safety fixes: watchdog double-spawn resolved, multi-buy FIFO, phantom settlement guard ported._
+_Last updated: 2026-04-04 | v3.4 | Batches 2–5 complete. Strategist: CB PDT fix, CB module-state locking, R9 macro filter ACTIVE. Trader: NO-side daily stop gate, UTC-aware heartbeat/watchdog, window guard TZ, window eval retry, run_persistent_ws_mode deleted. DS: normalize_entry_price NO-side fix, dry_run tag, exposure error handling, settlement datetime, P&L divergence fixed, 22 date.today() sites swept, CRYPTO_15M_SERIES consolidated in utils.py._
 
 ---
 
 ## Changelog
+
+### v3.4 DS update — 2026-04-04
+- **Batches 2–5 Data Scientist domain changes applied**
+- **B2-DS-1 (commit 538b25d):** `settlement_checker.py` date comparisons now use `_pdt_today()` (imported from logger) — settle records correctly attributed to PDT calendar day at all hours
+- **B2-DS-2 (commit 538b25d):** `position_tracker._settle_record_exists()` uses `date.fromisoformat(_today_pdt())` — idempotency guard reads correct PDT-dated file; no more duplicate settle writes at UTC midnight
+- **B2-DS-3 (commit 538b25d):** Dead `push_alert` block (lines 63–68) removed from `dashboard/api.py` — undefined name `NameError` risk eliminated
+- **B3-DS-1 (commit bbab631):** `normalize_entry_price()` fallback now side-aware — NO positions use `(1-market_prob)*100`; YES uses `market_prob*100`. Was wrong for NO-side (used YES formula for both)
+- **B3-DS-2 (commit bbab631):** `post_trade_monitor.check_settlements()` settle records tagged `dry_run: not _is_live_enabled()` — previously hardcoded `True`, would have mislabeled live settle records as demo
+- **B3-DS-3 (commit bbab631):** `capital.get_daily_exposure()` raises `RuntimeError` on error; 11 call sites in 7 files now log+skip — eliminates silent 0.0 fallback that allowed unlimited over-trading on error
+- **B5-DS-1 (commit 286268c):** `settlement_checker` hold_duration uses `datetime.now(timezone.utc)`; naive-tz fallback added — no more `TypeError` on positions with naive `added_at` timestamps
+- **B5-DS-2 (commit 286268c):** `_build_close_records()` shared helper added to `api.py`; both `/api/state` and `/api/pnl` use it with SUM accumulation for multi-leg positions — **ISSUE-D04 RESOLVED**
+- **B5-DS-3 (commit 286268c):** 22 `date.today()` sites replaced with PDT-aware equivalent — data_agent (14 sites), api.py (6 sites), crypto_15m (2 sites), utils.py (1 site)
+- **B5-DS-3i (commit 286268c):** `load_traded_tickers()` in `utils.py` now uses `_today_pdt()` — ticker dedup no longer fails during UTC midnight gap (5 PM–midnight PDT)
+- **B5-DS-4 (commit 286268c):** `CRYPTO_15M_SERIES` consolidated to canonical definition in `utils.py`; removed from `crypto_15m.py` and `position_monitor.py` — single source of truth prevents series list drift
+- P1-2 blocker substantially resolved; ISSUE-D04 resolved
 
 ### v3.3 — 2026-04-04
 - **Batch 1 trading-safety fixes** (commit 6b09ebe) — 3 P1 blockers resolved
@@ -150,7 +165,7 @@ External Data Sources
 
 | Module Name | Type | Status | Description |
 |---|---|---|---|
-| `crypto_15m.py` | Entry | Active | 15-min Kalshi binary direction (BTC/ETH/XRP/DOGE/SOL). OKX microstructure, 4 z-scored signals (TFI/OBI/MACD/OI), Half-Kelly sizing. Data-collection thresholds in Phase 2. |
+| `crypto_15m.py` | Entry | Active | 15-min Kalshi binary direction (BTC/ETH/XRP/DOGE/SOL). OKX microstructure, 4 z-scored signals (TFI/OBI/MACD/OI), Half-Kelly sizing. Data-collection thresholds in Phase 2. **Batch 5 (B5-DS-3):** 2 `date.today()` sites replaced with `_today_pdt()`. **Batch 5 (B5-DS-4):** `CRYPTO_15M_SERIES` constant removed — now imported from `utils.py` canonical definition. |
 | `crypto_threshold_daily.py` | Entry | Disabled (`CRYPTO_THRESHOLD_DAILY_ENABLED=False`) | Daily above/below (BTC/ETH, SOL gated). 5-signal composite (momentum, funding, ATR, OI regime, Polymarket). Bypasses `should_enter()`. |
 | `crypto_band_daily.py` | Entry | Disabled (`CRYPTO_BAND_DAILY_ENABLED=False`) | Daily band/range (BTC/ETH/XRP/SOL/DOGE). Log-normal probability model. Uses `should_enter()` for sizing. Trade execution isolated in `_execute_band_trades()` with portalocker cap lock (ISSUE-053). |
 | `crypto_long_horizon.py` | Entry | Active | Monthly/annual Kalshi markets (KXBTCMAXM, KXBTCMAXY, etc.). Fear & Greed regime + log-normal touch probability. $50 hard cap, 1/6 Kelly. Called in `full` mode from `ruppert_cycle.py`. |
@@ -162,7 +177,7 @@ External Data Sources
 | `main.py` | Orchestration | Active | Per-module scan runners for crypto band, crypto 1D. Interfaces `should_enter()` → `Trader`. |
 | `ws_feed.py` | Exit | Active | Persistent WS process. Real-time price cache updates, stop-loss/gain exit evaluation, fallback poll loop for missed 15m windows. |
 | `position_tracker.py` | Exit | Active | Core exit engine. Tracks open positions in memory + disk. Stop-loss tiers (15m and daily). Threshold exits. Settlement detection. |
-| `settlement_checker.py` | Exit | Scheduled | Batch settlement resolver. 3× daily (11PM, 8AM, 6AM PDT). Catches positions missed by WS path. FIFO exit accounting. |
+| `settlement_checker.py` | Exit | Scheduled | Batch settlement resolver. 2× daily (11PM, 8AM PDT). Catches positions missed by WS path. FIFO exit accounting. **Batch 2 (B2-DS-1):** now uses `_pdt_today()` for date comparisons. **Batch 5 (B5-DS-1):** hold_duration uses `datetime.now(timezone.utc)`; naive-tz fallback added. |
 | `market_cache.py` | Shared | Active | In-memory price store. WS feed writes; all modules read. Staleness detection. Thread-safe. Persists to `price_cache.json`. |
 | `circuit_breaker.py` | Risk | Active | Per-module consecutive loss tracking + global daily loss circuit breaker. State file `circuit_breaker_state.json`. Auto-resets on PDT day boundary. |
 | `prediction_scorer.py` | Analytics | Active | Post-hoc join of buy records + settle records → `scored_predictions.jsonl`. Triggered by `settlement_checker`. |
@@ -217,7 +232,7 @@ Trade logging (log_trade / log_activity) + Decision log (JSONL)
 
 **Source file:** `agents/ruppert/trader/crypto_15m.py`
 
-**Purpose:** Evaluates Kalshi 15-minute binary direction markets (KXBTC15M, KXETH15M, KXXRP15M, KXDOGE15M, KXSOL15M). These markets settle YES if the asset's price is higher at close than at open (Coinbase reference). ~~⚠️ **KXSOL15M is actively misrouted**~~ — **FIXED Sprint 4 (ISSUE-001):** `'KXSOL15M'` added to `CRYPTO_15M_SERIES` in `ws_feed.py`. Called on every WebSocket tick. Builds a weighted composite of four microstructure signals from OKX perpetual swap data, applies 10 risk filters, runs the strategy gate, sizes via Half-Kelly, and places a Kalshi order.
+**Purpose:** Evaluates Kalshi 15-minute binary direction markets (KXBTC15M, KXETH15M, KXXRP15M, KXDOGE15M, KXSOL15M). These markets settle YES if the asset's price is higher at close than at open (Coinbase reference). ~~⚠️ **KXSOL15M is actively misrouted**~~ — **FIXED Sprint 4 (ISSUE-001):** `'KXSOL15M'` added to `CRYPTO_15M_SERIES` in `ws_feed.py`. **Batch 4 (B4-TRD-5):** `crypto_15m.py` hardcoded series tuple replaced with `CRYPTO_15M_SERIES` constant imported from `utils.py` (canonical definition). `position_monitor.py` also imports from same constant. Called on every WebSocket tick. Builds a weighted composite of four microstructure signals from OKX perpetual swap data, applies 10 risk filters, runs the strategy gate, sizes via Half-Kelly, and places a Kalshi order.
 
 #### Inputs
 
@@ -313,7 +328,7 @@ P_final = max(0.05, min(0.95, P_biased + poly_nudge))  [poly_nudge always 0.0]
 | R6 | Extreme funding | `abs(fr_z) > 3.0` | `EXTREME_FUNDING` |
 | R7 | Low conviction | `abs(raw_score) < 0.05` | `LOW_CONVICTION` |
 | R8 | Session drawdown | `session_pnl < -0.05 * capital` | `DRAWDOWN_PAUSE` |
-| R9 | Macro event | `has_macro_event_within(minutes=30)` | `MACRO_EVENT_RISK` | **⚠️ STUB/DEAD CODE:** `has_macro_event_within()` does not exist in `ruppert_cycle`. Import silently caught; R9 never fires. |
+| R9 | Macro event | `has_macro_event_within(minutes_before=120, minutes_after=60)` | `MACRO_EVENT_RISK` | **✅ ACTIVE (Batch 4, B4-STR-1, commit 24682b6):** `has_macro_event_within()` implemented in `utils.py`. 40-entry 2026 calendar (FOMC decisions + minutes, CPI, NFP). `crypto_15m.py` uses conditional import + ERROR log if unavailable. Window: 120 min before, 60 min after macro event. |
 | R10 | Basis risk | `abs(coinbase_price - okx_price) / okx_price > 0.0015` | `BASIS_RISK` |
 
 Note: R2, R3, R4 values above reflect current config overrides (tightened from Phase 2 data-collection defaults of 25¢/0.0005/0.01). See Known Issue 1.11.
@@ -329,6 +344,8 @@ position_usd = max(position_usd, $5 floor)
 ```
 
 Then three-tier cap check: circuit breaker (3 consecutive losses = hard stop), daily backstop (disabled), window cap (4% of capital per 15-min window; **Fixed P1-1 (ISSUE-105):** actual spend computed as `contracts × price/100` inside lock — no longer overcharged on partial/trimmed fills). The `decision['size']` from `should_enter()` is **discarded** (see Known Issue 1.2).
+
+**Batch 2 (B2-STR-2, commit 538b25d) — PDT daily wager tracking (partial):** Daily wager checks at lines 155 and 1232 now call `circuit_breaker._today_pdt()` instead of `date.today()`. Wager reset at PDT midnight is now correct for these paths. ⚠️ Lines 553 and 1320 still use `date.today()` — deferred to Batch 5.
 
 #### Output Signal Dict and Decision Log
 
@@ -678,6 +695,8 @@ should_enter() returns True
 
 **`load_traded_tickers()` note:** Exits do NOT remove tickers from the set — once traded, blocked all day.
 
+**Batch 5 (B5-DS-3i) — `load_traded_tickers()` dedup fix:** `utils.py` now imports and uses `_today_pdt()` for the dedup key inside `load_traded_tickers()`. Previously, the function used `date.today()` (system TZ), which produced the wrong date string during the UTC midnight gap (5 PM–midnight PDT). The mismatch caused the dedup check to always miss, so tickers were not properly blocked for re-entry until the next PDT-day file load.
+
 ---
 
 ### 2.6 Trade Log Record Types
@@ -833,6 +852,8 @@ Config: `EXIT_95C_THRESHOLD = 95`, `EXIT_GAIN_PCT = 0.90` (Phase 2; was 0.70).
 
 **Sprint 5 (ISSUE-042) — Design D gate and side resolution:** `side` is now resolved from `key[1]` at the **top** of the `check_exits()` loop, before any stop logic runs. Design D stop tiers (daily catastrophic/severe/terminal) are gated to `side == 'yes'` only. NO-side daily positions skip all Design D stop checks. Previously, NO positions with a flipped `entry_price` (e.g. 97c for a 3c NO) could trigger Design D stops incorrectly because the stored price was near the YES win threshold rather than near zero.
 
+**Batch 3 (B3-TRD-1):** `and side == 'yes'` gate added to the **outer** daily stop-loss `if` block (~line 518 in `position_tracker.py`). NO-side daily positions now skip all daily stop-loss evaluation at the block entry level. Comment added explaining that NO-side exits are handled by `lte` threshold checks (the 5c equivalent-win rule), not stop-loss logic.
+
 #### execute_exit() — P&L Calculation
 
 ```
@@ -887,6 +908,8 @@ Every 60s. For each tracked position past `close_dt`: REST-fetches market result
 
 **`post_trade_monitor.check_alert_only_position()` (Fixed P1-5 / ISSUE-079):** Now uses `normalize_entry_price(pos)` helper for entry price normalization. Previously used broken inline logic that could produce incorrect entry price values for alert threshold checks.
 
+**`normalize_entry_price()` (Batch 3 / B3-DS-1):** Fallback when `entry_price` is missing is now **side-aware**: YES positions use `market_prob * 100` (was previously used for both sides); NO positions use `(1 - market_prob) * 100`. Previously, NO-side positions received a wrong entry price from the YES formula when `entry_price` was absent — causing incorrect alert thresholds and P&L estimates.
+
 #### recovery_poll_positions()
 
 Called on WS disconnect. REST-polls all tracked positions to catch missed price moves.
@@ -919,6 +942,8 @@ run_ws_feed()
 
 **WS connect params:** `ping_interval=None, ping_timeout=None` — server-side pings only (client pings caused false 1011 disconnects).
 
+**Batch 4 (B4-TRD-4):** `run_persistent_ws_mode()` deleted — it unconditionally raised `RuntimeError` and was never callable. The `--persistent` CLI flag now calls `ws_feed.run()` directly and exits with `sys.exit(1)` on failure.
+
 **Reconnect delay:** Exponential backoff — starts at 5s, doubles each reconnect, caps at 60s (sequence: 5→10→20→40→60s). **Fixed P1-5 (ISSUE-096, commit a441a6d).** Applied to both timeout and exception paths.
 
 **Sprint 1 — Async/blocking fixes:**
@@ -933,7 +958,7 @@ run_ws_feed()
 Processes only `type == 'ticker'` messages. Price conversion: WS sends dollar strings → cent integers.
 
 - Every tick: `market_cache.update()` + `_safe_check_exits()` (background task)
-- `KXBTC15M`, `KXETH15M`, `KXSOL15M`, `KXXRP15M`, `KXDOGE15M` prefix → `_safe_eval_15m()` (15m entry evaluation) — 5 series total. **KXSOL15M added Sprint 4 (ISSUE-001); KXXRP15M, KXDOGE15M also active.**
+- `KXBTC15M`, `KXETH15M`, `KXSOL15M`, `KXXRP15M`, `KXDOGE15M` prefix → `_safe_eval_15m()` (15m entry evaluation) — 5 series total. **KXSOL15M added Sprint 4 (ISSUE-001); KXXRP15M, KXDOGE15M also active.** **Batch 4 (B4-TRD-5):** Series list is now defined as the `CRYPTO_15M_SERIES` constant in `utils.py`, imported by both `ws_feed.py` and `position_monitor.py`. `crypto_15m.py` previously had a hardcoded tuple; now imports the same canonical constant.
 - `KXBTC`, `KXETH`, etc. prefix (NOT 15m) → `_safe_eval_hourly()` (daily/hourly band entry, runs in executor)
 - The `elif` logic ensures 15m tickers are NOT double-evaluated by the hourly handler.
 - All evaluation tasks are fire-and-forget (`asyncio.create_task`); feed yields every 100 messages.
@@ -944,7 +969,9 @@ Processes only `type == 'ticker'` messages. Price conversion: WS sends dollar st
 1. Skip if `elapsed < 90s` or `remaining < 180s`
 2. Acquire `_window_eval_lock`; skip if `guard_key in _window_evaluated` (atomic check, Sprint 1 fix)
 3. REST-resolve ticker → `evaluate_crypto_15m_entry()`
-4. Always mark `_window_evaluated[guard_key]` even on exception (prevents retry storms — see Known Issue 3.8)
+4. ~~Always mark `_window_evaluated[guard_key]` even on exception (prevents retry storms — see Known Issue 3.8)~~ **FIXED Batch 4 (B4-TRD-3):** Window evaluation mark is now written **after** `evaluate_crypto_15m_entry()` returns — no longer written before eval or on exception. `_window_retry_after` dict added: on REST `None` result, window gets one delayed retry (under `_window_eval_lock`). Permanent skip only after two misses (success or second REST `None`). ~~ISSUE-X08~~ **RESOLVED.**
+
+**Batch 4 (B4-TRD-2):** `_prune_window_guard()` — `.replace(tzinfo=None)` strip removed. Window guard timestamps now use UTC-aware ISO strings throughout. Previously mixed naive/aware datetimes could cause comparison errors across DST boundaries.
 
 #### Heartbeat
 
@@ -952,6 +979,8 @@ Processes only `type == 'ticker'` messages. Price conversion: WS sends dollar st
 ```json
 {"last_heartbeat": "<ISO>", "pid": <int>, "status": "running"}
 ```
+
+**Batch 4 (B4-TRD-1):** `_write_heartbeat()` now uses `datetime.now(timezone.utc)` — timestamp is no longer naive. Previously used `datetime.now()` (local/naive), which could drift during DST transitions or produce comparison errors.
 
 ---
 
@@ -966,6 +995,10 @@ FIFO accounting:
 - Counts buy/open records per `(ticker, side)` key (chronological)
 - Counts exit/settle records
 - Skips first N buy legs (N = exit count). Remaining = unsettled.
+
+**Batch 2 (B2-DS-1) — Date timezone fix:** `check_settlements()` and `load_all_unsettled()` date string comparisons now use `_pdt_today()` (imported from `logger`) instead of `date.today()`. Settle records are correctly attributed to the PDT calendar day at all hours. Previously, calls after UTC midnight (5 PM PDT) would search the wrong trade file and incorrectly classify positions as unsettled.
+
+**Batch 5 (B5-DS-1) — UTC-aware hold duration:** `hold_duration_hours` in settle records now computes elapsed time using `datetime.now(timezone.utc)`. A naive-datetime fallback (`.replace(tzinfo=timezone.utc)`) is applied when the stored `added_at` timestamp lacks timezone info. Previously, naive vs. aware datetime comparison raised a `TypeError` for positions added before the tz-aware fix was deployed.
 
 #### check_settlements() — Resolution Logic
 
@@ -1004,7 +1037,11 @@ Downstream readers must handle missing fields when consuming settle records from
 
 **Batch 1 (commit 6b09ebe) — FIFO position loading:** `post_trade_monitor.load_open_positions()` and `check_settlements()` inline loader changed from last-write-wins (`entries_by_key[key] = rec`) to FIFO list accumulation. Multi-leg positions (multiple buys on same ticker/side) now correctly preserved; earlier legs are no longer orphaned by later buys. ⚠️ **LIVE caveat:** `run_monitor()` processes each leg independently — needs dedup logic before LIVE deployment.
 
+**Batch 3 (B3-DS-2) — dry_run tag corrected:** `post_trade_monitor.check_settlements()` settle records are now tagged `dry_run: not _is_live_enabled()` (uses `env_config._is_live_enabled()` import). Previously hardcoded to `dry_run: True` — settle records in LIVE mode would have been incorrectly flagged as demo simulations, potentially causing downstream readers to discard or miscount live settlements.
+
 **Sprint 3 (ISSUE-025):** `check_expired_positions()` now calls `_settle_record_exists(ticker, side)` (checks today + yesterday's trade log) before writing. If a settle record already exists, position is removed from tracker without writing a duplicate.
+
+**Batch 2 (B2-DS-2):** `_settle_record_exists()` date comparison now uses `date.fromisoformat(_today_pdt())` instead of `date.today()` — the idempotency guard now reads the correct PDT-dated trade file all day. Previously, at UTC midnight (5 PM PDT) the function would look for the wrong file and miss existing settle records, allowing duplicate settle writes.
 
 After each settlement: calls `backfill_outcome()` and `prediction_scorer.score_new_settlements()`.
 
@@ -1053,6 +1090,12 @@ Thread-safe via `threading.Lock()`. Persists to `logs/price_cache.json` via atom
 
 **Sprint 5 — File locking on read-modify-write (ISSUE-076 fix):** All read-modify-write operations — `increment_consecutive_losses()`, `reset_consecutive_losses()`, and `update_global_state()` — now use a `_rw_locked()` helper that acquires `portalocker.LOCK_EX` on the state file before reading and holds it through the write. Cold-start `FileNotFoundError` is handled with a `w+` fallback inside the lock. This eliminates the TOCTOU race where two processes could read the same state, both increment, and the second write would clobber the first increment.
 
+**Batch 2 (B2-STR-1, commit 538b25d) — PDT day boundary in `check_global_net_loss()`:** Replaced `date.today()` at line 263 with `_today_pdt()`. Circuit breaker now reads the correct PDT trade file throughout the day. Zero `date.today()` calls remain in `circuit_breaker.py`.
+
+**Batch 3 (B3-STR-1, commit bbab631) — `get_module_state()` and `set_module_state()` file-locked:** Both methods now route through `_rw_locked()` using the mutable-cell pattern. Consecutive losses counter is no longer subject to TOCTOU race condition on module state reads and writes.
+
+**Batch 3 (B3-STR-2, commit bbab631) — Diagnostic logging in `check_global_net_loss()`:** `logger.info()` added to surface trade count and P&L sum during global net loss evaluation. Confirmed that `loss_today` key in `ruppert_cycle.py` is CORRECT — `strategy.py:check_loss_circuit_breaker()` already translates `net_loss_today` → `loss_today`. $0 display root cause is a separate data issue (not a key mismatch).
+
 **Sprint 5 — CB trip logging (ISSUE-047 fix):** When `increment_consecutive_losses()` causes the threshold to be reached, a `WARNING`-level log is emitted identifying the module, current count, and threshold (e.g. `"Circuit breaker tripped: crypto_dir_15m_BTC — 3/3 consecutive losses"`). Previously the trip was silent in the log.
 
 **Update triggers:**
@@ -1074,7 +1117,7 @@ Thread-safe via `threading.Lock()`. Persists to `logs/price_cache.json` via atom
 | ISSUE-X05 | ~~Legacy NO position migration. Pre-migration positions exited before migration may have wrong entry_price in historical trade log records.~~ **FIXED Sprint 5 (ISSUE-042):** Migration block removed from `_load()`. NO `entry_price` now stored as-is. DS inserted 125 `exit_correction` records into trades_2026-04-02/03.jsonl to correct historical P&L. CB global state refreshed. | ~~Low~~ **Resolved** |
 | ISSUE-X06 | `_write_off_logged` not cleared on WS reconnect. Same-process write-off suppression persists across reconnects. | Low |
 | ISSUE-X07 | Recovery poll without `close_time` bypasses NO-side settlement guard. | Low |
-| ISSUE-X08 | Fallback poll marks window evaluated on exception. Transient REST error → window permanently skipped for that connection cycle. | Medium |
+| ISSUE-X08 | ~~Fallback poll marks window evaluated on exception. Transient REST error → window permanently skipped for that connection cycle.~~ **FIXED Batch 4 (B4-TRD-3):** Evaluation mark now written AFTER eval returns; `_window_retry_after` dict allows one retry on REST None; permanent skip only after two misses. ✅ RESOLVED | ~~Medium~~ **Resolved** |
 | ISSUE-X09 | Global CB written separately from trading cycle. WS feed never calls `update_global_state()`. CB may lag behind reality. | High |
 
 ---
@@ -1227,6 +1270,8 @@ for each settle/exit record:
 
 **Fixed P1-2 (ISSUE-102):** `TICKER_MODULE_MAP` and `_cap_map` now include entries for `KXXRPD` (→ `crypto_threshold_daily_xrp`) and `KXDOGED` (→ `crypto_threshold_daily_doge`). Also includes `KXBTCD` mapping. Previously missing — module classification and cap checking were skipped for these tickers.
 
+**Batch 5 (B5-DS-3) — `date.today()` sweep (14 sites in data_agent.py):** All 14 remaining `date.today()` call sites in `data_agent.py` replaced with `_today_pdt()` (PDT-aware). Affected code paths include trade log date filtering, audit window calculations, and alert dedup time comparisons. Previously, these paths could use the wrong calendar day from 5 PM PDT until midnight.
+
 **Full-cycle-only checks:**
 - Entry price outside spread → `_flag_trade()` (adds `_price_anomaly: true`)
 - Daily cap violations → Telegram alert (no auto-fix)
@@ -1269,13 +1314,15 @@ for each settle/exit record:
 3. If deposits ≤ 0: **Sprint 2 (ISSUE-051):** sends Telegram alert + `log_activity()`, with 4-hour dedup via `logs/capital_fallback_alert.json`. Error summary capped at 500 chars. Then returns `$10,000.00`. Previously this was a silent `logger.warning()` only (see Known Issue 4.6 — now resolved).
 4. On **any exception** (import failure, path error, etc.) in `get_capital()`: same Telegram alert + 4-hour dedup + returns `$10,000.00`.
 
+**Batch 3 (B3-DS-3) — `get_daily_exposure()` error handling:** `capital.py` now **raises `RuntimeError`** instead of silently returning `0.0` on errors from `get_daily_exposure()`. The 11 call sites across 7 files (`crypto_15m.py`, `crypto_band_daily.py`, `crypto_threshold_daily.py`, `strategy.py`, `ws_feed.py`, `ruppert_cycle.py`, `post_trade_monitor.py`) now follow a **log + skip** pattern: they catch the `RuntimeError`, log a WARNING, and skip the current evaluation rather than proceeding with a fictitiously zero exposure value. Previously, any failure in `get_daily_exposure()` would silently allow cap checks to pass as if no capital was deployed — enabling unlimited over-trading when the function errored.
+
 **Key functions:**
 
 | Function | Returns |
 |----------|---------|
 | `get_capital()` | Total capital (deposits + realized P&L or API balance) |
 | `get_buying_power(deployed)` | `max(0, capital - deployed)` |
-| `get_daily_exposure()` | Delegates to `logger.get_daily_exposure()` |
+| `get_daily_exposure()` | Delegates to `logger.get_daily_exposure()`; raises `RuntimeError` on failure (Batch 3 / B3-DS-3) |
 | `get_pnl()` | `{closed: float, open: 0.0, total: float}` |
 
 **Why not `pnl_cache.json`:** Capital reads `compute_closed_pnl_from_logs()` directly to avoid synthesizer lag — keeps "Account Value" consistent with the dashboard Closed P&L panel.
@@ -1496,6 +1543,8 @@ Read once at import time by `config.py`. Changes require restart.
 
 **Restart logic:** Reads `ws_feed_heartbeat.json` every 60s. If stale or missing → calls `kill_existing_ws_feed()` to terminate any running ws_feed process → 2s delay → spawn new ws_feed process (Windows flags: `CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS`). Logs to `logs/watchdog.log`.
 
+**Batch 4 (B4-TRD-1):** Stale check now uses `datetime.now(timezone.utc)` for heartbeat age comparison — was naive `datetime.now()`. Aligns with ws_feed heartbeat write which also moved to UTC-aware (same batch).
+
 **~~⚠️ Double-spawn issue~~ ✅ RESOLVED (Batch 1, commit 6b09ebe):** `kill_existing_ws_feed()` ported from stale copy to active `scripts/ws_feed_watchdog.py`. Watchdog now kills any existing ws_feed process before spawning a new one, preventing competing WS connections at boot.
 
 ---
@@ -1568,6 +1617,12 @@ _Source: `memory/agents/sysmap-section6-dashboard.md`_
 - **Price cache:** `market_cache` module loaded at startup, refreshed every 60s by background daemon thread.
 - **Response caching:** 30s in-process cache for `/api/state`, `/api/pnl`, `/api/positions/active`.
 - **Fixed P1-4 (ISSUE-072):** 19 bare `except: pass` blocks replaced with `except Exception as e` with proper logging. `_cache_reload_loop()` is now guarded. Previously, many endpoint failures were silently discarded. **Endpoint count: 16** (corrected from earlier reports of 19).
+
+**Batch 2 (B2-DS-3) — Dead `push_alert` block removed:** Lines 63–68 in `dashboard/api.py` contained a dead `push_alert(...)` call that referenced an undefined name (would have raised `NameError` at runtime). Block removed; logging via `_logger.error()` is sufficient. No functional change to endpoint behavior.
+
+**Batch 5 (B5-DS-2) — Shared `_build_close_records()` helper:** A new internal helper `_build_close_records()` was added to `api.py`. Both `/api/state` and `/api/pnl` now call this single function instead of maintaining separate accumulation loops. Multi-leg positions are now handled with **SUM accumulation** — the helper sums P&L across all close records for the same `trade_id` / `(ticker, side)` key rather than keeping only one leg. This resolves the previously-noted divergence between `/api/state` and `/api/pnl` closed-P&L values. **ISSUE-D04 RESOLVED.**
+
+**Batch 5 (B5-DS-3) — `date.today()` sweep (6 sites in api.py):** All 6 `date.today()` call sites in `dashboard/api.py` replaced with `_today_pdt()` (PDT-aware). Previously, endpoints computing "today's" trades or win rates could bucket records into the wrong day during the 5 PM–midnight PDT window when UTC midnight had already rolled over.
 
 ---
 
@@ -1687,7 +1742,7 @@ These serve different purposes but can show different numbers without explanatio
 | ISSUE-D01 | ~~Fake P&L chart (two-point series). `points` array hardcoded to 2 data points: start date `'2026-03-10'` and today. Not a real per-day cumulative series.~~ **FIXED P1-4/P1-5 (ISSUE-063/CLEANUP-063):** `pnl_by_day` accumulation, hardcoded `points` build block, and `"points": points` key all removed from `dashboard/api.py`. Chart endpoint no longer returns this data. ✅ RESOLVED (P1) | ~~Medium~~ **Resolved** |
 | ISSUE-D02 | ~~`BOT_SRC` missing `ws_*` sources in `/api/pnl`. WS-originated trades (`ws_crypto` etc.) classified as neither bot nor manual → underreports deployed capital.~~ **FIXED P1-4 (ISSUE-064):** `_is_auto()`/`_is_manual()` promoted to module scope in `dashboard/api.py`; now correctly covers `ws_*` and `crypto_15m` sources. ✅ RESOLVED (P1) | ~~Medium~~ **Resolved** |
 | ISSUE-D03 | ~~Settled positions showing as open. `is_settled_ticker()` may return False for non-standard tickers or near-midnight EDT comparison edge cases.~~ **FIXED P1-4 (ISSUE-065):** `exited` set in `/api/positions/active` now includes both `exit` and `settle` action records. Settled positions no longer appear as open. ✅ RESOLVED (P1) | ~~Medium~~ **Resolved** |
-| ISSUE-D04 | `_build_state()` vs `/api/pnl` P&L accumulation duplication. Bug fixes must be applied in both places. | Medium |
+| ISSUE-D04 | ~~`_build_state()` vs `/api/pnl` P&L accumulation duplication. Bug fixes must be applied in both places.~~ **RESOLVED Batch 5 (B5-DS-2):** Shared `_build_close_records()` helper added; both `/api/state` and `/api/pnl` now call it. SUM accumulation for multi-leg positions. Single implementation — no more divergence. | ~~Medium~~ **Resolved** |
 | ISSUE-D05 | ~~`AUTO_SOURCES` / `MANUAL_SOURCES` undefined in `get_account()`. May raise `NameError` or return wrong bot/manual trade counts.~~ **FIXED P1-4 (ISSUE-018):** Replaced with `_is_auto()`/`_is_manual()` module-scope helper functions in `dashboard/api.py`. ✅ RESOLVED (P1) | ~~High~~ **Resolved** |
 | ISSUE-D06 | Open P&L relies entirely on market cache. WS feed down → all open positions show pnl=0. No staleness indicator in `/api/pnl` or `/api/state`. | Medium |
 | ISSUE-D07 | Brief generator uses two different P&L methods. `_compute_pnl_from_trades()` (today only, reads `pnl` from exit_correction) vs `compute_closed_pnl_from_logs()` (all-time, reads `pnl_correction`). Distinction not explained in output. | High |
@@ -1718,14 +1773,14 @@ _Consolidated list of all known issues across all sections. Severity: Critical /
 | ISSUE-E05 | `strategy_size` missing → trade silently skipped + Telegram alert. | §2 Execution | **Medium** |
 | ISSUE-X02 | ~~99c vs 100c discrepancy. `settlement_checker` uses 99c for wins; `check_expired_positions` uses 100c. 1-cent-per-contract systematic difference.~~ **FIXED P1-2 (ISSUE-026, commit d3584bf):** `settlement_checker.py` now uses `exit_price=100`. **FIXED P1-5 (ISSUE-098, commit 8a32658):** `position_monitor.py` corrected for YES-win and NO-win paths. ✅ RESOLVED (P1) | §3 Exit | ~~Medium~~ **Resolved** |
 | ISSUE-X04 | ~~In-flight guard doesn't block threshold checks. Warning logs generated; dedup guard prevents double-exit.~~ **FIXED Sprint 1 Batch 2 (ISSUE-002):** `_exits_lock = asyncio.Lock()` in `execute_exit()` makes check+add of `_exits_in_flight` atomic. | §3 Exit | ~~Medium~~ **Resolved** |
-| ISSUE-X08 | Fallback poll marks window evaluated on exception. Transient error → window permanently skipped for that connection cycle. | §3 Exit | **Medium** |
+| ISSUE-X08 | ~~Fallback poll marks window evaluated on exception. Transient error → window permanently skipped for that connection cycle.~~ **FIXED Batch 4 (B4-TRD-3):** Evaluation mark deferred until after eval; one retry on REST None via `_window_retry_after`; permanent skip only after two misses. ✅ RESOLVED | §3 Exit | ~~Medium~~ **Resolved** |
 | ISSUE-A05 | ~~Module mismatch auto-fix maps all `KXHIGH*` to `'weather_band'`.~~ **Obsolete:** Weather modules removed 2026-04-03. | §4 Analytics | ~~Medium~~ **Resolved** |
 | ISSUE-A08 | `run_domain_experiments()` is a no-op placeholder. No actual optimization runs. | §4 Analytics | **Medium** |
 | ISSUE-I04 | ~~`Ruppert-PostTrade-Monitor` overlap with WS exit path. Asymmetric exit locking.~~ **FIXED Sprint 1 P2:** `execute_exit()` now acquires `acquire_exit_lock()` — symmetric locking. | §5 Infrastructure | ~~Medium~~ **Resolved** |
 | ISSUE-D01 | ~~Fake P&L chart (two-point series). Hardcoded `'2026-03-10'` to today. Not real per-day cumulative data.~~ **FIXED P1-4/P1-5 (ISSUE-063/CLEANUP-063):** Removed from `dashboard/api.py`. ✅ RESOLVED (P1) | §6 Dashboard | ~~Medium~~ **Resolved** |
 | ISSUE-D02 | ~~`BOT_SRC` missing `ws_*` sources in `/api/pnl`. WS-originated trades undercount in deployed capital.~~ **FIXED P1-4 (ISSUE-064):** `_is_auto()`/`_is_manual()` now at module scope, covers `ws_*` sources. ✅ RESOLVED (P1) | §6 Dashboard | ~~Medium~~ **Resolved** |
 | ISSUE-D03 | ~~Settled positions may show as open (non-standard tickers, near-midnight EDT edge cases).~~ **FIXED P1-4 (ISSUE-065):** `exited` set now includes `settle` action records. ✅ RESOLVED (P1) | §6 Dashboard | ~~Medium~~ **Resolved** |
-| ISSUE-D04 | P&L accumulation duplicated between `_build_state()` and `/api/pnl`. Bug fixes need double application. | §6 Dashboard | **Medium** |
+| ISSUE-D04 | ~~P&L accumulation duplicated between `_build_state()` and `/api/pnl`. Bug fixes need double application.~~ **RESOLVED Batch 5 (B5-DS-2):** `_build_close_records()` shared helper; both endpoints use it with SUM accumulation for multi-leg. | §6 Dashboard | ~~Medium~~ **Resolved** |
 | ISSUE-D06 | Open P&L shows $0 when WS feed is down. No staleness indicator in `/api/pnl` or `/api/state`. | §6 Dashboard | **Medium** |
 | ISSUE-D08 | Brief generator uses 7-day lookback for open positions. Multi-week positions appear as closed. | §6 Dashboard | **Medium** |
 | ISSUE-1-01 | `confidence` in crypto_15m is a z-score magnitude, NOT a probability. Strategy confidence gate compares it directly against probability-scale thresholds. | §1 Entry | **Medium** |
@@ -2022,6 +2077,8 @@ Crypto long-horizon:  KXBTCMAXM, KXBTCMAXY, KXBTCMINY, KXBTC2026250, KXBTCMAX100
                       KXETHMAXM, KXETHMINY, KXETHMAXY
 ```
 
+**Batch 5 (B5-DS-4) — `CRYPTO_15M_SERIES` canonical definition:** The `CRYPTO_15M_SERIES` tuple has a single canonical definition in `utils.py`. Previously duplicated in both `crypto_15m.py` and `position_monitor.py` — both copies have been removed and replaced with an import from `utils.py`. This eliminates the risk of the series lists diverging (e.g., KXSOL15M was missing from one copy before B4-TRD-5).
+
 **Message Routing:**
 1. **Market Cache Update:** WS updates `market_cache` (bid/ask in dollars, source='ws')
 2. **Exit Check:** Routes to position_tracker for live exit evaluations (settlement guard)
@@ -2055,11 +2112,11 @@ The system currently operates in **DEMO mode** (simulated orders, real market da
 
 **Blockers before LIVE (P1):**
 1. ~~**P1-1: Watchdog double-spawn** — active copy missing `kill_existing_ws_feed()`~~ ✅ **RESOLVED Batch 1 (commit 6b09ebe)**
-2. **P1-2: `date.today()` pervasive** — 50+ sites use system TZ instead of PDT; circuit breaker silently disabled during UTC/PDT gap
+2. ~~**P1-2: `date.today()` pervasive** — 50+ sites use system TZ instead of PDT; circuit breaker silently disabled during UTC/PDT gap~~ **Substantially resolved (Batches 2/3/5):** Batch 2 fixed circuit_breaker + settlement_checker + position_tracker sites; Batch 5 swept remaining 22 sites across data_agent (14), api.py (6), crypto_15m (2), utils.py (1). Load_traded_tickers() dedup gap also closed (B5-DS-3i). Remaining gap: verify any sites in ws_feed / post_trade_monitor / position_monitor added after the sweep.. **Partial progress (Batches 2–5):** `check_global_net_loss()` in `circuit_breaker.py` fixed (B2-STR-1). `crypto_15m.py` lines 155+1232 fixed (B2-STR-2). `settlement_checker.py`, `position_tracker.py` fixed (B2-DS-1/2). `data_agent`, `api.py`, `utils.py` swept (B5-DS-3). ⚠️ `crypto_15m.py` lines 553 and 1320 remain (deferred to Batch 5 cleanup).
 3. ~~**P1-3: `post_trade_monitor` multi-buy overwrite** — `entries_by_key[key] = rec` clobbers earlier legs~~ ✅ **RESOLVED Batch 1 (commit 6b09ebe)** — FIFO list accumulation. ⚠️ LIVE caveat: `run_monitor()` needs leg dedup.
 4. ~~**P1-4: Phantom settlement inference** — result inferred from bid alone without confirmed status~~ ✅ **RESOLVED Batch 1 (commit 6b09ebe)** — both `post_trade_monitor` and `settlement_checker` now require `status in ('settled', 'finalized')`.
 5. **P1-5: `push_alert()` undefined** — `NameError` swallowed; price cache failure alerts never delivered
-6. **P1-6: R9 macro filter dead code** — `has_macro_event_within()` doesn't exist; documented protection is absent
+6. ~~**P1-6: R9 macro filter dead code**~~ ✅ **RESOLVED Batch 4 (B4-STR-1, commit 24682b6):** `has_macro_event_within(minutes_before=120, minutes_after=60)` implemented in `utils.py` with 40-entry 2026 calendar (FOMC decisions + minutes, CPI, NFP). `crypto_15m.py` uses conditional import + ERROR log if unavailable. R9 is now ACTIVE.
 
 > See `memory/overnight-final-report-2026-04-04.md` for the complete 41-item transition checklist with file:line references and fix instructions.
 
@@ -2071,7 +2128,9 @@ _End of System Map_
 
 ## 10. Revision History
 
-- v3.3 (2026-04-04): **Batch 1 trading-safety fixes (commit 6b09ebe).** 3 P1 DEMO→LIVE blockers resolved. B1-1: `kill_existing_ws_feed()` ported to active watchdog — ISSUE-I01 double-spawn RESOLVED. B1-2: `post_trade_monitor.load_open_positions()` and `check_settlements()` inline loader changed from last-write-wins to FIFO list accumulation — multi-leg positions no longer orphaned (LIVE caveat: `run_monitor()` needs leg dedup). B1-3: `post_trade_monitor.check_settlements()` result inference now requires `status in ('settled', 'finalized')` before bid-based inference — matches `settlement_checker.py` pattern (ISSUE-028 fix ported to both files). DEMO→LIVE blockers P1-1, P1-3, P1-4 marked resolved; P1-2, P1-5, P1-6 remain.
+- v3.4 (2026-04-04): **Batches 2–4 Strategist domain updates.** B2-STR-1: `circuit_breaker.py` `check_global_net_loss()` now uses `_today_pdt()` (was `date.today()`) — zero `date.today()` calls remain in circuit_breaker.py. B2-STR-2: `crypto_15m.py` daily wager tracking at lines 155+1232 switched to `circuit_breaker._today_pdt()`; lines 553+1320 deferred to Batch 5. B3-STR-1: `get_module_state()` and `set_module_state()` in `circuit_breaker.py` now route through `_rw_locked()` — consecutive losses counter no longer subject to TOCTOU race. B3-STR-2: Confirmed `loss_today` key in `ruppert_cycle.py` is CORRECT (strategy.py translates `net_loss_today` → `loss_today`); diagnostic `logger.info()` added to `check_global_net_loss()`. B4-STR-1: R9 macro filter is now ACTIVE — `has_macro_event_within(minutes_before=120, minutes_after=60)` implemented in `utils.py` with 40-entry 2026 calendar; `crypto_15m.py` uses conditional import + ERROR log; P1-6 DEMO→LIVE blocker RESOLVED.
+- v3.4 (2026-04-04): **Trader domain — Batch 3-4 updates (commits bbab631, 24682b6).** B3-TRD-1: `and side == 'yes'` gate added to outer daily stop-loss block in `position_tracker.py` — NO-side daily positions now bypass all stop-loss logic; comment explains lte threshold handles NO exits. B4-TRD-1: `ws_feed._write_heartbeat()` and `ws_feed_watchdog` stale check both use `datetime.now(timezone.utc)` — no longer naive timestamps. B4-TRD-2: `_prune_window_guard()` `.replace(tzinfo=None)` removed; UTC-aware ISO strings throughout. B4-TRD-3: Window evaluation mark deferred until after `evaluate_crypto_15m_entry()` returns; `_window_retry_after` dict added for one delayed retry on REST None; permanent skip only after two misses — ISSUE-X08 RESOLVED. B4-TRD-4: `run_persistent_ws_mode()` deleted (was unconditionally raising RuntimeError); `--persistent` now calls `ws_feed.run()` directly + `sys.exit(1)` on failure. B4-TRD-5: KXSOL15M confirmed in `position_monitor.py CRYPTO_15M_SERIES`; `crypto_15m.py` hardcoded series tuple replaced with canonical `CRYPTO_15M_SERIES` constant from `utils.py`; both `ws_feed.py` and `position_monitor.py` now import from same constant.
+- v3.3 (2026-04-04): **Batch 1 trading-safety fixes (commit 6b09ebe).** 3 P1 DEMO→LIVE blockers resolved. B1-1: `kill_existing_ws_feed()` ported to active watchdog — ISSUE-I01 double-spawn RESOLVED. B1-2: `post_trade_monitor.load_open_positions()` and `check_settlements()` inline loader changed from last-write-wins to FIFO list accumulation — multi-leg positions no longer orphaned (LIVE caveat: `run_monitor()` needs leg dedup). B1-3: `post_trade_monitor.check_settlements()` result inference now requires `status in ('settled', 'finalized')` before bid-based inference — matches `settlement_checker.py` pattern (ISSUE-028 fix ported to both files). DEMO→LIVE blockers P1-1, P1-3, P1-4 marked resolved; P1-2, P1-5, P1-6 remain. **[DS System Map updated — Batches 2–5 DS-domain changes applied by Data Scientist agent]** — B2-DS-1: settlement_checker uses `_pdt_today()` (imported from logger) for date comparisons; B2-DS-2: `_settle_record_exists()` uses `date.fromisoformat(_today_pdt())` for idempotency guard; B2-DS-3: dead `push_alert` block (lines 63–68) removed from dashboard/api.py. B3-DS-1: `normalize_entry_price()` fallback now side-aware — NO uses `(1-market_prob)*100`; B3-DS-2: `post_trade_monitor` settle records use `not _is_live_enabled()` instead of hardcoded `True`; B3-DS-3: `capital.py` raises `RuntimeError` instead of returning 0.0 — 11 call sites in 7 files now log+skip. ISSUE-D04 RESOLVED. B5-DS-1: settlement_checker hold_duration uses `datetime.now(timezone.utc)`; naive-tz fallback added; B5-DS-2: `_build_close_records()` shared helper added to api.py — both `/api/state` and `/api/pnl` now use it with SUM accumulation for multi-leg; B5-DS-3: 22 `date.today()` sites replaced across data_agent (14), api.py (6), crypto_15m (2), utils.py (1); B5-DS-3i: `load_traded_tickers()` uses `_today_pdt()` — dedup no longer fails at UTC midnight; B5-DS-4: `CRYPTO_15M_SERIES` consolidated to canonical definition in utils.py — removed from crypto_15m.py and position_monitor.py.
 - v3.2 (2026-04-04): **22 corrections from overnight audit.** Signal weights: noted config vs fallback defaults. Timing gates: 120s/660s/0.08. Risk filters: R2=8c, R3=0.003, R4=0.25; R9 marked STUB. Gate order: CB backstop→#2. `_pdt_today()` name corrected throughout. Settlement checker 2× daily. ISSUE-I01 consistently UNRESOLVED. ISSUE-023 partial resolution noted. Dashboard 16 endpoints. Module inventory: crypto_band_daily/crypto_threshold_daily Disabled. ISSUE-1-07, ISSUE-1-12, ISSUE-E07 marked RESOLVED. API wiring: fetch_coinbase_price() in crypto_15m.py; crypto_band_daily uses Kraken; 5 CRYPTO_15M_SERIES. BACKSTOP_ENABLED=True. DOMAIN_THRESHOLD=10. Exit dedup fingerprint format corrected. KalshiClient get_markets(). config_audit stale task names noted. Added DEMO vs LIVE summary section.
 - v1.0 (2026-04-02): Initial assembly from 6 research agents
 - v1.1 (2026-04-02): Corrections from 10-audit pass (12 factual errors fixed, 12 gaps filled)
