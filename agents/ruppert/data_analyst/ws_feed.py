@@ -405,6 +405,13 @@ def evaluate_crypto_entry(ticker: str, yes_ask: int, yes_bid: int, close_time: s
     else:
         return
 
+    # Gate: respect module ENABLED flags — checked AFTER strike_type is known
+    # to avoid blocking threshold contracts when only band is disabled.
+    if strike_type == 'between' and not getattr(config, 'CRYPTO_BAND_DAILY_ENABLED', False):
+        return
+    if strike_type in ('greater', 'less') and not getattr(config, 'CRYPTO_THRESHOLD_DAILY_ENABLED', False):
+        return
+
     # Derive module from series + strike_type
     _WS_MODULE_MAP = {
         ('BTC', 'between'): 'crypto_band_daily_btc',
