@@ -362,8 +362,8 @@ CRYPTO_DAILY_CIRCUIT_BREAKER_ADVISORY = False  # False = hard stop
 
 # ── Daily Module Enable Flags ────────────────────────────────────────────────
 # Code-level kill switch. Set True only when module is approved for trading.
-# Currently OFF — pending shadow WR > 45% over 50+ trades.
-CRYPTO_BAND_DAILY_ENABLED      = False
+# Band re-enabled 2026-04-05: model v2 sigma calibrated, WS gate confirmed, DEMO fake capital.
+CRYPTO_BAND_DAILY_ENABLED      = True
 CRYPTO_THRESHOLD_DAILY_ENABLED = False
 
 # ── Daily module stop-loss (band + threshold) ─────────────────────────────────
