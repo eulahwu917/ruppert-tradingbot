@@ -818,6 +818,9 @@ def _log_decision(
     position_usd: float | None,
     polymarket_yes_price: float | None = None,
     polymarket_fetched_at: str | None = None,
+    p_final_raw: float | None = None,
+    p_final_for_sizing: float | None = None,
+    sizing_capped: bool | None = None,
 ):
     """Append decision record to decisions_15m.jsonl."""
     record = {
@@ -835,6 +838,9 @@ def _log_decision(
         'position_usd': round(position_usd, 2) if position_usd is not None else None,
         'polymarket_yes_price': polymarket_yes_price,
         'polymarket_fetched_at': polymarket_fetched_at,
+        'p_final_raw': round(p_final_raw, 4) if p_final_raw is not None else None,
+        'p_final_for_sizing': round(p_final_for_sizing, 4) if p_final_for_sizing is not None else None,
+        'sizing_capped': sizing_capped,
     }
     try:
         with open(DECISION_LOG, 'a', encoding='utf-8') as f:
@@ -1122,15 +1128,20 @@ def evaluate_crypto_15m_entry(
     P_win = None
     edge = None
 
+    # Cap P_final for sizing to avoid oversizing on systematically overconfident high-conviction bets
+    # (65.4% loss rate on P_final > 0.80 trades across 4 days — see cap_and_edge_analysis.md)
+    _p_final_max = getattr(config, 'CRYPTO_15M_P_FINAL_MAX', 0.80)
+    P_final_for_sizing = min(P_final, _p_final_max)
+
     if edge_yes >= min_edge:
         direction = 'yes'
         entry_price = yes_ask
-        P_win = P_final
+        P_win = P_final_for_sizing
         edge = edge_yes
     elif edge_no >= min_edge:
         direction = 'no'
         entry_price = 100 - yes_bid
-        P_win = 1.0 - P_final
+        P_win = 1.0 - P_final_for_sizing
         edge = edge_no
     else:
         _log_decision(ticker, window_open_ts, window_close_ts, elapsed_secs,
@@ -1378,5 +1389,8 @@ def evaluate_crypto_15m_entry(
                    'ENTER', None,
                    edge, entry_price, position_usd,
                    polymarket_yes_price=polymarket_yes_price,
-                   polymarket_fetched_at=polymarket_fetched_at)
+                   polymarket_fetched_at=polymarket_fetched_at,
+                   p_final_raw=P_final,
+                   p_final_for_sizing=P_final_for_sizing,
+                   sizing_capped=P_final > _p_final_max)
 

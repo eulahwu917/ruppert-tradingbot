@@ -225,6 +225,7 @@ CRYPTO_15M_DIR_W_OI   = 0.10   # Open Interest Delta weight (Phase 2: reduced fr
 # Must sum to 1.0; Optimizer owns these values
 # Sum check: 0.50 + 0.25 + 0.15 + 0.10 = 1.00 ✓
 
+CRYPTO_15M_P_FINAL_MAX          =   0.80  # cap on P_final used for sizing (Sprint 1 — see cap_and_edge_analysis.md)
 CRYPTO_15M_DIR_HARD_CAP_USD     = 100.0   # absolute per-trade dollar cap (half-Kelly formula)
 CRYPTO_15M_DIR_MIN_POSITION_USD =   5.0   # minimum viable trade size
 CRYPTO_15M_DIR_DAILY_BACKSTOP_ENABLED = True    # P2+P3-1: enabled — see ISSUE-090
