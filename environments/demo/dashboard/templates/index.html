@@ -95,6 +95,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 .b-econ{background:#1a2a1a;color:#86efac;padding:2px 6px;border-radius:3px;font-size:10px}
 .b-geo{background:#1a2a2a;color:#2dd4bf;padding:2px 6px;border-radius:3px;font-size:10px}
 .b-strong{background:#1a2e1a;color:#4ade80;padding:2px 8px;border-radius:3px;font-size:10px;font-weight:700;border:1px solid #2d5a2d}
+.trade-filter-btn.on { color: #4ade80; border-color: #2d5a2d; background: #1a2e1a; }
 
 /* Scout items */
 .sc-scroll { max-height: 500px; overflow-y: auto; padding: 4px 0; }
@@ -251,7 +252,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       <div class="acct-right"><div class="acct-main pnl-neu" id="opnl">--</div><div class="acct-pct pnl-neu" id="opnl-pct"></div></div>
     </div>
     <div class="acct-item" style="min-width:110px;">
-      <div class="acct-label"><span style="white-space:nowrap;display:block;">Closed P&amp;L</span><select id="cpnl-select" onchange="setCpnlFrame(this.value)" style="font-size:9px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#777;padding:1px 4px;cursor:pointer;outline:none;margin-top:2px;"><option value="month" selected>This Month</option><option value="year">This Year</option><option value="all">All Time</option></select></div>
+      <div class="acct-label"><span style="white-space:nowrap;display:block;">Closed P&amp;L</span><select id="cpnl-select" onchange="setCpnlFrame(this.value)" style="font-size:9px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#777;padding:1px 4px;cursor:pointer;outline:none;margin-top:2px;"><option value="day">Today</option><option value="week">This Week</option><option value="month" selected>This Month</option><option value="year">This Year</option><option value="all">All Time</option></select></div>
       <div class="acct-right"><div class="acct-main pnl-neu" id="cpnl">--</div><div class="acct-pct pnl-neu" id="cpnl-pct"></div></div>
     </div>
     <div class="acct-item">
@@ -585,6 +586,14 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
         </div>
       </div>
       <div class="pane" id="p-trades">
+        <div style="padding:10px 16px 0;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <span style="font-size:10px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-right:4px;">Filter:</span>
+          <button class="ref trade-filter-btn on" data-period="all"   onclick="setTradeFilter('all')">All Time</button>
+          <button class="ref trade-filter-btn"   data-period="year"  onclick="setTradeFilter('year')">Yearly</button>
+          <button class="ref trade-filter-btn"   data-period="month" onclick="setTradeFilter('month')">Monthly</button>
+          <button class="ref trade-filter-btn"   data-period="week"  onclick="setTradeFilter('week')">Weekly</button>
+          <button class="ref trade-filter-btn"   data-period="day"   onclick="setTradeFilter('day')">Daily</button>
+        </div>
         <div class="t-scroll">
         <table class="tbl" id="hist-tbl" style="table-layout:fixed;width:100%;min-width:700px;">
           <thead><tr>
@@ -594,9 +603,11 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <th style="width:88px;">Quantity</th>
             <th style="width:88px;">Entry</th>
             <th style="width:88px;">Cost</th>
+            <th style="width:72px;">Exit</th>
+            <th style="width:88px;">Proceeds</th>
             <th style="width:88px;">Closed P&amp;L</th>
           </tr></thead>
-          <tbody id="tr-b"><tr><td colspan="8" class="loading">Loading history...</td></tr></tbody>
+          <tbody id="tr-b"><tr><td colspan="10" class="loading">Loading history...</td></tr></tbody>
         </table>
         </div>
       </div>
@@ -1014,11 +1025,69 @@ function updateAccountValue() {
 }
 
 // ── Trades ─────────────────────────────────────────────────────────────────────
+window._tradesAll = [];
+window._tradesPeriod = 'all';
+
+function setTradeFilter(period) {
+  window._tradesPeriod = period;
+  document.querySelectorAll('.trade-filter-btn').forEach(b => {
+    b.classList.toggle('on', b.dataset.period === period);
+  });
+  renderClosedTrades();
+}
+
+function _tradeInPeriod(t, period) {
+  if (period === 'all') return true;
+  const raw = (t.timestamp || t._date || '').substring(0, 10);
+  if (!raw) return false;
+  const d = new Date(raw + 'T00:00:00');
+  const now = new Date();
+  if (period === 'day') {
+    return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth() && d.getDate()===now.getDate();
+  }
+  if (period === 'week') {
+    const mon = new Date(now); mon.setDate(now.getDate()-now.getDay()+(now.getDay()===0?-6:1)); mon.setHours(0,0,0,0);
+    return d >= mon;
+  }
+  if (period === 'month') return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth();
+  if (period === 'year') return d.getFullYear()===now.getFullYear();
+  return true;
+}
+
+function renderClosedTrades() {
+  const tb = document.getElementById('tr-b');
+  if (!tb) return;
+  const trades = (window._tradesAll || []).filter(t => _tradeInPeriod(t, window._tradesPeriod));
+  if (!trades.length) {
+    tb.innerHTML = '<tr><td colspan="9" class="loading" style="color:#555;padding:20px;">No trades for this period</td></tr>';
+    return;
+  }
+  tb.innerHTML = trades.map(t => {
+    const pnl = t.realized_pnl != null ? `<span style="color:${t.realized_pnl>=0?'#4ade80':'#f87171'}">${t.realized_pnl>=0?'+':''}$${t.realized_pnl.toFixed(2)}</span>` : '<span style="color:#444">--</span>';
+    const exit = t.exit_price_cents != null ? `${t.exit_price_cents}¢` : '--';
+    const proceeds = t.proceeds != null ? `$${t.proceeds.toFixed(2)}` : '--';
+    const side = t.side === 'yes' ? '<span style="color:#4ade80">YES</span>' : '<span style="color:#f87171">NO</span>';
+    const date = (t.timestamp||t._date||'').substring(0,10);
+    const module = (t.parent_module||t.module||'').replace('crypto_','').replace('_',' ');
+    return `<tr>
+      <td class="l" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.ticker||''}">${t.title||t.ticker||''}<br><span style="color:#555;font-size:9px">${module}</span></td>
+      <td>${date}</td>
+      <td>${side}</td>
+      <td>${t.contracts!=null?t.contracts:'--'}</td>
+      <td>${t.entry_price!=null?t.entry_price+'¢':'--'}</td>
+      <td>${t.size_dollars!=null?'$'+parseFloat(t.size_dollars).toFixed(2):'--'}</td>
+      <td>${exit}</td>
+      <td>${proceeds}</td>
+      <td>${pnl}</td>
+    </tr>`;
+  }).join('');
+}
+
 async function loadTrades() {
   const trades = await api('/api/trades');
   const tb = $('tr-b');
   if (!trades||!trades.length) {
-    tb.innerHTML='<tr><td colspan="7" class="loading" style="color:#555;padding:20px;">No trades yet</td></tr>';
+    tb.innerHTML='<tr><td colspan="9" class="loading" style="color:#555;padding:20px;">No trades yet</td></tr>';
     return;
   }
   // Sort newest to oldest (timestamp preferred, fall back to _date)
@@ -1027,38 +1096,8 @@ async function loadTrades() {
     const db = b.timestamp || b._date || '';
     return db.localeCompare(da);
   });
-  tb.innerHTML = trades.map(t=>{
-    const title  = (t.title||t.ticker||'').replace(/[*]{2}/g,'');
-    const ticker = t.ticker||'';
-    const _ts = ticker.split('-')[0].toLowerCase(); const url = `https://kalshi.com/markets/${_ts}/${ticker.toLowerCase()}`;
-    const side   = t.side==='UP'
-      ? '<span class="b-yes">UP</span>'
-      : t.side==='DOWN'
-      ? '<span class="b-no">DOWN</span>'
-      : t.side==='yes'
-      ? '<span class="b-yes">YES</span>'
-      : '<span class="b-no">NO</span>';
-
-    const mp     = t.market_prob||0;
-    const entryP = t.side==='no' ? Math.round((1-mp)*100) : Math.round(mp*100);
-    const cost   = t.size_dollars ? dollar(t.size_dollars) : '--';
-    const rpnl   = t.realized_pnl!=null
-      ? '<span class="'+(t.realized_pnl>=0?'pnl-pos':'pnl-neg')+'">'+(t.realized_pnl>=0?'+':'')+dollar(t.realized_pnl)+'</span>'
-      : '<span style="color:#444">--</span>';
-    const dt     = (t.timestamp||t._date||'').substring(0,10);
-    const qty    = t.contracts||'--';
-    return `<tr>
-      <td class="l" style="overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:260px;">
-        <div style="display:flex;align-items:center;gap:5px;">${moduleTag(t.parent_module)}<span style="color:#aaa;font-size:11px;">${title}</span></div>
-      </td>
-      <td class="ca shrink">${dt}</td>
-      <td class="ca shrink">${side}</td>
-      <td class="ra shrink">${qty}</td>
-      <td class="ra shrink">${entryP}c</td>
-      <td class="ra shrink">${cost}</td>
-      <td class="ra shrink">${rpnl}</td>
-    </tr>`;
-  }).join('');
+  window._tradesAll = trades;
+  renderClosedTrades();
 }
 
 // ── Weather ────────────────────────────────────────────────────────────────────
@@ -1239,6 +1278,7 @@ function renderState(state) {
   window._cpnlData = {
     all:   acct.closed_pnl       || 0,
     day:   acct.closed_pnl_day   || 0,
+    week:  acct.closed_pnl_week  || 0,
     month: acct.closed_pnl_month || 0,
     year:  acct.closed_pnl_year  || 0,
   };
@@ -1350,11 +1390,16 @@ function setPnlFrame(frame, btn) {
 
 // ── Closed P&L period toggles ─────────────────────────────────────────────────
 window._cpnlFrame = 'month';
-window._cpnlData  = {all: 0, day: 0, month: 0, year: 0};
+window._cpnlData  = {all: 0, day: 0, week: 0, month: 0, year: 0};
 
 function setCpnlFrame(frame) {
   window._cpnlFrame = frame;
-  const val = frame === 'month' ? window._cpnlData.month : frame === 'year' ? window._cpnlData.year : window._cpnlData.all;
+  const d = window._cpnlData;
+  const val = frame === 'day'   ? (d.day   ?? 0)
+            : frame === 'week'  ? (d.week  ?? 0)
+            : frame === 'month' ? (d.month ?? 0)
+            : frame === 'year'  ? (d.year  ?? 0)
+            : (d.all ?? 0);
   setPnl('cpnl', 'cpnl-pct', val, window._kalshiBalance || 400);
 }
 
@@ -1364,7 +1409,7 @@ async function loadClosedPnl() {
     if (!pnl) return;
 
     window._closedPnl = pnl.closed_pnl || 0;  // BOT-only (manual excluded)
-    window._cpnlData  = {all: pnl.closed_pnl||0, day: pnl.closed_pnl_day||0, month: pnl.bot_closed_pnl_month||0, year: pnl.bot_closed_pnl_year||0};
+    window._cpnlData  = {all: pnl.closed_pnl||0, day: pnl.closed_pnl_day||0, week: pnl.closed_pnl_week||0, month: pnl.bot_closed_pnl_month||0, year: pnl.bot_closed_pnl_year||0};
 
     // Account bar Closed P&L (now BOT-only - period selector still works)
     const cpnlVal = window._cpnlData[window._cpnlFrame || 'month'];

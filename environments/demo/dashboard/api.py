@@ -688,6 +688,11 @@ def get_trades():
             t['pnl_corrected'] = False
 
         t['exit_price'] = cr.get('exit_price') or cr.get('fill_price')
+        _ep_raw = t['exit_price']
+        _ep_cents = int(round(float(_ep_raw))) if _ep_raw is not None else None
+        _ct = t.get('contracts') or 0
+        t['exit_price_cents'] = _ep_cents
+        t['proceeds'] = round(_ep_cents * _ct / 100, 2) if (_ep_cents is not None and _ct) else None
         t['settlement_result'] = cr.get('settlement_result', '')
         t['exit_type'] = 'settle' if cr.get('action') == 'settle' else cr.get('exit_type', 'manual')
 
@@ -1075,7 +1080,7 @@ def get_pnl_history():
 
     closed_pnl_total = 0.0
     closed_by_source = {'bot': 0.0, 'manual': 0.0}
-    closed_by_period = {'day': 0.0, 'month': 0.0, 'year': 0.0}
+    closed_by_period = {'day': 0.0, 'week': 0.0, 'month': 0.0, 'year': 0.0}
     closed_by_src_period = {'bot': {'month':0.0,'year':0.0,'all':0.0}, 'manual': {'month':0.0,'year':0.0,'all':0.0}}
     closed_wins = 0
     bot_wins = 0
@@ -1289,6 +1294,7 @@ def get_pnl_history():
 
     # Override period totals with canonical log-scan values
     closed_by_period['day']   = compute_period_closed_pnl_from_logs('day')
+    closed_by_period['week']  = compute_period_closed_pnl_from_logs('week')
     closed_by_period['month'] = compute_period_closed_pnl_from_logs('month')
     closed_by_period['year']  = compute_period_closed_pnl_from_logs('year')
 
@@ -1403,6 +1409,7 @@ def get_pnl_history():
         "bot_deployed":  round(bot_dep, 2),
         "man_deployed":  round(man_dep, 2),
         "closed_pnl_day":   round(closed_by_period["day"], 2),
+        "closed_pnl_week":  round(closed_by_period["week"], 2),
         "bot_closed_month":        round(closed_by_src_period["bot"]["month"], 2),
         "bot_closed_year":         round(closed_by_src_period["bot"]["year"], 2),
         "bot_closed_pnl_month":    round(closed_by_src_period["bot"]["month"], 2),
@@ -1757,6 +1764,7 @@ def _build_state():
 
     # Override period scalars with canonical log-scan values
     closed_pnl_day   = compute_period_closed_pnl_from_logs('day')
+    closed_pnl_week  = compute_period_closed_pnl_from_logs('week')
     closed_pnl_month = compute_period_closed_pnl_from_logs('month')
     closed_pnl_year  = compute_period_closed_pnl_from_logs('year')
 
@@ -1812,6 +1820,7 @@ def _build_state():
             'closed_pnl_month': round(closed_pnl_month, 2),
             'closed_pnl_year':  round(closed_pnl_year, 2),
             'closed_pnl_day':   round(closed_pnl_day, 2),
+            'closed_pnl_week':  round(closed_pnl_week, 2),
             'total_pnl':        round(open_pnl_total + closed_pnl_total, 2),
             'win_rate':         win_rate,
             'total_trades':     total_bot_trades,

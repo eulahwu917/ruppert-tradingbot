@@ -734,8 +734,8 @@ def compute_period_closed_pnl_from_logs(period: str) -> float:
     from pathlib import Path
     from datetime import datetime as _dt
 
-    if period not in ('day', 'month', 'year'):
-        raise ValueError(f"period must be 'day', 'month', or 'year'; got {period!r}")
+    if period not in ('day', 'week', 'month', 'year'):
+        raise ValueError(f"period must be 'day', 'week', 'month', or 'year'; got {period!r}")
 
     try:
         from agents.ruppert.env_config import get_paths as _get_paths
@@ -747,6 +747,8 @@ def compute_period_closed_pnl_from_logs(period: str) -> float:
             return 0.0
 
         today = _pdt_today()  # datetime.date in PDT
+        from datetime import timedelta as _td
+        _week_start = today - _td(days=today.weekday())  # Monday of current PDT week
 
         total_pnl = 0.0
         for p in log_files:
@@ -777,6 +779,8 @@ def compute_period_closed_pnl_from_logs(period: str) -> float:
 
                     # Period filter
                     if period == 'day' and sdate != today:
+                        continue
+                    elif period == 'week' and sdate < _week_start:
                         continue
                     elif period == 'month' and (sdate.year != today.year or sdate.month != today.month):
                         continue
