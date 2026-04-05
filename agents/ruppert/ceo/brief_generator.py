@@ -365,6 +365,8 @@ def build_brief() -> str:
         f"",
         f"## 💰 P&L Summary",
         f"",
+        f"_Source: trade log scan (7-day rolling window)_",
+        f"",
         f"| Period | P&L | Wins | Losses | Trades |",
         f"|--------|-----|------|--------|--------|",
         f"| Today | ${pnl_today['closed_pnl']:+.2f} | {pnl_today['wins']}W | {pnl_today['losses']}L | {pnl_today['total_trades']} |",
@@ -378,7 +380,7 @@ def build_brief() -> str:
             f"**Account capital:** ${capital_info['current_capital']:,.2f}  ",
         ]
     lines += [
-        f"**Closed P&L (truth file):** ${capital_info.get('closed_pnl', 0):+.2f}",
+        f"**Closed P&L (truth file, all-time canonical):** ${capital_info.get('closed_pnl', 0):+.2f}",
         f"",
     ]
 

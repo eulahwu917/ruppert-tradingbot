@@ -72,11 +72,13 @@ OKX_SYMBOLS = {
     'ETH': 'ETH-USDT-SWAP',
     'SOL': 'SOL-USDT-SWAP',
 }
-BINANCE_SYMBOLS = {
-    'BTC': 'BTCUSDT',
-    'ETH': 'ETHUSDT',
-    'SOL': 'SOLUSDT',
-}
+# BINANCE_SYMBOLS removed — OKX endpoints use FUNDING_SYMBOLS from crypto_client.py
+# (ISSUE-S2-OKX fix 2026-04-04)
+# BINANCE_SYMBOLS = {
+#     'BTC': 'BTCUSDT',
+#     'ETH': 'ETHUSDT',
+#     'SOL': 'SOLUSDT',
+# }
 
 OKX_API = 'https://www.okx.com/api/v5'
 
@@ -254,13 +256,14 @@ def compute_s1_momentum(candles: list) -> dict:
 
 def compute_s2_funding(asset: str) -> dict:
     """
-    Signal 2 — funding rate regime via Binance Futures.
+    Signal 2 — funding rate regime via OKX perpetual swaps (inverse, coin-margined).
+    Uses FUNDING_SYMBOLS from crypto_client for canonical OKX instId mapping.
     Returns {'funding_24h_cumulative', 'funding_24h_z', 'regime', 'raw_score', 'filter_skip'}.
     """
-    binance_symbol = BINANCE_SYMBOLS.get(asset, f'{asset}USDT')
     try:
-        from agents.ruppert.trader.crypto_client import _compute_funding_z_scores
-        result = _compute_funding_z_scores(binance_symbol, return_cumulative=True)
+        from agents.ruppert.trader.crypto_client import _compute_funding_z_scores, FUNDING_SYMBOLS
+        okx_symbol = FUNDING_SYMBOLS.get(asset, f'{asset}-USD-SWAP')
+        result = _compute_funding_z_scores(okx_symbol, return_cumulative=True)
     except Exception as e:
         logger.warning('compute_s2_funding: failed to fetch funding data for %s: %s', asset, e)
         return {
@@ -413,6 +416,11 @@ def cache_oi_snapshot(asset: str, current_oi: float, write: bool = False) -> dic
                 stale = age_hours > 26
                 if stale:
                     logger.warning('OI snapshot stale for %s: age=%.1fh', asset, age_hours)
+                # Too-fresh guard: snapshot written this session (< 1h ago) is not a valid
+                # 24h baseline. Treat as bootstrap to prevent double-fire corruption (ISSUE-1-10).
+                if age_hours < 1.0:
+                    logger.info('OI snapshot too fresh for %s (age=%.1fh) — treating as bootstrap to avoid same-session baseline', asset, age_hours)
+                    return {'oi': None, 'timestamp': ts_str, 'bootstrap': True, 'stale': False}
             except Exception:
                 stale = True
 

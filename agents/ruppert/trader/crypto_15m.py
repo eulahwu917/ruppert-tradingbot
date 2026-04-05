@@ -1163,7 +1163,7 @@ def evaluate_crypto_15m_entry(
         'side': direction,
         'edge': round(edge, 4),
         'win_prob': round(P_win, 4),
-        'confidence': round(abs(raw_score), 3),
+        'confidence': round(abs(2 * P_directional - 1), 3),  # raw directional conviction (pre-funding-bias); P_biased adjusts sizing separately
         'module': _module_name,
         'yes_ask': yes_ask,
         'yes_bid': yes_bid,
@@ -1320,7 +1320,7 @@ def evaluate_crypto_15m_entry(
         'side': direction,
         'edge': round(edge, 4),
         'win_prob': round(P_win, 4),
-        'confidence': round(abs(raw_score), 3),
+        'confidence': round(abs(2 * P_directional - 1), 3),  # raw directional conviction (pre-funding-bias); P_biased adjusts sizing separately
         'market_prob': yes_ask / 100.0 if direction == 'yes' else (100 - yes_bid) / 100.0,
         'model_prob': round(P_final, 4),
         'source': 'crypto_15m',
