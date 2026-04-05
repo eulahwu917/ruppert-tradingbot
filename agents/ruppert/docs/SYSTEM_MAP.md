@@ -5,6 +5,14 @@ _Last updated: 2026-04-04 | v4.1 | Late night: Band Model v2 sigma fix, dashboar
 
 ## Changelog
 
+### v4.2 — 2026-04-05 (commit c081413)
+- **SPRINT1-CAP:** `crypto_15m.py` — P_final sizing cap implemented. `CRYPTO_15M_P_FINAL_MAX = 0.80` added to config.py. `P_final_for_sizing = min(P_final, 0.80)` applied before Kelly sizing only. Edge calculation and entry gate still use raw P_final — entry selection unchanged.
+- **SPRINT1-LOG:** `_log_decision()` extended with 3 new fields on ENTER records: `p_final_raw`, `p_final_for_sizing`, `sizing_capped`. Non-ENTER records log null. No existing fields changed.
+- **Rationale:** 65.4% loss rate on P_final > 0.80 trades across all 4 days (n=26, p=0.005). Sizing cap saves ~$166/4 days at $100 flat sizing — scales with capital.
+- **Monitor:** If HC trades (P_final > 0.80) win rate exceeds 60% for 3 consecutive bull days, revisit cap.
+- **Dashboard:** Yesterday filter added to all period selectors (commit preceding c081413).
+- **Deferred:** Weight rebalancing (needs live A/B), regime filter (needs multi-regime data), sigmoid scale (kills winners).
+
 ### v4.1 — 2026-04-04 Late Night (commits 0897e26, 79cf555)
 - **BAND-SIGMA-V2 (commit 0897e26):** `crypto_band_daily.py` — sigma computation replaced. Old: `daily_vol * sqrt(hours/24)` (8-12x too small → 100% entry rate). New: `_SIGMA_HOURLY[series] * sqrt(max(1.0, hours_to_settlement))`. Calibrated from 48 resolved Kalshi band contracts (April 2026). BTC=0.000577/√hr, ETH=0.001020/√hr, default=0.001530/√hr. Results: 79% entry filter rate, 3/4 wins survive filter, Brier 0.2423→0.0666 (in-sample). `CRYPTO_BAND_DAILY_ENABLED` remains False — David enables separately.
 - **DASH-WIN-RATE (commit 79cf555):** Dashboard win rate now period-filtered. Account-level: new dropdown (Today/This Week/This Month/This Year/All-Time). Per-module cards: win rate follows each card's existing Closed P&L period select automatically. Backend: `compute_module_closed_stats_from_logs()` extended with period win/trade counts. Division-by-zero guarded (returns None on 0 trades).

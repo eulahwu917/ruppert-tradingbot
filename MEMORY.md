@@ -6,6 +6,28 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 
 ---
 
+## 2026-04-05 — Sprint 1: P_final Sizing Cap (00:00-00:40 PDT)
+
+### Sprint 1 — SHIPPED (commit c081413)
+- **P_final sizing cap:** `min(P_final, 0.80)` in Kelly formula. Config: `CRYPTO_15M_P_FINAL_MAX = 0.80`. Entry gate unchanged — raw P_final still used for edge/entry decisions.
+- **Logging:** `p_final_raw`, `p_final_for_sizing`, `sizing_capped` added to every ENTER decision record.
+- **QA: PASS** — all 8 checks clean.
+- **Rationale:** 65.4% HC trade loss rate across 4 days (n=26, p=0.005). Saves ~$166/4 days at flat $100 sizing.
+
+### Tonight's full analysis pipeline (22:10 → 00:40 PDT)
+- **15m Brier analysis:** 636 trades, Brier 0.2738, 14pp overconfidence, YES 35.5% WR / NO 90.4% WR
+- **YES stop-loss audit:** 95.8% of stops correct, stops saved $1,118 vs holding — do not change
+- **Signal decomposition:** Prior "TFI anti-predictive" was methodology error (mixed YES+NO). Correct: OBI=#1, TFI=#2, MACD=#3, OI=#4 (only negative)
+- **TFI microstructure:** TFI IS predictive on YES trades (+0.183), strongest in bear conditions. Do NOT down-weight.
+- **Grid search (43 combos):** MIN_EDGE already 12% in production — grid search was sizing experiment only. Weights don't affect entry selection.
+- **4-day cap analysis:** HC loss rate robust across all days. MIN_EDGE 12% is optimal — raising hurts (12-20% edge trades win at 67%).
+- **Dashboard:** Yesterday filter added to all period selectors. Win rate by period live.
+- **Deferred:** Weight rebalancing (needs live A/B), regime filter, sigmoid 0.75 (kills winners — never)
+- **Pending:** WS S1-S5 architecture discussion (David asked, deferred to after Brier analysis — still pending)
+- **System Map:** v4.2
+
+---
+
 ## 2026-04-04 — Late Night Band Model v2 + Dashboard (22:10-23:05 PDT)
 
 ### Band Model v2 — SHIPPED (commit 0897e26)
