@@ -1351,7 +1351,7 @@ def get_pnl_history():
         except Exception as e:
             _logger.error("[dashboard:get_pnl_history/open_pnl] %s", e, exc_info=True)
 
-    total_pnl = closed_by_source['bot'] + open_by_source['bot']
+    total_pnl = closed_pnl_total + open_by_source['bot']
 
     # Deployed costs for % calculation — exclude settled AND manually exited positions
     all_t = read_all_trades()
