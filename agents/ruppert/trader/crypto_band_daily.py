@@ -44,6 +44,15 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Calibrated hourly sigma from empirical settlement displacement analysis (Band Model v2)
+# Source: 48 resolved Kalshi band contracts, April 2026
+# Formula: sigma(hours) = _SIGMA_HOURLY[series] * sqrt(max(1.0, hours_to_settlement))
+_SIGMA_HOURLY = {
+    'KXBTC': 0.000577,
+    'KXETH': 0.001020,
+    'default': 0.001530,  # conservative fallback for KXDOGE, KXSOL, KXXRP etc.
+}
+
 _BD_LOGS_DIR = _get_bd_paths()['logs']
 _BD_LOGS_DIR.mkdir(exist_ok=True)
 BAND_DECISION_LOG_PATH = _BD_LOGS_DIR / 'decisions_band.jsonl'
@@ -446,8 +455,11 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
                     except Exception:
                         pass
 
-                # Per-market sigma: use actual hours remaining, not hardcoded SERIES_CFG hours
-                sigma_m = daily_vol * math.sqrt(max(1.0, _hours_left) / 24.0)
+                # Per-market sigma: calibrated per-sqrt-hour constant * sqrt(hours) [Band Model v2]
+                # Source: 48 resolved Kalshi band contracts, April 2026
+                # Formula: sigma = _SIGMA_HOURLY[series] * sqrt(max(1.0, hours_to_settlement))
+                sigma_hourly = _SIGMA_HOURLY.get(series, _SIGMA_HOURLY['default'])
+                sigma_m = sigma_hourly * math.sqrt(max(1.0, _hours_left))
                 prob_model = band_prob(spot, band_mid, half_w, sigma_m, drift)
                 mkt_yes    = ya / 100
                 edge_no    = mkt_yes - prob_model
