@@ -6,6 +6,42 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 
 ---
 
+## 2026-04-04 — Late Evening Critical Fixes (20:30-21:30 PDT)
+
+### WS Gate Bug — Root Cause of -$13.1K Drawdown
+- CRYPTO_BAND_DAILY_ENABLED=False only blocked scheduled scan; WS feed's evaluate_crypto_entry() had zero awareness of the flag
+- WS was trading band/threshold contracts using degraded model: t-distribution only, no S1/S2/S3/S4/S5 signals, NO TFI/OBI/MACD/OI
+- Band daily: -$6,942 | Threshold daily: -$6,185 — these offset the 15m gains entirely
+- **Fix (commit 9b4d8dd):** ENABLED flag checks added to evaluate_crypto_entry() AFTER strike_type parsing (adversarial catch: naive top-of-function check would block threshold when only band disabled)
+
+### PnL Field Missing From Apr 4+ Records
+- build_trade_entry() was not writing pnl field — exit records had pnl=None
+- compute_closed_pnl_from_logs() silently excluded all Apr 4 records (only summing Apr 2-3)
+- Dashboard was showing +$347 all-time — the real 15m-only figure is +$13,595.76
+- **Fix:** pnl field added to build_trade_entry() (commit 748cc1d); backfill script run (114 records updated)
+
+### Full Band/Threshold Purge
+- All band/threshold records removed from ALL trade files (790+ records across Apr 2-4)
+- tracked_positions.json cleared of band/threshold positions
+- True 15m-only all-time closed P&L: **+$13,595.76**
+
+### Unified WS Architecture Discussion
+- David proposed: single WS process, cached S1-S5 signals, ensemble probability model (log-normal + t-dist)
+- Strategist: directionally correct, retire band scan, keep threshold scan
+- Adversarial caught Strategist error: models NOT identical (t-dist vs log-normal, different sigma scales, 5× position size difference)
+- 3 high challenges: S2 TTL should be ≤2h not 8h; ISSUE-062 (spot price) unresolved; shadow flag shares live gate
+- David's feedback: 1h S2 TTL fine (maybe 15-30m?); Kalshi contract prices may serve as spot proxy; DEMO IS shadow env (no shadow-within-shadow needed); 50/50 model is fine to start; 30-day timeline David will judge; needs plain-English explanation of #6
+- Strategist responding to David's feedback (pending)
+
+### System state (21:30 PDT)
+- Trading: ACTIVE — 15m only, WS gated, band/threshold blocked
+- True all-time closed P&L: +$13,595.76 (15m only)
+- Dashboard: clean, all P&L canonical
+- GitHub: current at 9b4d8dd
+- Architecture proposal: in discussion, awaiting Strategist revised response
+
+---
+
 ## 2026-04-04 — Evening Audit + Dashboard Fixes (18:00-19:27 PDT)
 
 ### Trading Restarted

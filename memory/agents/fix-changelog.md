@@ -15,6 +15,24 @@ _Every fix must be logged here with issue ID, summary, and commit hash_
 
 ---
 
+## 2026-04-04 Late Evening — WS Gate + PnL Backfill + Architecture Review
+
+| Issue ID | Title | Fix Summary | Commit |
+|----------|-------|-------------|--------|
+| WS-GATE-01 | WS feed ignoring ENABLED flags for band/threshold | evaluate_crypto_entry() now checks CRYPTO_BAND_DAILY_ENABLED and CRYPTO_THRESHOLD_DAILY_ENABLED after strike_type is determined. Placement after strike_type parse prevents blocking threshold when only band is disabled (adversarial catch). | 9b4d8dd |
+| PNL-BACK-01 | exit/settle records missing pnl field (Apr 4+) | build_trade_entry() now writes pnl from opportunity.get('pnl'). Added backfill script scripts/backfill_exit_pnl.py — 114 records updated in trades_2026-04-04.jsonl. Canonical pnl: +347 → -3155 → +13,595 (after band/threshold purge). | 9b4d8dd |
+| CLEANUP-01 | Band/threshold trades polluting logs | All band/threshold records (790+ across Apr 2-4) purged from all trade files and tracked_positions.json. True 15m-only all-time pnl: +$13,595.76. | manual |
+
+**Architecture finding (2026-04-04):**
+- CRYPTO_BAND_DAILY_ENABLED=False was only blocking scheduled scan — WS was ignoring it
+- Band/threshold via WS used degraded model (t-dist only, no S1-S5 signals) — this caused the -$13.1K drag
+- 15m module unaffected: +$13,595.76 all-time (true performance)
+- Unified WS architecture proposed by David (single process, cached S1-S5, ensemble probability model)
+- Adversarial review: 3 high + 3 medium challenges — architecture sound but needs 4 prerequisites
+- David's feedback sent to Strategist for revised recommendation (pending)
+
+---
+
 ## 2026-04-04 Evening — Audit Warnings + Dashboard P&L Fixes
 
 | Issue ID | Title | Fix Summary | Commit |
