@@ -1080,7 +1080,7 @@ function renderClosedTrades() {
                 : (t.side || '--');
     const date = (t.timestamp||t._date||'').substring(0,10);
     return `<tr>
-      <td class="l" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.ticker||''}">${t.title||t.ticker||''}${moduleTypeTag(t.module)}</td>
+      <td class="l" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.ticker||''}">${moduleTypeTag(t.module)}${t.title||t.ticker||''}</td>
       <td>${date}</td>
       <td>${sideLabel}</td>
       <td>${t.contracts!=null?t.contracts:'--'}</td>
