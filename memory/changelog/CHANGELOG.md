@@ -61,6 +61,24 @@ SPRINT2-051 | get_capital() silent $10k fallback — no alert | Fixed (45d3a9b) 
 
 ---
 
+## 2026-04-05 Sprint 1 — P_final Sizing Cap + 15m Optimizations
+
+APR5-CAP-001 | P_final sizing cap — model systematically overconfident at P_final >0.80 (65.4% HC loss rate, 4 days, p=0.005). `P_final_for_sizing = min(P_final, 0.80)` in Kelly only. Entry gate unchanged. | Fixed (c081413) QA-passed DS+Strategist+Adversarial-reviewed
+APR5-LOG-001 | Missing P_final fields in decision log — `p_final_raw`, `p_final_for_sizing`, `sizing_capped` added to ENTER records in decisions_15m.jsonl | Fixed (c081413) QA-passed
+APR5-BAND-001 | Band sigma 8.85x too high — `daily_vol * sqrt(hours/24)` replaced with `_SIGMA_HOURLY[series] * sqrt(max(1.0, hours))`. Calibrated from 48 resolved contracts. | Fixed (0897e26) QA-passed DS+Adversarial-reviewed
+APR5-BAND-002 | Dead sigma formula — `sigma = daily_vol * math.sqrt(hours/24)` still present at line 379 in outer loop (never executed). | Fixed (pending) chore cleanup
+APR5-DASH-001 | Win rate not period-filtered — added Today/Yesterday/This Week/This Month/This Year/All-Time filter to account + module cards | Fixed (79cf555) QA-passed
+APR5-DASH-002 | Dashboard default period was This Month — changed all selectors to Today | Fixed (committed)
+APR5-DASH-003 | No Yesterday filter — added Yesterday to all period selectors | Fixed (committed)
+APR5-DASH-004 | P_final confidence display bug — prior audit finding closed
+DEFERRED-WEIGHTS | Weight rebalancing (W_OBI 0.25→0.35, W_TFI 0.50→0.43, W_OI 0.10→0.07) — grid search confirms directional but marginal. Needs 7+ days data across regimes. | Deferred (condition: >7 days data, rerun 4-day grid search)
+DEFERRED-WS-S1S5 | Unified WS architecture with cached S1-S5 signals — valid idea, needs: shadow flag, S2 TTL ≤2h, ISSUE-062 (live spot), thread pool. | Deferred (condition: band/threshold 50+ trades + preconditions met)
+DISMISSED-SIGMOID | Sigmoid scale 0.75 — simulation shows it blocks 66.7%-winner trades. Net negative PnL impact. | Dismissed (never implement)
+DISMISSED-STOPLOSS | YES stop-loss timing change — 95.8% of stops correct, saves $1,118 vs holding. | Dismissed (do not change)
+DISMISSED-MINED | MIN_EDGE raise — already 12% in prod; 12-20% edge trades win at 67%. Raising hurts. | Dismissed
+
+---
+
 ## 2026-04-03 Sprint 1 Fixes
 
 SPRINT1-070 | WS feed hourly evaluator capped at 7% instead of 70% — WS band/threshold trades hard-blocked | Fixed (ceba350) DS-reviewed
