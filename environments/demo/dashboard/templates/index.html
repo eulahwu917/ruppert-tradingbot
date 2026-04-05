@@ -86,6 +86,10 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
 /* Badges */
 .b-yes{background:#1a2e1a;color:#4ade80;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:700}
 .b-no{background:#2e1a1a;color:#f87171;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:700}
+.mod-tag { display:inline-block; font-size:9px; padding:1px 5px; border-radius:3px; font-weight:600; text-transform:uppercase; letter-spacing:.4px; margin-left:4px; }
+.mod-15m       { color:#38bdf8; background:rgba(56,189,248,.12); border:1px solid rgba(56,189,248,.3); }
+.mod-threshold { color:#a78bfa; background:rgba(167,139,250,.12); border:1px solid rgba(167,139,250,.3); }
+.mod-band      { color:#fb923c; background:rgba(251,146,60,.12); border:1px solid rgba(251,146,60,.3); }
 .b-sim{background:#1a1a2e;color:#818cf8;padding:2px 6px;border-radius:3px;font-size:10px}
 .b-bot{background:#1a1a2e;color:#818cf8;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-left:5px;vertical-align:middle}
 .b-manual{background:#2e2a1a;color:#fbbf24;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-left:5px;vertical-align:middle}
@@ -417,7 +421,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
   <!-- Row 2: Crypto sub-module cards (active: 15m Dir, Threshold Daily, Band Daily) -->
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;align-items:stretch;" id="crypto-cards-row">
     <!-- ₿ 15m Dir -->
-    <div class="card" style="border-left:3px solid #a78bfa;">
+    <div class="card" style="border-left:3px solid #38bdf8;background:rgba(56,189,248,.03);">
       <div style="padding:16px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
           <span style="font-size:18px;">&#x20BF;</span>
@@ -432,6 +436,8 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
               <select id="crypto_dir_15m-period" onchange="setModulePeriod('crypto_dir_15m',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
+                <option value="day">Today</option>
+                <option value="week">This Week</option>
                 <option value="month" selected>This Month</option>
                 <option value="year">This Year</option>
                 <option value="all">All Time</option>
@@ -461,7 +467,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       </div>
     </div>
     <!-- ₿ Threshold Daily -->
-    <div class="card" style="border-left:3px solid #a78bfa;">
+    <div class="card" style="border-left:3px solid #a78bfa;background:rgba(167,139,250,.03);">
       <div style="padding:16px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
           <span style="font-size:18px;">&#x20BF;</span>
@@ -476,6 +482,8 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
               <select id="crypto_threshold_daily-period" onchange="setModulePeriod('crypto_threshold_daily',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
+                <option value="day">Today</option>
+                <option value="week">This Week</option>
                 <option value="month" selected>This Month</option>
                 <option value="year">This Year</option>
                 <option value="all">All Time</option>
@@ -505,7 +513,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       </div>
     </div>
     <!-- ₿ Band Daily -->
-    <div class="card" style="border-left:3px solid #a78bfa;">
+    <div class="card" style="border-left:3px solid #fb923c;background:rgba(251,146,60,.03);">
       <div style="padding:16px;">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;">
           <span style="font-size:18px;">&#x20BF;</span>
@@ -520,6 +528,8 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
               <select id="crypto_band_daily-period" onchange="setModulePeriod('crypto_band_daily',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;">
+                <option value="day">Today</option>
+                <option value="week">This Week</option>
                 <option value="month" selected>This Month</option>
                 <option value="year">This Year</option>
                 <option value="all">All Time</option>
@@ -891,12 +901,9 @@ async function loadPositions() {
   window._cachedPositions = positions;
   tb.innerHTML = positions.map(p => {
     const name  = (p.title||p.ticker||'');
-    const side  = p.side === 'UP'
-      ? '<span class="b-yes">UP</span>'
-      : p.side === 'DOWN'
-      ? '<span class="b-no">DOWN</span>'
-      : p.side?.toLowerCase() === 'yes'
-      ? '<span class="b-yes">YES</span>'
+    const side  = p.side === 'UP'   ? '<span style="color:#4ade80">UP ↑</span>'
+      : p.side === 'DOWN' ? '<span style="color:#f87171">DOWN ↓</span>'
+      : p.side?.toLowerCase() === 'yes' ? '<span class="b-yes">YES</span>'
       : '<span class="b-no">NO</span>';
     const cur   = '<span style="color:#555;font-size:10px;">live↓</span>';
     const _s = (p.ticker||"").split("-")[0].toLowerCase(); const url = `https://kalshi.com/markets/${_s}`;
@@ -921,7 +928,7 @@ async function loadPositions() {
     return `<tr>
       <td class="l col-title">
         <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">
-          ${moduleTag(p.parent_module)}
+          ${moduleTypeTag(p.module)}
           <a href="${url}" target="_blank" style="color:#aaa;text-decoration:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:380px;">${name}</a>
           ${expiry}
         </div>
@@ -1066,13 +1073,16 @@ function renderClosedTrades() {
     const pnl = t.realized_pnl != null ? `<span style="color:${t.realized_pnl>=0?'#4ade80':'#f87171'}">${t.realized_pnl>=0?'+':''}$${t.realized_pnl.toFixed(2)}</span>` : '<span style="color:#444">--</span>';
     const exit = t.exit_price_cents != null ? `${t.exit_price_cents}¢` : '--';
     const proceeds = t.proceeds != null ? `$${t.proceeds.toFixed(2)}` : '--';
-    const side = t.side === 'yes' ? '<span style="color:#4ade80">YES</span>' : '<span style="color:#f87171">NO</span>';
+    const sideLabel = t.side === 'UP'   ? '<span style="color:#4ade80">UP ↑</span>'
+                : t.side === 'DOWN' ? '<span style="color:#f87171">DOWN ↓</span>'
+                : t.side === 'yes'  ? '<span style="color:#4ade80">YES</span>'
+                : t.side === 'no'   ? '<span style="color:#f87171">NO</span>'
+                : (t.side || '--');
     const date = (t.timestamp||t._date||'').substring(0,10);
-    const module = (t.parent_module||t.module||'').replace('crypto_','').replace('_',' ');
     return `<tr>
-      <td class="l" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.ticker||''}">${t.title||t.ticker||''}<br><span style="color:#555;font-size:9px">${module}</span></td>
+      <td class="l" style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${t.ticker||''}">${t.title||t.ticker||''}${moduleTypeTag(t.module)}</td>
       <td>${date}</td>
-      <td>${side}</td>
+      <td>${sideLabel}</td>
       <td>${t.contracts!=null?t.contracts:'--'}</td>
       <td>${t.entry_price!=null?t.entry_price+'¢':'--'}</td>
       <td>${t.size_dollars!=null?'$'+parseFloat(t.size_dollars).toFixed(2):'--'}</td>
@@ -1235,6 +1245,15 @@ function doAct(uid, action, ticker, priceCents) {
 }
 
 // ── Module Tags ───────────────────────────────────────────────────────────────
+function moduleTypeTag(module) {
+  if (!module) return '';
+  const m = module.toLowerCase();
+  if (m.includes('dir_15m'))         return '<span class="mod-tag mod-15m">15m</span>';
+  if (m.includes('threshold_daily')) return '<span class="mod-tag mod-threshold">Threshold</span>';
+  if (m.includes('band_daily'))      return '<span class="mod-tag mod-band">Band</span>';
+  return '<span class="mod-tag">' + (module.replace('crypto_','').replace(/_/g,' ')) + '</span>';
+}
+
 function moduleTag(parent_module) {
   switch (parent_module) {
     case 'weather':
@@ -1360,7 +1379,7 @@ function renderState(state) {
     return `<tr>
       <td class="l col-title">
         <div style="display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;">
-          ${moduleTag(p.parent_module)}
+          ${moduleTypeTag(p.module)}
           <a href="${url}" target="_blank" style="color:#aaa;text-decoration:none;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 1 auto;max-width:380px;">${name}</a>
           ${expiry}
         </div>
