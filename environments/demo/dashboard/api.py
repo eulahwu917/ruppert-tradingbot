@@ -24,7 +24,7 @@ def _today_pdt():
     """Return today's date in PDT/PST (America/Los_Angeles). Use instead of date.today()."""
     return datetime.now(timezone.utc).astimezone(_LA_TZ).date()
 from agents.ruppert.data_scientist.capital import get_capital, get_buying_power
-from agents.ruppert.data_scientist.logger import classify_module, get_parent_module, compute_closed_pnl_from_logs
+from agents.ruppert.data_scientist.logger import classify_module, get_parent_module, compute_closed_pnl_from_logs, compute_period_closed_pnl_from_logs
 import agents.ruppert.data_analyst.market_cache as market_cache
 import logging as _log
 
@@ -1287,6 +1287,11 @@ def get_pnl_history():
             module_stats[_mk]['trade_count']      = _cs['trade_count']
             module_stats[_mk]['wins']             = _cs['wins']
 
+    # Override period totals with canonical log-scan values
+    closed_by_period['day']   = compute_period_closed_pnl_from_logs('day')
+    closed_by_period['month'] = compute_period_closed_pnl_from_logs('month')
+    closed_by_period['year']  = compute_period_closed_pnl_from_logs('year')
+
     # ── Open positions ───────────────────────────────────────────────────────
     open_pnl_total = 0.0
     open_by_source = {'bot': 0.0, 'manual': 0.0}
@@ -1749,6 +1754,11 @@ def _build_state():
             module_closed[_mk]['closed_pnl_year']  = _cs['closed_pnl_year']
             module_closed[_mk]['trade_count']      = _cs['trade_count']
             module_closed[_mk]['wins']             = _cs['wins']
+
+    # Override period scalars with canonical log-scan values
+    closed_pnl_day   = compute_period_closed_pnl_from_logs('day')
+    closed_pnl_month = compute_period_closed_pnl_from_logs('month')
+    closed_pnl_year  = compute_period_closed_pnl_from_logs('year')
 
     # ── Finalize module stats ─────────────────────────────────────────────────
     modules_out: dict = {}

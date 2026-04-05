@@ -713,6 +713,88 @@ def compute_closed_pnl_from_logs() -> float:
         ) from e
 
 
+def compute_period_closed_pnl_from_logs(period: str) -> float:
+    """Compute closed P&L for the current PDT day/month/year from trade logs.
+
+    Canonical source for period closed P&L. Mirrors compute_closed_pnl_from_logs()
+    but filtered to the current PDT day, month, or year.
+
+    Args:
+        period: 'day' | 'month' | 'year'
+
+    Returns:
+        float: Rounded to 2 decimal places.
+
+    Raises:
+        ValueError: If period is not 'day', 'month', or 'year'.
+        RuntimeError: If log scanning fails.
+    """
+    import json
+    from pathlib import Path
+    from datetime import datetime as _dt
+
+    if period not in ('day', 'month', 'year'):
+        raise ValueError(f"period must be 'day', 'month', or 'year'; got {period!r}")
+
+    try:
+        from agents.ruppert.env_config import get_paths as _get_paths
+        _paths = _get_paths()
+        trades_dir = Path(_paths['trades'])
+
+        log_files = sorted(trades_dir.glob('trades_*.jsonl'))
+        if not log_files:
+            return 0.0
+
+        today = _pdt_today()  # datetime.date in PDT
+
+        total_pnl = 0.0
+        for p in log_files:
+            for line in p.read_text(encoding='utf-8').splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    t = json.loads(line)
+                    action = t.get('action', '')
+
+                    if action in ('exit', 'settle') and t.get('pnl') is not None:
+                        pnl = float(t['pnl'])
+                        raw_ts = t.get('timestamp')
+                    elif action == 'exit_correction' and t.get('pnl_correction') is not None:
+                        pnl = float(t['pnl_correction'])
+                        raw_ts = t.get('timestamp')
+                    else:
+                        continue
+
+                    # Parse record date — skip if no timestamp
+                    if not raw_ts:
+                        continue
+                    try:
+                        sdate = _dt.fromisoformat(str(raw_ts).split('+')[0]).date()
+                    except Exception:
+                        continue
+
+                    # Period filter
+                    if period == 'day' and sdate != today:
+                        continue
+                    elif period == 'month' and (sdate.year != today.year or sdate.month != today.month):
+                        continue
+                    elif period == 'year' and sdate.year != today.year:
+                        continue
+
+                    total_pnl += pnl
+
+                except Exception:
+                    pass
+
+        return round(total_pnl, 2)
+
+    except Exception as e:
+        raise RuntimeError(
+            f'[Logger] compute_period_closed_pnl_from_logs({period!r}) failed: {e}'
+        ) from e
+
+
 def get_daily_summary():
     """Return a summary of today's trading activity."""
     log_path = _today_log_path()  # already uses TRADES_DIR via _today_log_path()
