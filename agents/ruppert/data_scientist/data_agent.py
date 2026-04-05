@@ -30,7 +30,7 @@ if str(_WORKSPACE_ROOT) not in sys.path:
     sys.path.insert(0, str(_WORKSPACE_ROOT))
 
 from agents.ruppert.env_config import get_paths as _get_paths
-from agents.ruppert.data_scientist.logger import log_activity, send_telegram
+from agents.ruppert.data_scientist.logger import log_activity, send_telegram, compute_closed_pnl_from_logs
 from agents.ruppert.trader import position_tracker
 
 # PDT-aware date helper — safe during UTC midnight boundary (B5-DS-3)
@@ -517,7 +517,7 @@ def check_dashboard_consistency(open_positions: list = None) -> list[dict]:
         try:
             pnl_data = requests.get(f'{base}/api/pnl', timeout=5).json()
             api_pnl = pnl_data.get('closed_pnl', 0)
-            log_pnl = compute_pnl_from_logs()
+            log_pnl = compute_closed_pnl_from_logs()
             if abs(api_pnl - log_pnl) > 0.10:
                 issues.append({
                     'check': 'closed_pnl',
@@ -579,7 +579,14 @@ def check_decision_log_orphans() -> list[dict]:
         if d.get('decision', '').upper() in ('SKIP',):
             continue
         ticker = d.get('market_id', d.get('ticker', ''))
-        d_date = str(d.get('ts', ''))[:10]
+        ts_raw = d.get('ts', '')
+        try:
+            ts_dt = datetime.fromisoformat(str(ts_raw))
+            if ts_dt.tzinfo is None:
+                ts_dt = ts_dt.replace(tzinfo=timezone.utc)
+            d_date = ts_dt.astimezone(_LA_TZ).date().isoformat()
+        except Exception:
+            d_date = str(ts_raw)[:10]
         if d_date in (today_str, yesterday_str) and ticker not in trade_tickers:
             orphans.append(d)
     return orphans
