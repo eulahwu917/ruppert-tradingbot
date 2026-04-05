@@ -15,6 +15,16 @@ _Every fix must be logged here with issue ID, summary, and commit hash_
 
 ---
 
+## P2 Non-Blockers — ws_feed CRYPTO_15M_SERIES, date.today() cleanup (2026-04-04)
+
+| Issue ID | Title | Fix Summary | Commit |
+|----------|-------|-------------|--------|
+| P2-A | ws_feed.py local CRYPTO_15M_SERIES | Removed local definition (lines 83-84); added top-level import from utils.py. Adversarial caught spec error (lazy import inside function vs module-level). | 97ad9dc |
+| P2-B | crypto_band_daily.py date.today() | 1 site replaced with _today_pdt(). Added _today_pdt import from utils. | 97ad9dc |
+| P2-C | crypto_threshold_daily.py date.today() | 4 sites replaced with _today_pdt() (~lines 651, 797, 950, 1210). Added _today_pdt import from utils. | 97ad9dc |
+
+---
+
 ## Known Issues Fix Batch — ISSUE-1-01, ISSUE-D07, ISSUE-1-10, ISSUE-S2-OKX (2026-04-04)
 
 | Issue ID | Title | Fix Summary | Commit |

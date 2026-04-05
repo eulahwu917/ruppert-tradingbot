@@ -6,6 +6,27 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 
 ---
 
+## 2026-04-04 — All Issues Fixed, Ready to Restart (17:07-17:51 PDT)
+
+### P2 Non-Blockers Fixed — commit 97ad9dc
+
+David: "Fix everything before restart, don't leave anything behind."
+
+- **P2-A:** ws_feed.py local `CRYPTO_15M_SERIES` removed; top-level import from utils.py added. Adversarial caught spec error (lazy import inside function would have NameError'd at 3 module-level usage sites).
+- **P2-B:** crypto_band_daily.py — 1 `date.today()` → `_today_pdt()`. Import added.
+- **P2-C:** crypto_threshold_daily.py — 4 `date.today()` → `_today_pdt()`. Import added.
+
+### System state (end of 2026-04-04)
+- **Zero open code issues** — no date.today() anywhere, no duplicate constants, no known issues
+- **GitHub:** current at 97ad9dc
+- **System Map:** v3.9 (0809128) — fully adjudicated, 98%+ confidence
+- **Trading:** halted — awaiting David confirmation to restart (crypto 15m only)
+- **Daily modules:** remain OFF — need shadow WR >45% / 50+ trades + R9 + R1 vol gate
+- **Phase 3:** pending 50 shadow trades
+- **CME key:** rotated by David ✅
+
+---
+
 ## 2026-04-04 — Known Issues Fixed (17:07-17:35 PDT)
 
 ### All 4 known issues + S2 bug fixed — commit 1f98004, System Map v3.9 (0809128)
