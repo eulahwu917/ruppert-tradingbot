@@ -6,6 +6,40 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 
 ---
 
+## 2026-04-04 — Late Night Band Model v2 + Dashboard (22:10-23:05 PDT)
+
+### Band Model v2 — SHIPPED (commit 0897e26)
+- Sigma was 8.85x too high in formula (`daily_vol * sqrt(hours/24)` using intraday vol)
+- Calibrated from 48 resolved Kalshi band contracts: BTC=0.000577/√hr, ETH=0.001020/√hr, default=0.001530/√hr
+- New formula: `_SIGMA_HOURLY[series] * sqrt(max(1.0, hours_to_settlement))`
+- 3/4 actual wins survive calibrated filter at 0.22 threshold — model does NOT select for losers
+- In-sample Brier: 0.2423→0.0666; forward validation gate: recheck after 50 DEMO trades, flag if OOS Brier >0.30
+- `CRYPTO_BAND_DAILY_ENABLED` stays False — David enables when ready
+- QA: PASS
+
+### Dashboard Win Rate by Period — SHIPPED (commit 79cf555)
+- Account-level: dropdown (Today/This Week/This Month/This Year/All-Time)
+- Per-module cards: win rate follows each card's Closed P&L period select automatically
+- QA: PASS
+
+### History Depth — Key Finding
+- Our signal history: 3.2 days only. Kalshi history: ~22 months, ~164,700 band contracts
+- Can use Kalshi history for sigma calibration. CANNOT reconstruct S1-S5 signals historically.
+- Need 30-60 days live paired data for signal optimization. 15m accumulating fastest (~220/day).
+
+### ⚠️ REMINDER: WS S1-S5 Architecture Discussion Pending
+- David asked why WS doesn't run full S1-S5 signals, wants to discuss after 15m Brier results land
+- Answer: feasible, needs background cache + thread pool + ISSUE-062 (live spot) + shadow flag — ~2-3 week project
+- DO NOT forget to bring this up once 15m Brier analysis is delivered
+
+### System state (23:05 PDT)
+- Trading: ACTIVE (15m only)
+- Band: OFF, model v2 ready
+- Dashboard: win rate by period live
+- GitHub: 79cf555 | System Map: v4.1
+
+---
+
 ## 2026-04-04 — Night Dashboard Overhaul + Band Sigma Finding (21:30-22:08 PDT)
 
 ### Dashboard UI (commits 592c973, e27bce1, 80d16d9)

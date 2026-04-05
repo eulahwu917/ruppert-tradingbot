@@ -1,9 +1,18 @@
 # Ruppert System Map
-_Last updated: 2026-04-04 | v4.0 | Evening audit fixes: decision orphan UTC→PDT fix, dashboard closed_pnl and total_pnl now use canonical compute_closed_pnl_from_logs(). All dashboard P&L fields consistent. Commits a258c3a, 061df01, 815bdd7._
+_Last updated: 2026-04-04 | v4.1 | Late night: Band Model v2 sigma fix, dashboard win rate by period, dead code cleanup. Commits 0897e26, 79cf555._
 
 ---
 
 ## Changelog
+
+### v4.1 — 2026-04-04 Late Night (commits 0897e26, 79cf555)
+- **BAND-SIGMA-V2 (commit 0897e26):** `crypto_band_daily.py` — sigma computation replaced. Old: `daily_vol * sqrt(hours/24)` (8-12x too small → 100% entry rate). New: `_SIGMA_HOURLY[series] * sqrt(max(1.0, hours_to_settlement))`. Calibrated from 48 resolved Kalshi band contracts (April 2026). BTC=0.000577/√hr, ETH=0.001020/√hr, default=0.001530/√hr. Results: 79% entry filter rate, 3/4 wins survive filter, Brier 0.2423→0.0666 (in-sample). `CRYPTO_BAND_DAILY_ENABLED` remains False — David enables separately.
+- **DASH-WIN-RATE (commit 79cf555):** Dashboard win rate now period-filtered. Account-level: new dropdown (Today/This Week/This Month/This Year/All-Time). Per-module cards: win rate follows each card's existing Closed P&L period select automatically. Backend: `compute_module_closed_stats_from_logs()` extended with period win/trade counts. Division-by-zero guarded (returns None on 0 trades).
+- **WS gate confirmed:** `evaluate_crypto_entry()` in ws_feed.py checks `CRYPTO_BAND_DAILY_ENABLED` before entering band contracts (fix from 9b4d8dd still in place).
+- **Known remaining (non-blocking):** Dead code `sigma = daily_vol * math.sqrt(hours / 24)` at line 379 in crypto_band_daily.py outer loop — never executed (overridden by sigma_m per market), cleanup deferred.
+- **Pending David decision:** `CRYPTO_BAND_DAILY_ENABLED = True` to re-enable band in DEMO. Forward validation gate: recheck Brier after 50 live DEMO band trades; if OOS Brier > 0.30, flag for review.
+
+### v4.0 — 2026-04-04 Evening (commits a258c3a, 061df01, 815bdd7)
 
 ### v4.0 — 2026-04-04 Evening (commits a258c3a, 061df01, 815bdd7)
 - **AUDIT-01 RESOLVED:** `check_decision_log_orphans()` in `data_agent.py` — `d_date` now uses `_LA_TZ`-aware datetime conversion (was raw UTC string slice). False orphan count: 116 → 0.
