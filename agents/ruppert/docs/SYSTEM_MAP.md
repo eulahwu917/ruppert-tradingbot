@@ -1,9 +1,18 @@
 # Ruppert System Map
-_Last updated: 2026-04-04 | v3.4 | Batches 2–5 complete. Strategist: CB PDT fix, CB module-state locking, R9 macro filter ACTIVE. Trader: NO-side daily stop gate, UTC-aware heartbeat/watchdog, window guard TZ, window eval retry, run_persistent_ws_mode deleted. DS: normalize_entry_price NO-side fix, dry_run tag, exposure error handling, settlement datetime, P&L divergence fixed, 22 date.today() sites swept, CRYPTO_15M_SERIES consolidated in utils.py._
+_Last updated: 2026-04-04 | v4.0 | Evening audit fixes: decision orphan UTC→PDT fix, dashboard closed_pnl and total_pnl now use canonical compute_closed_pnl_from_logs(). All dashboard P&L fields consistent. Commits a258c3a, 061df01, 815bdd7._
 
 ---
 
 ## Changelog
+
+### v4.0 — 2026-04-04 Evening (commits a258c3a, 061df01, 815bdd7)
+- **AUDIT-01 RESOLVED:** `check_decision_log_orphans()` in `data_agent.py` — `d_date` now uses `_LA_TZ`-aware datetime conversion (was raw UTC string slice). False orphan count: 116 → 0.
+- **AUDIT-02 RESOLVED:** `check_dashboard_consistency()` — `log_pnl` now calls `compute_closed_pnl_from_logs()` from logger.py (same function as dashboard), eliminating false P&L mismatch alerts.
+- **DATA-01:** 4 orphan tickers (KXBTC/ETH/XRP/DOGE 15M-26APR031515-15) purged from decisions_15m.jsonl and events_2026-04-03.jsonl. Root cause: logger write failure 2026-04-03 12:01–12:03 PDT.
+- **DASH-01 RESOLVED:** `get_pnl_history()` `pnl_result` dict — `closed_pnl`, `bot_closed_pnl`, `bot_closed_all` now use `closed_pnl_total` (canonical). Was using `closed_by_source['bot']` (legacy ticker-dedup accumulator). Delta was ~$1,500 — now 0.0.
+- **DASH-02 RESOLVED:** `get_pnl_history()` line 1354 — `total_pnl = closed_pnl_total + open_by_source['bot']`. Was `closed_by_source['bot']`. Now `total_pnl == closed_pnl + open_pnl` (verified match: True).
+- **Dashboard P&L note:** `closed_pnl_total` is set by `compute_closed_pnl_from_logs()` at line 1277, used for all closed P&L response fields. `closed_by_source['bot']` is still used for win rate and trade counts only — correct.
+- **Known remaining:** `closed_pnl_day/month/year` period fields still use legacy accumulator — separate future fix.
 
 ### v3.4 DS update — 2026-04-04
 - **Batches 2–5 Data Scientist domain changes applied**

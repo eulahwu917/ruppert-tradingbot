@@ -6,6 +6,32 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 
 ---
 
+## 2026-04-04 — Evening Audit + Dashboard Fixes (18:00-19:27 PDT)
+
+### Trading Restarted
+- WS Feed + Watchdog + Post-Trade Monitor + Demo cycles all re-enabled and running
+- First trades placed ~17:57 PDT after restart
+
+### Audit Warning Fixes — commits a258c3a
+- **Decision orphan false alarms (116→0):** `check_decision_log_orphans()` was slicing raw UTC timestamp string for date. Decisions after 5pm PDT had UTC date one day ahead of trade file. Fixed to use `_LA_TZ`-aware datetime conversion.
+- **Dashboard P&L audit false alarm:** `check_dashboard_consistency()` was using local `compute_pnl_from_logs()` instead of `compute_closed_pnl_from_logs()` from logger.py (what dashboard actually uses). Fixed.
+- **4 orphan tickers purged:** KXBTC/ETH/XRP/DOGE 15M-26APR031515-15 removed from decisions_15m.jsonl (94 lines) + events_2026-04-03.jsonl (4 lines). These were genuine logger write failures on 2026-04-03 12:01–12:03 PDT — both buy and settle records were never persisted.
+
+### Dashboard P&L Dead Code Fixed — commits 061df01, 815bdd7
+- **Root cause:** `get_pnl_history()` had `closed_pnl_total = compute_closed_pnl_from_logs()` at line 1277, but `pnl_result` dict read from `closed_by_source['bot']` (legacy ticker-dedup accumulator) — the override was dead code. Delta was ~$1,500.
+- **Fix 1 (061df01):** `closed_pnl`, `bot_closed_pnl`, `bot_closed_all` → `closed_pnl_total`. Delta now 0.0.
+- **Fix 2 (815bdd7):** `total_pnl` line 1354 → `closed_pnl_total + open_by_source['bot']`. Now `total_pnl == closed_pnl + open_pnl` (verified True).
+- **Remaining:** `closed_pnl_day/month/year` period fields still use legacy accumulator — future fix.
+
+### System state (end of 2026-04-04 evening)
+- **Trading:** ACTIVE — WS feed running, crypto 15m only
+- **Dashboard P&L:** fully consistent — closed/total/bot all use canonical source
+- **Audit warnings:** 0 false alarms (orphans=0 false, P&L=0 false)
+- **GitHub:** current at 815bdd7
+- **System Map:** v4.0
+
+---
+
 ## 2026-04-04 — All Issues Fixed, Ready to Restart (17:07-17:51 PDT)
 
 ### P2 Non-Blockers Fixed — commit 97ad9dc

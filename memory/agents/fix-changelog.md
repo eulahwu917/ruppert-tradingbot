@@ -15,6 +15,18 @@ _Every fix must be logged here with issue ID, summary, and commit hash_
 
 ---
 
+## 2026-04-04 Evening — Audit Warnings + Dashboard P&L Fixes
+
+| Issue ID | Title | Fix Summary | Commit |
+|----------|-------|-------------|--------|
+| AUDIT-01 | Decision orphan false alarms (116) | `check_decision_log_orphans()`: `d_date` now uses `_LA_TZ`-aware datetime conversion instead of raw UTC string slice. Decisions after 5pm PDT were matching wrong trade file date. | a258c3a |
+| AUDIT-02 | Dashboard P&L audit false alarm | `check_dashboard_consistency()`: `log_pnl` now calls `compute_closed_pnl_from_logs()` from logger.py (same function dashboard uses) instead of local reimplementation. | a258c3a |
+| DATA-01 | 4 orphan tickers in decisions_15m.jsonl | Purged KXBTC/ETH/XRP/DOGE 15M-26APR031515-15 from decisions_15m.jsonl (94 lines) and events_2026-04-03.jsonl (4 lines). Logger write failure on 2026-04-03 12:01-12:03 PDT caused trade file gap. | manual |
+| DASH-01 | Dashboard closed_pnl dead code override | `get_pnl_history()`: `closed_pnl`, `bot_closed_pnl`, `bot_closed_all` now use `closed_pnl_total` (canonical) instead of `closed_by_source['bot']` (legacy ticker-dedup accumulator). Delta was ~$1,500. | 061df01 |
+| DASH-02 | Dashboard total_pnl legacy accumulator | `get_pnl_history()` line 1354: `total_pnl = closed_pnl_total + open_by_source['bot']`. Was using `closed_by_source['bot']`. Now total_pnl == closed_pnl + open_pnl. | 815bdd7 |
+
+---
+
 ## P2 Non-Blockers — ws_feed CRYPTO_15M_SERIES, date.today() cleanup (2026-04-04)
 
 | Issue ID | Title | Fix Summary | Commit |
