@@ -377,7 +377,7 @@ Then three-tier cap check: circuit breaker (3 consecutive losses = hard stop), d
 
 **S1: 24h Momentum** — z-score of daily return vs 29-day history. Raw score = `clamp(z, -2, 2) / 2.0` → `[-1, 1]`.
 
-**S2: Funding Rate Regime** — OKX cumulative 24h funding. Sign-inverted: high positive funding (longs paying) → mild bearish signal. `filter_skip = True` if `|funding_24h_z| > 3.5`.
+**S2: Funding Rate Regime** — OKX cumulative 24h funding (Binance replaced by OKX due to HTTP 451 geo-block from US IPs; BINANCE_SYMBOLS dict still present in code but queries go to OKX only). Sign-inverted: high positive funding (longs paying) → mild bearish signal. `filter_skip = True` if `|funding_24h_z| > 3.5`.
 
 **S3: ATR Band** — Rolling ATR-14 percentage. Sizing multiplier only (not directional). `raw_score = 0.0` always.
 
@@ -1006,7 +1006,7 @@ FIFO accounting:
 
 Result determination (priority order — updated Sprint 3 / ISSUE-028):
 1. `market.result in ('yes', 'no')` → use directly
-2. `market.status in ('settled', 'finalized')` → `yes_bid >= 99` → yes, else no
+2. `market.status in ('settled', 'finalized')` → `yes_bid >= 99` → yes, `yes_bid <= 1` → no, else → ambiguous (skip — do not infer)
 3. Market expired but result pending → `continue` (do not infer from bid alone)
 
 **Removed (Sprint 3):** Steps 3 and 4 previously inferred settlement outcome from `yes_bid >= 99` or `yes_bid <= 1` without a confirmed `result` or `status`. This could produce phantom settlements on near-expiry contracts that hadn't resolved yet. Bid-only inference is now blocked — settlement requires a confirmed API `result` field or `status in ('settled', 'finalized')`.
