@@ -393,7 +393,15 @@ def compute_module_closed_stats_from_logs() -> dict:
         'closed_pnl_month': 0.0,
         'closed_pnl_year': 0.0,
         'trade_count': 0,
+        'trade_count_day': 0,
+        'trade_count_week': 0,
+        'trade_count_month': 0,
+        'trade_count_year': 0,
         'wins': 0,
+        'wins_day': 0,
+        'wins_week': 0,
+        'wins_month': 0,
+        'wins_year': 0,
     } for m in module_keys}
 
     # For each close/exit/settle record, add to the appropriate bucket.
@@ -430,12 +438,20 @@ def compute_module_closed_stats_from_logs() -> dict:
                 if sdate:
                     if sdate == _today:
                         stats[bucket]['closed_pnl_day'] += pnl
+                        stats[bucket]['trade_count_day'] += 1
+                        if pnl > 0: stats[bucket]['wins_day'] += 1
                     if sdate >= _week_start:
                         stats[bucket]['closed_pnl_week'] += pnl
+                        stats[bucket]['trade_count_week'] += 1
+                        if pnl > 0: stats[bucket]['wins_week'] += 1
                     if sdate.year == _today.year and sdate.month == _today.month:
                         stats[bucket]['closed_pnl_month'] += pnl
+                        stats[bucket]['trade_count_month'] += 1
+                        if pnl > 0: stats[bucket]['wins_month'] += 1
                     if sdate.year == _today.year:
                         stats[bucket]['closed_pnl_year'] += pnl
+                        stats[bucket]['trade_count_year'] += 1
+                        if pnl > 0: stats[bucket]['wins_year'] += 1
 
             elif action == 'exit_correction' and t.get('pnl_correction') is not None:
                 correction = float(t['pnl_correction'])
@@ -460,14 +476,23 @@ def compute_module_closed_stats_from_logs() -> dict:
                     except Exception:
                         pass
                 if sdate:
+                    _was_win_c = float(t.get('logged_pnl', 0)) > 0
                     if sdate == _today:
                         stats[bucket]['closed_pnl_day'] += correction
+                        if _was_win_c:
+                            stats[bucket]['wins_day'] = max(0, stats[bucket]['wins_day'] - 1)
                     if sdate >= _week_start:
                         stats[bucket]['closed_pnl_week'] += correction
+                        if _was_win_c:
+                            stats[bucket]['wins_week'] = max(0, stats[bucket]['wins_week'] - 1)
                     if sdate.year == _today.year and sdate.month == _today.month:
                         stats[bucket]['closed_pnl_month'] += correction
+                        if _was_win_c:
+                            stats[bucket]['wins_month'] = max(0, stats[bucket]['wins_month'] - 1)
                     if sdate.year == _today.year:
                         stats[bucket]['closed_pnl_year'] += correction
+                        if _was_win_c:
+                            stats[bucket]['wins_year'] = max(0, stats[bucket]['wins_year'] - 1)
         except Exception as e:
             _logger.error("[dashboard:compute_module_closed_stats_from_logs] %s", e, exc_info=True)
 
@@ -1759,8 +1784,16 @@ def _build_state():
             module_closed[_mk]['closed_pnl_week']  = _cs['closed_pnl_week']
             module_closed[_mk]['closed_pnl_month'] = _cs['closed_pnl_month']
             module_closed[_mk]['closed_pnl_year']  = _cs['closed_pnl_year']
-            module_closed[_mk]['trade_count']      = _cs['trade_count']
-            module_closed[_mk]['wins']             = _cs['wins']
+            module_closed[_mk]['trade_count']          = _cs['trade_count']
+            module_closed[_mk]['trade_count_day']      = _cs.get('trade_count_day', 0)
+            module_closed[_mk]['trade_count_week']     = _cs.get('trade_count_week', 0)
+            module_closed[_mk]['trade_count_month']    = _cs.get('trade_count_month', 0)
+            module_closed[_mk]['trade_count_year']     = _cs.get('trade_count_year', 0)
+            module_closed[_mk]['wins']                 = _cs['wins']
+            module_closed[_mk]['wins_day']             = _cs.get('wins_day', 0)
+            module_closed[_mk]['wins_week']            = _cs.get('wins_week', 0)
+            module_closed[_mk]['wins_month']           = _cs.get('wins_month', 0)
+            module_closed[_mk]['wins_year']            = _cs.get('wins_year', 0)
 
     # Override period scalars with canonical log-scan values
     closed_pnl_day   = compute_period_closed_pnl_from_logs('day')
@@ -1773,8 +1806,16 @@ def _build_state():
     for mod in ['crypto', 'crypto_dir_15m', 'crypto_threshold_daily', 'crypto_band_daily']:
         oc = module_open.get(mod, {})
         cc = module_closed.get(mod, {})
-        tc = cc.get('trade_count', 0)
-        wr = round(cc['wins'] / tc * 100, 1) if tc > 0 else None
+        tc     = cc.get('trade_count', 0)
+        tc_day = cc.get('trade_count_day', 0)
+        tc_wk  = cc.get('trade_count_week', 0)
+        tc_mo  = cc.get('trade_count_month', 0)
+        tc_yr  = cc.get('trade_count_year', 0)
+        wr       = round(cc['wins']               / tc     * 100, 1) if tc     > 0 else None
+        wr_day   = round(cc.get('wins_day', 0)    / tc_day * 100, 1) if tc_day > 0 else None
+        wr_week  = round(cc.get('wins_week', 0)   / tc_wk  * 100, 1) if tc_wk  > 0 else None
+        wr_month = round(cc.get('wins_month', 0)  / tc_mo  * 100, 1) if tc_mo  > 0 else None
+        wr_year  = round(cc.get('wins_year', 0)   / tc_yr  * 100, 1) if tc_yr  > 0 else None
         modules_out[mod] = {
             'open_trades':       oc.get('open_trades', 0),
             'open_deployed':     round(oc.get('open_deployed', 0.0), 2),
@@ -1785,6 +1826,10 @@ def _build_state():
             'closed_pnl_month':  round(cc.get('closed_pnl_month', 0.0), 2),
             'closed_pnl_year':   round(cc.get('closed_pnl_year', 0.0), 2),
             'win_rate':          wr,
+            'win_rate_day':      wr_day,
+            'win_rate_week':     wr_week,
+            'win_rate_month':    wr_month,
+            'win_rate_year':     wr_year,
             'trade_count':       tc,
         }
 
@@ -1796,6 +1841,14 @@ def _build_state():
     total_bot_trades = sum(module_closed[m]['trade_count'] for m in _all_mods if m in module_closed)
     total_bot_wins   = sum(module_closed[m]['wins'] for m in _all_mods if m in module_closed)
     win_rate = round(total_bot_wins / total_bot_trades * 100, 1) if total_bot_trades > 0 else None
+
+    # Per-period account-level win rates
+    _pw = {p: sum(module_closed[m].get(f'wins_{p}', 0) for m in _all_mods if m in module_closed) for p in ('day', 'week', 'month', 'year')}
+    _pc = {p: sum(module_closed[m].get(f'trade_count_{p}', 0) for m in _all_mods if m in module_closed) for p in ('day', 'week', 'month', 'year')}
+    win_rate_day   = round(_pw['day']   / _pc['day']   * 100, 1) if _pc['day']   > 0 else None
+    win_rate_week  = round(_pw['week']  / _pc['week']  * 100, 1) if _pc['week']  > 0 else None
+    win_rate_month = round(_pw['month'] / _pc['month'] * 100, 1) if _pc['month'] > 0 else None
+    win_rate_year  = round(_pw['year']  / _pc['year']  * 100, 1) if _pc['year']  > 0 else None
 
     # ── Smart money (from cache) ──────────────────────────────────────────────
     smart_money = {'direction': 'neutral', 'bull_pct': 0.5, 'traders_sampled': 0}
@@ -1823,6 +1876,10 @@ def _build_state():
             'closed_pnl_week':  round(closed_pnl_week, 2),
             'total_pnl':        round(open_pnl_total + closed_pnl_total, 2),
             'win_rate':         win_rate,
+            'win_rate_day':     win_rate_day,
+            'win_rate_week':    win_rate_week,
+            'win_rate_month':   win_rate_month,
+            'win_rate_year':    win_rate_year,
             'total_trades':     total_bot_trades,
             'mode':             get_mode(),
         },

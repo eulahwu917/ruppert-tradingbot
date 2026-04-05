@@ -260,7 +260,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       <div class="acct-right"><div class="acct-main pnl-neu" id="cpnl">--</div><div class="acct-pct pnl-neu" id="cpnl-pct"></div></div>
     </div>
     <div class="acct-item">
-      <div class="acct-label">Win Rate</div>
+      <div class="acct-label"><span style="white-space:nowrap;display:block;">Win Rate</span><select id="winrate-select" onchange="setWinRateFrame(this.value)" style="font-size:9px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#777;padding:1px 4px;cursor:pointer;outline:none;margin-top:2px;"><option value="day">Today</option><option value="week">This Week</option><option value="month" selected>This Month</option><option value="year">This Year</option><option value="all">All-Time</option></select></div>
       <div class="acct-right"><div class="acct-main" id="winrate" style="color:#888;">--</div></div>
     </div>
     <div class="acct-item">
@@ -679,12 +679,17 @@ function renderModuleCard(mod) {
     pnlEl.textContent = (pnl >= 0 ? '+' : '') + dollar(pnl);
   }
 
-  // Win Rate (all-time, always green per spec)
+  // Win Rate — follows the same period as Closed P&L dropdown
   const wrEl = document.getElementById(pfx + '-winrate');
   if (wrEl) {
-    if (d.win_rate != null) {
-      wrEl.textContent = d.win_rate.toFixed(0) + '%';
-      wrEl.style.color = '#4ade80';
+    const wr = period === 'day'   ? (d.win_rate_day   ?? null)
+             : period === 'week'  ? (d.win_rate_week  ?? null)
+             : period === 'month' ? (d.win_rate_month ?? null)
+             : period === 'year'  ? (d.win_rate_year  ?? null)
+             : d.win_rate;
+    if (wr != null) {
+      wrEl.textContent = wr.toFixed(0) + '%';
+      wrEl.style.color = wr >= 50 ? '#4ade80' : '#f87171';
     } else {
       wrEl.textContent = '--';
       wrEl.style.color = '#888';
@@ -1304,17 +1309,15 @@ function renderState(state) {
   const cpnlVal = window._cpnlData[window._cpnlFrame || 'month'];
   setPnl('cpnl', 'cpnl-pct', cpnlVal, acct.balance || 10000);
 
-  // Win Rate
-  const wrEl = $('winrate');
-  if (wrEl) {
-    if (acct.win_rate != null) {
-      wrEl.textContent = acct.win_rate.toFixed(0) + '%';
-      wrEl.style.color = acct.win_rate >= 50 ? '#4ade80' : '#f87171';
-    } else {
-      wrEl.textContent = '--';
-      wrEl.style.color = '#888';
-    }
-  }
+  // Win Rate (period-aware)
+  window._winRateData = {
+    all:   acct.win_rate       ?? null,
+    day:   acct.win_rate_day   ?? null,
+    week:  acct.win_rate_week  ?? null,
+    month: acct.win_rate_month ?? null,
+    year:  acct.win_rate_year  ?? null,
+  };
+  renderWinRate();
 
   // Buying Power
   $('bp').textContent = dollar(acct.buying_power || 0);
@@ -1411,6 +1414,34 @@ function setPnlFrame(frame, btn) {
 window._cpnlFrame = 'month';
 window._cpnlData  = {all: 0, day: 0, week: 0, month: 0, year: 0};
 
+// ── Win Rate period toggles ────────────────────────────────────────────────────
+window._winRateFrame = 'month';
+window._winRateData  = {all: null, day: null, week: null, month: null, year: null};
+
+function setWinRateFrame(frame) {
+  window._winRateFrame = frame;
+  renderWinRate();
+}
+
+function renderWinRate() {
+  const d = window._winRateData;
+  const frame = window._winRateFrame || 'month';
+  const wr = frame === 'day'   ? (d.day   ?? null)
+           : frame === 'week'  ? (d.week  ?? null)
+           : frame === 'month' ? (d.month ?? null)
+           : frame === 'year'  ? (d.year  ?? null)
+           : (d.all ?? null);
+  const wrEl = $('winrate');
+  if (!wrEl) return;
+  if (wr != null) {
+    wrEl.textContent = wr.toFixed(0) + '%';
+    wrEl.style.color = wr >= 50 ? '#4ade80' : '#f87171';
+  } else {
+    wrEl.textContent = '--';
+    wrEl.style.color = '#888';
+  }
+}
+
 function setCpnlFrame(frame) {
   window._cpnlFrame = frame;
   const d = window._cpnlData;
@@ -1434,11 +1465,16 @@ async function loadClosedPnl() {
     const cpnlVal = window._cpnlData[window._cpnlFrame || 'month'];
     setPnl('cpnl', 'cpnl-pct', cpnlVal, window._kalshiBalance || 400);
 
-    // Win Rate
-    const wrEl = document.getElementById('winrate');
-    if (wrEl && pnl.closed_win_rate != null) {
-      wrEl.textContent = pnl.closed_win_rate.toFixed(0) + '%';
-      wrEl.style.color = pnl.closed_win_rate >= 50 ? '#4ade80' : '#f87171';
+    // Win Rate — /api/pnl only has all-time; use renderWinRate() with existing _winRateData
+    // (renderState() from /api/state provides period-level data; this path is fallback only)
+    if (pnl.closed_win_rate != null) {
+      window._winRateData = window._winRateData || {};
+      window._winRateData.all = pnl.closed_win_rate;
+      if (window._winRateFrame === 'all') renderWinRate();
+      // If no frame set yet, default to all-time from this endpoint
+      if (!window._winRateFrame || window._winRateFrame === 'month') {
+        // Don't override — renderState() will set proper period data
+      }
     }
 
     // Module cards
