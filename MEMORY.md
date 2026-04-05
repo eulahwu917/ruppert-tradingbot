@@ -28,9 +28,11 @@ Phase 2 (System Map): 291+ claims enumerated, ~113 adjudicated. 12 corrections a
 - ws_feed.py CRYPTO_15M_SERIES import from utils.py
 - crypto_band_daily.py + crypto_threshold_daily.py: remaining date.today() (disabled modules)
 
-**System state: HALTED, code clean, Phase 3 pending shadow trades**
+**System state: HALTED, code clean, System Map fully adjudicated, Phase 3 pending shadow trades**
 - Next: David confirms → restart WS feed + watchdog (crypto 15m only)
 - Daily modules: OFF until shadow WR >45% / 50+ trades + R9 + R1 vol gate
+- System Map: v3.8 (0cfcd82) — all 291 claims adjudicated, 23 corrections applied
+- Latent bug to fix before daily module re-enable: crypto_threshold_daily.py S2 passes BTCUSDT (Binance format) to OKX endpoint — likely causes silent 0.0 funding data on S2 signal
 
 ---
 
