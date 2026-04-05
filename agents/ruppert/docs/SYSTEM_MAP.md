@@ -350,7 +350,7 @@ Then three-tier cap check: circuit breaker (3 consecutive losses = hard stop), d
 #### Output Signal Dict and Decision Log
 
 - Signal dict to `should_enter()`: `{ticker, side, edge, win_prob, confidence, module, yes_ask, yes_bid, hours_to_settlement, open_position_value}`
-- ⚠️ `confidence` = `abs(raw_score)` — a z-score magnitude, **NOT a probability** (see Known Issue 1.1)
+- ✅ `confidence` = `abs(2 * P_directional - 1)` — true [0,1] directional conviction (0 = toss-up, 1 = certain). **RESOLVED ISSUE-1-01 (2026-04-04):** was previously `abs(raw_score)` (z-score magnitude).
 - Decision log per 15-minute window evaluation (ENTER or SKIP), not per WS tick. Dedup guard prevents multiple records for same window: `logs/decisions_15m.jsonl`
 
 ---
@@ -498,7 +498,7 @@ if size < min_viable: reject 'below_min_viable'
 
 ### 1.6 Known Quirks — Entry Pipeline
 
-1. **confidence = z-score in crypto_15m, NOT probability.** Strategy confidence gate (e.g. 0.50 threshold) is compared against `abs(raw_score)` which is a composite z-score magnitude, not a 0–1 probability.
+1. ~~**confidence = z-score in crypto_15m, NOT probability.**~~ **RESOLVED (ISSUE-1-01, 2026-04-04):** `confidence` is now `abs(2 * P_directional - 1)` — true [0,1] directional conviction. Strategy gate thresholds now have correct semantic meaning.
 2. **crypto_15m ignores strategy.py size.** `decision['size']` is discarded; module uses its own Half-Kelly.
 3. **crypto_threshold_daily bypasses `should_enter()` entirely.** No strategy gate runs.
 4. **Polymarket nudge always 0.** Code computes nudge, then forces `poly_nudge = 0.0` before applying.
@@ -1785,7 +1785,7 @@ _Consolidated list of all known issues across all sections. Severity: Critical /
 | ISSUE-D04 | ~~P&L accumulation duplicated between `_build_state()` and `/api/pnl`. Bug fixes need double application.~~ **RESOLVED Batch 5 (B5-DS-2):** `_build_close_records()` shared helper; both endpoints use it with SUM accumulation for multi-leg. | §6 Dashboard | ~~Medium~~ **Resolved** |
 | ISSUE-D06 | Open P&L shows $0 when WS feed is down. No staleness indicator in `/api/pnl` or `/api/state`. | §6 Dashboard | **Medium** |
 | ISSUE-D08 | Brief generator uses 7-day lookback for open positions. Multi-week positions appear as closed. | §6 Dashboard | **Medium** |
-| ISSUE-1-01 | `confidence` in crypto_15m is a z-score magnitude, NOT a probability. Strategy confidence gate compares it directly against probability-scale thresholds. | §1 Entry | **Medium** |
+| ISSUE-1-01 | ~~`confidence` in crypto_15m is a z-score magnitude, NOT a probability.~~ **RESOLVED (2026-04-04):** `confidence` now uses `abs(2 * P_directional - 1)` — true [0,1] conviction. | §1 Entry | ~~Medium~~ **Resolved** |
 | ISSUE-1-03 | `crypto_threshold_daily` bypasses `should_enter()` entirely. No strategy gate runs. | §1 Entry | **Medium** |
 | ISSUE-1-12 | ~~Module daily cap config for `crypto_band_daily_*` absent. Strategy gate fails open; relies on module's own 7% check.~~ **RESOLVED:** Key exists at `config.py:71`. | §1 Entry | ~~Medium~~ **Resolved** |
 | ISSUE-E06 | `get_daily_exposure()` START_DATE hardcoded to `'2026-03-26'`. Brittle on redeployment. | §2 Execution | **Low** |
