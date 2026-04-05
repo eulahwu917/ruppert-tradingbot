@@ -1389,9 +1389,9 @@ def get_pnl_history():
 
     pnl_result = {
         "open_pnl":   round(open_pnl_total, 2),
-        "closed_pnl": round(closed_by_source['bot'], 2),   # BOT-only (manual excluded)
+        "closed_pnl": round(closed_pnl_total, 2),   # canonical closed P&L from logs
         "total_pnl":  round(total_pnl, 2),
-        "bot_closed_pnl":    round(closed_by_source['bot'], 2),
+        "bot_closed_pnl":    round(closed_pnl_total, 2),
         "manual_closed_pnl": round(closed_by_source['manual'], 2),
         "bot_open_pnl":      round(open_by_source['bot'], 2),
         "manual_open_pnl":   round(open_by_source['manual'], 2),
@@ -1402,7 +1402,7 @@ def get_pnl_history():
         "bot_closed_year":         round(closed_by_src_period["bot"]["year"], 2),
         "bot_closed_pnl_month":    round(closed_by_src_period["bot"]["month"], 2),
         "bot_closed_pnl_year":     round(closed_by_src_period["bot"]["year"], 2),
-        "bot_closed_all":      round(closed_by_source["bot"], 2),
+        "bot_closed_all":      round(closed_pnl_total, 2),
         "manual_closed_month": round(closed_by_src_period["manual"]["month"], 2),
         "manual_closed_year":  round(closed_by_src_period["manual"]["year"], 2),
         "manual_closed_all":   round(closed_by_source["manual"], 2),
