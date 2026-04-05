@@ -39,6 +39,7 @@ from agents.ruppert.data_analyst.kalshi_client import KalshiClient
 from agents.ruppert.env_config import get_paths as _get_paths
 from agents.ruppert.data_analyst.polymarket_client import get_crypto_daily_consensus
 from agents.ruppert.trader import circuit_breaker as _circuit_breaker
+from agents.ruppert.trader.utils import _today_pdt
 
 # ISSUE-053: portalocker for cross-process daily cap race protection
 try:
@@ -648,7 +649,7 @@ def discover_1d_markets(asset: str) -> list:
         return []
 
     # Filter to markets expiring today at 17:00 ET settlement
-    today_str = date.today().isoformat()  # 'YYYY-MM-DD'
+    today_str = _today_pdt()  # 'YYYY-MM-DD'
     qualifying = []
 
     for m in all_meta:
@@ -794,7 +795,7 @@ def _cross_module_guard(asset: str, settlement_date: str) -> bool:
     try:
         from agents.ruppert.env_config import get_paths as _get_paths
         trades_dir = _get_paths()['trades']
-        trade_log = trades_dir / f'trades_{date.today().isoformat()}.jsonl'
+        trade_log = trades_dir / f'trades_{_today_pdt()}.jsonl'
         if not trade_log.exists():
             return True
 
@@ -947,7 +948,7 @@ def _log_decision(asset: str, window: str, signals: dict, decision: str, reason:
 
 def get_today_settlement_date() -> str:
     """Return today's date as ISO string (YYYY-MM-DD)."""
-    return date.today().isoformat()
+    return _today_pdt()
 
 
 def _skip(asset, window, reason, signals=None,
@@ -1207,7 +1208,7 @@ def evaluate_crypto_1d_entry(asset: str, window: str = 'primary') -> dict:
             f"edge={best.get('edge', 0):.2f}"
         ),
         'timestamp': datetime.now(timezone.utc).isoformat(),
-        'date': str(date.today()),
+        'date': _today_pdt(),
     }
     trade_opp['strategy_size'] = actual_cost
 

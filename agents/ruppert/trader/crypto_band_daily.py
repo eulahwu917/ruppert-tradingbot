@@ -32,6 +32,7 @@ from agents.ruppert.strategist.strategy import (
 )
 from agents.ruppert.data_analyst.polymarket_client import get_crypto_daily_consensus
 from agents.ruppert.env_config import get_paths as _get_bd_paths
+from agents.ruppert.trader.utils import _today_pdt
 import config
 
 # ISSUE-053: portalocker for cross-process daily cap race protection
@@ -245,7 +246,7 @@ def _execute_band_trades(new_crypto, trader, total_capital, crypto_daily_cap,
             'fill_contracts': contracts,
             'note': t['note'],
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'date': str(date.today()),
+            'date': _today_pdt(),
             'poly_daily_yes_price':    _bp_data.get('yes_price'),
             'poly_daily_market_title': _bp_data.get('market_title'),
             'poly_daily_volume_24h':   _bp_data.get('volume_24h'),

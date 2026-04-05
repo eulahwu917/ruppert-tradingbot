@@ -49,6 +49,7 @@ from scripts.event_logger import log_event
 import agents.ruppert.data_analyst.market_cache as market_cache
 import agents.ruppert.trader.position_tracker as position_tracker
 import agents.ruppert.trader.circuit_breaker as circuit_breaker
+from agents.ruppert.trader.utils import CRYPTO_15M_SERIES
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +79,6 @@ _kalshi_client_instance = None
 
 # Series prefixes from config (updateable without code change)
 ACTIVE_SERIES_PREFIXES = set(getattr(config, 'WS_ACTIVE_SERIES', []))
-
-# 15-min crypto direction series (subset of active series)
-CRYPTO_15M_SERIES = ['KXBTC15M', 'KXETH15M', 'KXXRP15M', 'KXDOGE15M', 'KXSOL15M']
 
 # Crypto hourly band prefixes
 CRYPTO_HOURLY_PREFIXES = ('KXBTC', 'KXETH', 'KXXRP', 'KXDOGE', 'KXSOL')
