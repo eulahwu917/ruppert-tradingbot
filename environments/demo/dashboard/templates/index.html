@@ -256,11 +256,11 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
       <div class="acct-right"><div class="acct-main pnl-neu" id="opnl">--</div><div class="acct-pct pnl-neu" id="opnl-pct"></div></div>
     </div>
     <div class="acct-item" style="min-width:110px;">
-      <div class="acct-label"><span style="white-space:nowrap;display:block;">Closed P&amp;L</span><select id="cpnl-select" onchange="setCpnlFrame(this.value)" style="font-size:9px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#777;padding:1px 4px;cursor:pointer;outline:none;margin-top:2px;"><option value="day" selected>Today</option><option value="week">This Week</option><option value="month">This Month</option><option value="year">This Year</option><option value="all">All Time</option></select></div>
+      <div class="acct-label"><span style="white-space:nowrap;display:block;">Closed P&amp;L</span><select id="cpnl-select" onchange="setCpnlFrame(this.value)" style="font-size:9px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#777;padding:1px 4px;cursor:pointer;outline:none;margin-top:2px;"><option value="day" selected>Today</option><option value="yesterday">Yesterday</option><option value="week">This Week</option><option value="month">This Month</option><option value="year">This Year</option><option value="all">All Time</option></select></div>
       <div class="acct-right"><div class="acct-main pnl-neu" id="cpnl">--</div><div class="acct-pct pnl-neu" id="cpnl-pct"></div></div>
     </div>
     <div class="acct-item">
-      <div class="acct-label"><span style="white-space:nowrap;display:block;">Win Rate</span><select id="winrate-select" onchange="setWinRateFrame(this.value)" style="font-size:9px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#777;padding:1px 4px;cursor:pointer;outline:none;margin-top:2px;"><option value="day" selected>Today</option><option value="week">This Week</option><option value="month">This Month</option><option value="year">This Year</option><option value="all">All-Time</option></select></div>
+      <div class="acct-label"><span style="white-space:nowrap;display:block;">Win Rate</span><select id="winrate-select" onchange="setWinRateFrame(this.value)" style="font-size:9px;background:#1a1a1a;border:1px solid #2a2a2a;border-radius:4px;color:#777;padding:1px 4px;cursor:pointer;outline:none;margin-top:2px;"><option value="day" selected>Today</option><option value="yesterday">Yesterday</option><option value="week">This Week</option><option value="month">This Month</option><option value="year">This Year</option><option value="all">All-Time</option></select></div>
       <div class="acct-right"><div class="acct-main" id="winrate" style="color:#888;">--</div></div>
     </div>
     <div class="acct-item">
@@ -291,7 +291,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
           <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
-              <select id="weather-period" onchange="setModulePeriod('weather',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;"><option value="day" selected>Today</option><option value="month">This Month</option>
+              <select id="weather-period" onchange="setModulePeriod('weather',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;"><option value="day" selected>Today</option><option value="yesterday">Yesterday</option><option value="month">This Month</option>
                 <option value="year">This Year</option>
                 <option value="all">All Time</option>
               </select>
@@ -336,7 +336,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
           <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
-              <select id="geo-period" onchange="setModulePeriod('geo',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;"><option value="day" selected>Today</option><option value="month">This Month</option>
+              <select id="geo-period" onchange="setModulePeriod('geo',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;"><option value="day" selected>Today</option><option value="yesterday">Yesterday</option><option value="month">This Month</option>
                 <option value="year">This Year</option>
                 <option value="all">All Time</option>
               </select>
@@ -382,7 +382,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
           <div style="flex:1;padding:0 12px;border-right:1px solid #222;text-align:center;">
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
-              <select id="fed-period" onchange="setModulePeriod('fed',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;"><option value="day" selected>Today</option><option value="month">This Month</option>
+              <select id="fed-period" onchange="setModulePeriod('fed',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;"><option value="day" selected>Today</option><option value="yesterday">Yesterday</option><option value="month">This Month</option>
                 <option value="year">This Year</option>
                 <option value="all">All Time</option>
               </select>
@@ -433,6 +433,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
               <select id="crypto_dir_15m-period" onchange="setModulePeriod('crypto_dir_15m',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;"><option value="day" selected>Today</option>
+                <option value="yesterday">Yesterday</option>
                 <option value="week">This Week</option>
                 <option value="month">This Month</option>
                 <option value="year">This Year</option>
@@ -478,6 +479,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
               <select id="crypto_threshold_daily-period" onchange="setModulePeriod('crypto_threshold_daily',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;"><option value="day" selected>Today</option>
+                <option value="yesterday">Yesterday</option>
                 <option value="week">This Week</option>
                 <option value="month">This Month</option>
                 <option value="year">This Year</option>
@@ -523,6 +525,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
             <div style="font-size:9px;color:#555;text-transform:uppercase;letter-spacing:.6px;margin-bottom:4px;display:flex;align-items:center;justify-content:center;gap:4px;flex-wrap:wrap;">
               Closed P&amp;L
               <select id="crypto_band_daily-period" onchange="setModulePeriod('crypto_band_daily',this.value)" style="font-size:8px;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:3px;color:#666;padding:1px 3px;cursor:pointer;outline:none;"><option value="day" selected>Today</option>
+                <option value="yesterday">Yesterday</option>
                 <option value="week">This Week</option>
                 <option value="month">This Month</option>
                 <option value="year">This Year</option>
@@ -596,6 +599,7 @@ a.mkt-link { color: inherit; text-decoration: none; } a.mkt-link:hover .sym { co
           <button class="ref trade-filter-btn"   data-period="year"  onclick="setTradeFilter('year')">Yearly</button>
           <button class="ref trade-filter-btn"   data-period="month" onclick="setTradeFilter('month')">Monthly</button>
           <button class="ref trade-filter-btn"   data-period="week"  onclick="setTradeFilter('week')">Weekly</button>
+          <button class="ref trade-filter-btn"   data-period="yesterday" onclick="setTradeFilter('yesterday')">Yesterday</button>
           <button class="ref trade-filter-btn on" data-period="day"   onclick="setTradeFilter('day')">Daily</button>
         </div>
         <div class="t-scroll">
@@ -650,10 +654,11 @@ function renderModuleCard(mod) {
   if (!d) return;
   const period  = window._modulePeriod[mod] || 'month';
   const pfx     = MODULE_ID[mod] || mod;
-  const pnl     = period === 'day'   ? (d.closed_pnl_day   ?? 0)
-                : period === 'week'  ? (d.closed_pnl_week  ?? 0)
-                : period === 'month' ? (d.closed_pnl_month ?? 0)
-                : period === 'year'  ? (d.closed_pnl_year  ?? 0)
+  const pnl     = period === 'day'       ? (d.closed_pnl_day       ?? 0)
+                : period === 'yesterday' ? (d.closed_pnl_yesterday ?? 0)
+                : period === 'week'      ? (d.closed_pnl_week      ?? 0)
+                : period === 'month'     ? (d.closed_pnl_month     ?? 0)
+                : period === 'year'      ? (d.closed_pnl_year      ?? 0)
                 : d.closed_pnl;
 
   // Open P&L (always current, not period-filtered - from live Kalshi prices)
@@ -676,10 +681,11 @@ function renderModuleCard(mod) {
   // Win Rate — follows the same period as Closed P&L dropdown
   const wrEl = document.getElementById(pfx + '-winrate');
   if (wrEl) {
-    const wr = period === 'day'   ? (d.win_rate_day   ?? null)
-             : period === 'week'  ? (d.win_rate_week  ?? null)
-             : period === 'month' ? (d.win_rate_month ?? null)
-             : period === 'year'  ? (d.win_rate_year  ?? null)
+    const wr = period === 'day'       ? (d.win_rate_day       ?? null)
+             : period === 'yesterday' ? (d.win_rate_yesterday ?? null)
+             : period === 'week'      ? (d.win_rate_week      ?? null)
+             : period === 'month'     ? (d.win_rate_month     ?? null)
+             : period === 'year'      ? (d.win_rate_year      ?? null)
              : d.win_rate;
     if (wr != null) {
       wrEl.textContent = wr.toFixed(0) + '%';
@@ -1051,6 +1057,10 @@ function _tradeInPeriod(t, period) {
   if (period === 'day') {
     return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth() && d.getDate()===now.getDate();
   }
+  if (period === 'yesterday') {
+    const yest = new Date(now); yest.setDate(now.getDate() - 1);
+    return d.getFullYear()===yest.getFullYear() && d.getMonth()===yest.getMonth() && d.getDate()===yest.getDate();
+  }
   if (period === 'week') {
     const mon = new Date(now); mon.setDate(now.getDate()-now.getDay()+(now.getDay()===0?-6:1)); mon.setHours(0,0,0,0);
     return d >= mon;
@@ -1294,22 +1304,24 @@ function renderState(state) {
 
   // Closed P&L (period-aware)
   window._cpnlData = {
-    all:   acct.closed_pnl       || 0,
-    day:   acct.closed_pnl_day   || 0,
-    week:  acct.closed_pnl_week  || 0,
-    month: acct.closed_pnl_month || 0,
-    year:  acct.closed_pnl_year  || 0,
+    all:       acct.closed_pnl           || 0,
+    day:       acct.closed_pnl_day       || 0,
+    yesterday: acct.closed_pnl_yesterday || 0,
+    week:      acct.closed_pnl_week      || 0,
+    month:     acct.closed_pnl_month     || 0,
+    year:      acct.closed_pnl_year      || 0,
   };
   const cpnlVal = window._cpnlData[window._cpnlFrame || 'day'];
   setPnl('cpnl', 'cpnl-pct', cpnlVal, acct.balance || 10000);
 
   // Win Rate (period-aware)
   window._winRateData = {
-    all:   acct.win_rate       ?? null,
-    day:   acct.win_rate_day   ?? null,
-    week:  acct.win_rate_week  ?? null,
-    month: acct.win_rate_month ?? null,
-    year:  acct.win_rate_year  ?? null,
+    all:       acct.win_rate           ?? null,
+    day:       acct.win_rate_day       ?? null,
+    yesterday: acct.win_rate_yesterday ?? null,
+    week:      acct.win_rate_week      ?? null,
+    month:     acct.win_rate_month     ?? null,
+    year:      acct.win_rate_year      ?? null,
   };
   renderWinRate();
 
@@ -1406,11 +1418,11 @@ function setPnlFrame(frame, btn) {
 
 // ── Closed P&L period toggles ─────────────────────────────────────────────────
 window._cpnlFrame = 'day';
-window._cpnlData  = {all: 0, day: 0, week: 0, month: 0, year: 0};
+window._cpnlData  = {all: 0, day: 0, yesterday: 0, week: 0, month: 0, year: 0};
 
 // ── Win Rate period toggles ────────────────────────────────────────────────────
 window._winRateFrame = 'day';
-window._winRateData  = {all: null, day: null, week: null, month: null, year: null};
+window._winRateData  = {all: null, day: null, yesterday: null, week: null, month: null, year: null};
 
 function setWinRateFrame(frame) {
   window._winRateFrame = frame;
@@ -1420,10 +1432,11 @@ function setWinRateFrame(frame) {
 function renderWinRate() {
   const d = window._winRateData;
   const frame = window._winRateFrame || 'day';
-  const wr = frame === 'day'   ? (d.day   ?? null)
-           : frame === 'week'  ? (d.week  ?? null)
-           : frame === 'month' ? (d.month ?? null)
-           : frame === 'year'  ? (d.year  ?? null)
+  const wr = frame === 'day'       ? (d.day       ?? null)
+           : frame === 'yesterday' ? (d.yesterday ?? null)
+           : frame === 'week'      ? (d.week      ?? null)
+           : frame === 'month'     ? (d.month     ?? null)
+           : frame === 'year'      ? (d.year      ?? null)
            : (d.all ?? null);
   const wrEl = $('winrate');
   if (!wrEl) return;
@@ -1439,10 +1452,11 @@ function renderWinRate() {
 function setCpnlFrame(frame) {
   window._cpnlFrame = frame;
   const d = window._cpnlData;
-  const val = frame === 'day'   ? (d.day   ?? 0)
-            : frame === 'week'  ? (d.week  ?? 0)
-            : frame === 'month' ? (d.month ?? 0)
-            : frame === 'year'  ? (d.year  ?? 0)
+  const val = frame === 'day'       ? (d.day       ?? 0)
+            : frame === 'yesterday' ? (d.yesterday ?? 0)
+            : frame === 'week'      ? (d.week      ?? 0)
+            : frame === 'month'     ? (d.month     ?? 0)
+            : frame === 'year'      ? (d.year      ?? 0)
             : (d.all ?? 0);
   setPnl('cpnl', 'cpnl-pct', val, window._kalshiBalance || 400);
 }
@@ -1453,7 +1467,7 @@ async function loadClosedPnl() {
     if (!pnl) return;
 
     window._closedPnl = pnl.closed_pnl || 0;  // BOT-only (manual excluded)
-    window._cpnlData  = {all: pnl.closed_pnl||0, day: pnl.closed_pnl_day||0, week: pnl.closed_pnl_week||0, month: pnl.bot_closed_pnl_month||0, year: pnl.bot_closed_pnl_year||0};
+    window._cpnlData  = {all: pnl.closed_pnl||0, day: pnl.closed_pnl_day||0, yesterday: 0, week: pnl.closed_pnl_week||0, month: pnl.bot_closed_pnl_month||0, year: pnl.bot_closed_pnl_year||0};
 
     // Account bar Closed P&L (now BOT-only - period selector still works)
     const cpnlVal = window._cpnlData[window._cpnlFrame || 'day'];
