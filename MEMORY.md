@@ -6,6 +6,21 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 
 ---
 
+## 2026-04-04 — Known Issues Fixed (17:07-17:35 PDT)
+
+### All 4 known issues + S2 bug fixed — commit 1f98004, System Map v3.9 (0809128)
+
+- **ISSUE-1-01 RESOLVED:** `confidence` in crypto_15m now `abs(2*P_directional-1)` — true [0,1] conviction. Was `abs(raw_score)` (z-score magnitude). Thresholds now semantically correct.
+- **ISSUE-D07 RESOLVED:** Brief P&L table now labeled "7-day rolling window"; truth file labeled "all-time canonical". Cosmetic only.
+- **ISSUE-1-10 RESOLVED:** `cache_oi_snapshot()` read path returns bootstrap if age < 1h — prevents double-fire from using a just-written snapshot as the 24h baseline.
+- **ISSUE-S2-OKX RESOLVED:** `compute_s2_funding()` was passing `BTCUSDT` (Binance format) to OKX endpoint. Now imports `FUNDING_SYMBOLS` from `crypto_client.py` and uses `BTC-USD-SWAP`. `BINANCE_SYMBOLS` dict commented out.
+
+**Pipeline notes:** Adversarial caught a spec error on S2 (OKX_SYMBOLS = USDT-margined, wrong product). DS revision was correct (single-symbol mode is self-contained, no contamination, but product choice still matters → use FUNDING_SYMBOLS/BTC-USD-SWAP). Second adversarial pass confirmed PASS.
+
+**System state:** All known issues cleared. Trading restart pending David's confirmation.
+
+---
+
 ## 2026-04-04 — Full Audit Pipeline Complete (12:00-16:40 PDT)
 
 ### Audit pipeline ran, System Map at 98%+ confidence

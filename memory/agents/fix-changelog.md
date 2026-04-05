@@ -15,6 +15,17 @@ _Every fix must be logged here with issue ID, summary, and commit hash_
 
 ---
 
+## Known Issues Fix Batch — ISSUE-1-01, ISSUE-D07, ISSUE-1-10, ISSUE-S2-OKX (2026-04-04)
+
+| Issue ID | Title | Fix Summary | Commit |
+|----------|-------|-------------|--------|
+| ISSUE-1-01 | confidence z-score → probability | crypto_15m.py: confidence now `abs(2*P_directional-1)` — true [0,1] conviction. Both assignment sites updated. System Map v3.9 updated. | 1f98004 |
+| ISSUE-D07 | brief shows two P&L values without labels | brief_generator.py: added "7-day rolling window" note above table; "truth file" label now says "all-time canonical" | 1f98004 |
+| ISSUE-1-10 | OI snapshot double-fire corruption | crypto_threshold_daily.py: cache_oi_snapshot() read path returns bootstrap if snapshot age < 1h | 1f98004 |
+| ISSUE-S2-OKX | Binance symbol format passed to OKX endpoint | crypto_threshold_daily.py: compute_s2_funding() now imports FUNDING_SYMBOLS from crypto_client; uses BTC-USD-SWAP (OKX inverse perpetual). BINANCE_SYMBOLS dict commented out. | 1f98004 |
+
+---
+
 ## Batch 5 — Settlement Naive Datetime, P&L Divergence, date.today() Sweep, CRYPTO_15M_SERIES (2026-04-04)
 
 | Issue ID | Title | Fix Summary | Commit |
@@ -372,3 +383,44 @@ _Every fix must be logged here with issue ID, summary, and commit hash_
 | P2-CRASH | audit/qa_health_check.py | Dead weather/NOAA/FRED/OpenMeteo sections removed (crash fix — was ImportError on import) | 80b7d02 |
 | P2-CLN-1 | audit/data_health_check.py | check_nws(), check_openmeteo() removed | d2a3134 |
 | P2-CLN-2 | 9 other files | Dead weather/geo/econ remnants cleaned (noaa_prob fields, architecture comments, whitelist entries) | d2a3134 |
+
+## Audit Pipeline Fixes (2026-04-04 afternoon)
+
+### Batch A — date.today() survivors in active paths (dd6540d)
+| ID | File | Fix | Commit |
+|----|------|-----|--------|
+| BA-1 | post_trade_monitor.py | 4x date.today() replaced with _today_pdt() from utils — lines 101, 265, 410, 601; arithmetic sites use date.fromisoformat(_today_pdt()) | dd6540d |
+| BA-2 | position_monitor.py | 5x date.today() replaced with _today_pdt() — lines 89, 174, 178, 439, 569 | dd6540d |
+| BA-3 | crypto_long_horizon.py | 1x date.today() replaced with _today_pdt() — line 427 | dd6540d |
+
+### Batch B — Capital error handling gaps (dd6540d)
+| ID | File | Fix | Commit |
+|----|------|-----|--------|
+| BB-1 | ws_feed.py | get_capital() + get_buying_power() in evaluate_crypto_entry() wrapped in try/except RuntimeError + logger.warning() + return | dd6540d |
+| BB-2 | crypto_band_daily.py | get_capital() wrapped in try/except RuntimeError + logger.warning() + return | dd6540d |
+| BB-3 | crypto_threshold_daily.py | get_capital() wrapped in try/except RuntimeError + logger.warning() + return | dd6540d |
+| BB-3b | crypto_threshold_daily.py | P1 regression fix: except RuntimeError block returned bare None instead of _skip(). Fixed to return _skip(asset, window, capital_read_error) | d9e3a89 |
+
+### Batch C — Data correction (applied directly, not committed)
+| ID | Action | Detail |
+|----|--------|--------|
+| BC-1 | trades_2026-04-03.jsonl | 42 duplicate buy records removed. Backup: .pre-batch-c-backup. Capital unchanged at ,347.42 |
+
+### Docstring fixes (e67dfd8)
+| File | Fix |
+|------|-----|
+| post_trade_monitor.py | Docstring: 30min -> every 15min via Task Scheduler (PT15M per XML) |
+| settlement_checker.py | Docstring: 2x daily -> every 30min 24/7 (PT30M per XML) |
+| crypto_threshold_daily.py | Docstring: 4 signals -> 5 signals (S1-S5 including Polymarket S5) |
+
+### System Map corrections (v3.5 through v3.8)
+| Version | Commit | Summary |
+|---------|--------|---------|
+| v3.5 | b3fb12b | 3 schedule fixes (settlement_checker PT30M, post_trade_monitor PT15M, CRYPTO_15M_SERIES ws_feed P2 note) |
+| v3.6 | 5042e11 | 9 corrections (_PROTECTED_ACTIONS, pnl_cache, ISSUE-A02 partial, drought dedup 2h, BACKSTOP_ENABLED name, DOMAIN_THRESHOLD, task table, min edge range, get_markets) |
+| v3.7 | 9bbe4da | 9 corrections (timing gates 90s/800s, R2 spread 25c, city field, log_settle fingerprint, ISSUE-X07 resolved, brier_tracker dead code, optimizer data flow, ISSUE-E02, decisions_15m per-window) |
+| v3.8 | 0cfcd82 | 2 final corrections (settlement 3-way branch ambiguous skip, S2 Binance->OKX note) |
+
+Total System Map corrections: 23 across v3.5-v3.8
+Total claims adjudicated: ~291 (all enumerated)
+Final confidence: 98%+ on all adjudicated claims
