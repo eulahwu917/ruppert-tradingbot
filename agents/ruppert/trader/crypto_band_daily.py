@@ -377,9 +377,6 @@ def run_crypto_scan(dry_run=True, direction='neutral', traded_tickers=None, open
         for series, spot, half_w, daily_vol, hours in SERIES_CFG:
             if spot == 0:
                 continue
-            sigma = daily_vol * math.sqrt(hours / 24)
-            drift = drift_sigma * sigma
-
             # Price-targeted fetching: get ALL market metadata (cheap paginated list),
             # filter to markets near current price, then enrich only those with orderbook.
             all_meta = client.get_markets_metadata(series, status='open')
