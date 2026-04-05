@@ -165,6 +165,7 @@ def build_trade_entry(opportunity, size, contracts, order_result, **extra_fields
         'confidence':   opportunity.get('confidence') if opportunity.get('confidence') is not None
                         else abs(opportunity.get('edge') or 0),
         'entry_price':  entry_price_val,
+        'pnl':          opportunity.get('pnl'),
         'size_dollars': size,
         'contracts':    contracts,
         'scan_contracts': opportunity.get('scan_contracts'),
