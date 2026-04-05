@@ -18,7 +18,7 @@ _Last updated: 2026-04-04 | v4.1 | Late night: Band Model v2 sigma fix, dashboar
 - **DASH-WIN-RATE (commit 79cf555):** Dashboard win rate now period-filtered. Account-level: new dropdown (Today/This Week/This Month/This Year/All-Time). Per-module cards: win rate follows each card's existing Closed P&L period select automatically. Backend: `compute_module_closed_stats_from_logs()` extended with period win/trade counts. Division-by-zero guarded (returns None on 0 trades).
 - **WS gate confirmed:** `evaluate_crypto_entry()` in ws_feed.py checks `CRYPTO_BAND_DAILY_ENABLED` before entering band contracts (fix from 9b4d8dd still in place).
 - **Known remaining (non-blocking):** Dead code `sigma = daily_vol * math.sqrt(hours / 24)` at line 379 in crypto_band_daily.py outer loop — never executed (overridden by sigma_m per market), cleanup deferred.
-- **Pending David decision:** `CRYPTO_BAND_DAILY_ENABLED = True` to re-enable band in DEMO. Forward validation gate: recheck Brier after 50 live DEMO band trades; if OOS Brier > 0.30, flag for review.
+- **Band re-enabled 2026-04-05 (commit 8e6f91d):** `CRYPTO_BAND_DAILY_ENABLED = True`. Forward validation gate: recheck Brier after 50 live DEMO band trades; if OOS Brier > 0.30, flag for review.
 
 ### v4.0 — 2026-04-04 Evening (commits a258c3a, 061df01, 815bdd7)
 

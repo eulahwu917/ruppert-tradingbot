@@ -54,11 +54,11 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 - Answer: feasible, needs background cache + thread pool + ISSUE-062 (live spot) + shadow flag — ~2-3 week project
 - DO NOT forget to bring this up once 15m Brier analysis is delivered
 
-### System state (23:05 PDT)
-- Trading: ACTIVE (15m only)
-- Band: OFF, model v2 ready
-- Dashboard: win rate by period live
-- GitHub: 79cf555 | System Map: v4.1
+### System state (00:42 PDT Apr 5)
+- Trading: ACTIVE — 15m + Band (re-enabled)
+- P_final sizing cap live (0.80, Kelly only)
+- Dashboard: win rate by period + Yesterday filter live
+- GitHub: 8e6f91d | System Map: v4.2
 
 ---
 
