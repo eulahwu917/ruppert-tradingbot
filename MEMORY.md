@@ -6,6 +6,39 @@ David explicitly asked: be honest, push back when you disagree. Don't just agree
 
 ---
 
+## 2026-04-04 — Night Dashboard Overhaul + Band Sigma Finding (21:30-22:08 PDT)
+
+### Dashboard UI (commits 592c973, e27bce1, 80d16d9)
+- **Closed P&L filters:** Daily + Weekly added (logger.py week support + api.py + frontend)
+- **Closed Trades table:** Exit/Proceeds columns + Daily/Weekly/Monthly/Yearly/All filters
+- **Module tags:** `moduleTypeTag()` — 15m=sky blue, Threshold=purple, Band=orange
+- **Card colors:** Module cards color-coded to match tags
+- **UP ↑ / DOWN ↓:** Replaced YES/NO in both Open + Closed positions
+- **Card selects:** Today/This Week added to all 3 module cards
+- **Tag position:** Closed Trades tag on left (matches Open Positions)
+
+### Band Strategy Sigma Finding — CRITICAL
+- DS queried Kalshi for 48 resolved band contracts
+- **Win rate: 8.3%** (4/48). **Log-normal Brier: 0.2816. T-dist Brier: 0.2423.** Both near-random (0.25 = coin flip).
+- **Root cause:** sigma is 8-12x too small. Using intraday hourly vol (~$200-500) instead of historical settlement displacement (~$1,400-2,100).
+- **Both models enter 100% of contracts** — zero discrimination — the strategy is a coin flip until sigma is recalibrated.
+- Market itself is well-calibrated (~14% pricing, 8.3% true rate). Our models were 40pp overconfident.
+- **Fix:** Replace sigma with historical spot-at-scan vs spot-at-settlement distribution. ~1-2 week project.
+- **Band strategy remains OFF** until sigma is recalibrated.
+- Backlog filed: `memory/backlog/BACKLOG-band-sigma-recalibration.md`
+
+### 15m side distribution (confirmed healthy)
+- 64.2% YES (UP), 35.8% NO (DOWN) across 617 15m trades — no signal bias
+
+### System state (22:08 PDT)
+- Trading: ACTIVE (15m only)
+- Dashboard: fully rebuilt with all UI improvements
+- GitHub: 80d16d9
+- Band: OFF (sigma backlog)
+- All-time closed P&L (15m only): +$13,595.76
+
+---
+
 ## 2026-04-04 — Late Evening Critical Fixes (20:30-21:30 PDT)
 
 ### WS Gate Bug — Root Cause of -$13.1K Drawdown

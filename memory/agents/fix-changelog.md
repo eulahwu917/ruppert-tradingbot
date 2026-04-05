@@ -15,6 +15,24 @@ _Every fix must be logged here with issue ID, summary, and commit hash_
 
 ---
 
+## 2026-04-04 Night — Dashboard UI Overhaul
+
+| Issue ID | Title | Fix Summary | Commit |
+|----------|-------|-------------|--------|
+| UI-01 | Closed P&L weekly filter | compute_period_closed_pnl_from_logs() + api.py + index.html — Daily/Weekly filter for Closed P&L summary | 592c973 |
+| UI-02 | Closed Trades filters + columns | Exit/Proceeds columns + Daily/Weekly/Monthly/Yearly/All filters on Closed Trades table | 592c973 |
+| UI-03 | Module type tags + card colors | moduleTypeTag() — 15m/Threshold/Band badges with color coding (sky blue/purple/orange) | e27bce1 |
+| UI-04 | UP↑/DOWN↓ side labels | Replaced YES/NO with directional labels in Open + Closed positions | e27bce1 |
+| UI-05 | Module card Today/Week filters | Added Today + This Week options to all 3 module card selects | e27bce1 |
+| UI-06 | Tag position fix | Closed Trades module tag moved to left of title (matches Open Positions) | 80d16d9 |
+
+**Band sigma finding (2026-04-04):**
+- Model comparison on 48 resolved contracts: log-normal Brier=0.2816, t-dist Brier=0.2423, both near random (0.25)
+- Root cause: sigma 8-12x too small — using intraday hourly vol instead of settlement displacement
+- Band strategy suspended; backlog: memory/backlog/BACKLOG-band-sigma-recalibration.md
+
+---
+
 ## 2026-04-04 Late Evening — WS Gate + PnL Backfill + Architecture Review
 
 | Issue ID | Title | Fix Summary | Commit |
